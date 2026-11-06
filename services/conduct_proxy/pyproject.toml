@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lc-conduct-proxy"
+version = "0.1.0"
+description = "Conduct-policy egress gateway for lei-commons jobs (constitution Article 2)"
+requires-python = ">=3.11"
+license = {text = "Apache-2.0"}
+dependencies = ["pyyaml>=6"]  # also needs lc-core, installed from packages/lc_core
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+include = ["conduct_proxy*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -38,6 +38,7 @@ PROTECTED = [
     ".github/",
     "infra/",
     "bootstrap/",
+    "services/conduct_proxy/",
     "packages/lc_core/lc_core/control.py",
     "packages/lc_core/lc_core/events.py",
 ]
