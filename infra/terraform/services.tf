@@ -109,9 +109,14 @@ resource "google_billing_budget" "monthly" {
     spend_basis       = "FORECASTED_SPEND"
   }
 
-  all_updates_rule {
-    pubsub_topic                   = google_pubsub_topic.budget.id
-    disable_default_iam_recipients = false
+  # Without this block the budget still emails billing admins at each threshold,
+  # but the budget guard gets no spend updates and cannot pause the system.
+  dynamic "all_updates_rule" {
+    for_each = var.budget_pubsub_enabled ? [1] : []
+    content {
+      pubsub_topic                   = google_pubsub_topic.budget.id
+      disable_default_iam_recipients = false
+    }
   }
 
   lifecycle {

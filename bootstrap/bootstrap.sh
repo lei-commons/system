@@ -25,6 +25,7 @@ ORG="lei-commons"
 CURRENCY="USD"
 BUDGET="1500"
 AUTO_APPROVE=0
+BUDGET_PUBSUB=true
 
 usage() {
   sed -n '2,20p' "$0"
@@ -39,6 +40,7 @@ while [[ $# -gt 0 ]]; do
     --region) REGION="$2"; shift 2 ;;
     --currency) CURRENCY="$2"; shift 2 ;;
     --budget) BUDGET="$2"; shift 2 ;;
+    --no-budget-pubsub) BUDGET_PUBSUB=false; shift ;;
     --yes) AUTO_APPROVE=1; shift ;;
     -h|--help) usage 0 ;;
     *) echo "unknown option: $1" >&2; usage 1 ;;
@@ -108,6 +110,7 @@ TF_VARS=(
   -var "github_org_id=${ORG_ID}"
   -var "monthly_budget_usd=${BUDGET}"
   -var "budget_currency=${CURRENCY}"
+  -var "budget_pubsub_enabled=${BUDGET_PUBSUB}"
 )
 
 terraform plan -input=false -out=day0.plan "${TF_VARS[@]}"
