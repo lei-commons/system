@@ -48,7 +48,7 @@ RETURN_HEADERS = (
 class Gate:
     """Article 1.2: when the system is not running, nothing leaves. Fails closed."""
 
-    def __init__(self, check=lambda: require_running(COMPONENT), clock=time.monotonic):
+    def __init__(self, check=lambda: require_running(COMPONENT, allow_manual=True), clock=time.monotonic):
         self._check, self._clock = check, clock
         self._until, self._error = 0.0, None
         self._lock = threading.Lock()

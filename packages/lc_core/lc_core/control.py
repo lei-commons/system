@@ -80,15 +80,20 @@ def load_state(env: dict | None = None) -> ControlState:
     raise SystemHalted("control state not available; failing closed")
 
 
-def require_running(component: str, env: dict | None = None) -> ControlState:
-    """Return the state if ``component`` may run; raise ``SystemHalted`` otherwise."""
+def require_running(component: str, env: dict | None = None, allow_manual: bool = False) -> ControlState:
+    """Return the state if ``component`` may run; raise ``SystemHalted`` otherwise.
+
+    In manual mode agents keep working and proposing, but nothing merges or deploys
+    without the owner. Work that only proposes passes ``allow_manual=True``; anything
+    that merges, deploys or publishes keeps the default and stops.
+    """
     try:
         st = load_state(env)
     except SystemHalted:
         raise
     except Exception as exc:  # unreadable or malformed state: fail closed
         raise SystemHalted(f"control state unreadable ({exc}); failing closed") from exc
-    if st.state != "running":
+    if st.state != "running" and not (allow_manual and st.state == "manual"):
         raise SystemHalted(f"system is {st.state}; {component} will not run")
     if component in st.paused_components or _prefix_paused(component, st.paused_components):
         raise SystemHalted(f"{component} is paused by the owner")
