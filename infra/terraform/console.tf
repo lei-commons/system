@@ -24,11 +24,13 @@ resource "google_secret_manager_secret_iam_member" "console_totp" {
 }
 
 resource "google_cloud_run_v2_service" "console" {
-  count = var.console_enabled ? 1 : 0
+  provider = google-beta
+  count    = var.console_enabled ? 1 : 0
 
   name                = "owner-console"
   location            = var.region
   ingress             = "INGRESS_TRAFFIC_ALL"
+  launch_stage        = "BETA"
   iap_enabled         = true
   deletion_protection = false
 
