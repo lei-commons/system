@@ -8,6 +8,7 @@ locals {
   wif_bindings = {
     "system@refs/heads/main"   = "deployer"
     "releases@refs/heads/main" = "publisher"
+    "control@refs/heads/main"  = "control-operator"
   }
 }
 

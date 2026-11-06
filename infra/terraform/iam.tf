@@ -14,10 +14,12 @@ locals {
     console      = "Owner console backend (behind IAP, owner only)"
     budget-guard = "Pauses the system when spend reaches the owner's cap; cannot resume"
     gateway      = "Runs the conduct gateway, the only route to the internet for jobs"
+    # Used only by the owner's workflows in the control repo. Never an agent identity.
+    control-operator = "Writes the control state on the owner's command, from control@main only"
   }
 
   # Runtime identities read the control state before every step.
-  runtime_sas = [for k in keys(local.service_accounts) : k if k != "deployer"]
+  runtime_sas = [for k in keys(local.service_accounts) : k if !contains(["deployer", "control-operator"], k)]
 
   common_roles = ["roles/logging.logWriter", "roles/monitoring.metricWriter"]
 
@@ -34,6 +36,8 @@ locals {
     # budget-guard has no project roles beyond logging; it writes only the control bucket.
     budget-guard = []
     gateway      = []
+    # No project roles: it only touches the two buckets below.
+    control-operator = []
   }
 
   # bucket => { role => [sa keys] }
@@ -48,7 +52,7 @@ locals {
       "roles/storage.objectViewer" = ["console"]
     }
     decision_log = {
-      "roles/storage.objectCreator" = ["ingest", "crawler", "resolver", "maker", "checker", "publisher", "workflow", "console", "budget-guard"]
+      "roles/storage.objectCreator" = ["ingest", "crawler", "resolver", "maker", "checker", "publisher", "workflow", "console", "budget-guard", "control-operator"]
       "roles/storage.objectViewer"  = ["publisher", "console"]
     }
     frames = {
@@ -57,7 +61,7 @@ locals {
     }
     control = {
       "roles/storage.objectViewer" = local.runtime_sas
-      "roles/storage.objectUser"   = ["console", "budget-guard"]
+      "roles/storage.objectUser"   = ["console", "budget-guard", "control-operator"]
     }
   }
 
