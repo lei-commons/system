@@ -29,6 +29,8 @@ git clone https://github.com/lei-commons/system.git && cd system
 ./bootstrap/bootstrap.sh --project <project-id> --billing <BILLING-ACCOUNT-ID> --create
 ```
 
+If the project sits in an organization with a domain-restricted-sharing policy, creating the budget fails with `do not belong to a permitted customer`, because Google's billing service account can't be added to the Pub/Sub topic. Either add an exception for the project, or rerun with `--no-budget-pubsub`. The budget then only emails billing admins, and the budget guard can't pause the system at the cap until Pub/Sub is enabled.
+
 Project IDs are global, so pick a unique one such as `lei-commons-prod-01`. The script shows the Terraform plan and asks before applying. It is safe to re-run.
 
 At the end it prints the GitHub org variables. If you are logged in to `gh` in Cloud Shell (`gh auth login`), it can set them for you; otherwise add them at *Org settings → Secrets and variables → Actions → Variables*.

@@ -43,6 +43,12 @@ variable "budget_currency" {
   default     = "USD"
 }
 
+variable "budget_pubsub_enabled" {
+  description = "Send budget updates to Pub/Sub for the budget guard. Needs Google's billing service account on the topic, which a domain-restricted-sharing org policy can block."
+  type        = bool
+  default     = true
+}
+
 variable "enable_deny_policy" {
   description = "Create the IAM deny policy. Needs the Deny Admin role, which some accounts can only grant at organisation level. Least-privilege roles apply either way."
   type        = bool
