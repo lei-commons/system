@@ -51,6 +51,10 @@ jobs:
       - run: pytest -q scripts/tests
       - run: pip install -e services/conduct_proxy
       - run: pytest -q services/conduct_proxy
+      - run: pip install -e agents/harness
+      - run: pytest -q agents/harness
+      - name: Sandbox holds against a real escape attempt
+        run: bash agents/harness/test-sandbox.sh
       - name: Gateway image builds and starts
         run: |
           docker build -f services/conduct_proxy/Dockerfile -t conduct-gateway .
@@ -95,7 +99,7 @@ jobs:
           pip install pyyaml
           python -c "import yaml,glob,sys; [yaml.safe_load(open(f)) for f in glob.glob('config/*.yaml')+glob.glob('.github/workflows/*.yml')]"
       - name: shellcheck
-        run: shellcheck bootstrap/*.sh
+        run: shellcheck bootstrap/*.sh agents/harness/*.sh
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.9.8"
