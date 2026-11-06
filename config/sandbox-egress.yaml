@@ -1,0 +1,16 @@
+# Where session agents may connect from inside the runner sandbox.
+# Protected path. Adding a host needs owner approval (Article 2).
+# Port 443 only. Web pages go through the conduct gateway, never through here.
+
+version: 1
+
+hosts:
+  - pypi.org
+  - files.pythonhosted.org
+  - github.com
+  - api.github.com
+  - codeload.github.com
+
+suffixes:
+  - .googleapis.com
+  - .githubusercontent.com

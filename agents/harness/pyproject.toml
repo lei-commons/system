@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lc-harness"
+version = "0.1.0"
+description = "The session agent loop and runner sandbox for lei-commons"
+requires-python = ">=3.11"
+license = {text = "Apache-2.0"}
+dependencies = ["pyyaml>=6"]  # also needs lc-core and lc-conduct-proxy, installed from this repo
+
+[project.optional-dependencies]
+vertex = ["anthropic[vertex]"]
+test = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+include = ["lc_harness*", "lc_sandbox*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
