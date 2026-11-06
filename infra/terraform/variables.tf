@@ -49,6 +49,12 @@ variable "budget_pubsub_enabled" {
   default     = true
 }
 
+variable "console_enabled" {
+  description = "Create the owner console. Push the image first: the deploy-console workflow does this."
+  type        = bool
+  default     = false
+}
+
 variable "gateway_image" {
   description = "Conduct gateway image, by digest, from bootstrap/build-gateway.sh. Empty until the first build; the gateway and egress check are created once it is set."
   type        = string

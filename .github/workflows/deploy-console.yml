@@ -1,0 +1,44 @@
+# Builds the owner console image and rolls it out. The deployer identity can do
+# this from system@main only. The first run just pushes the image, because the
+# service doesn't exist until the owner applies Terraform with --console.
+name: deploy-console
+
+on:
+  push:
+    branches: [main]
+    paths: ["services/console/**", "packages/lc_core/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-console
+  cancel-in-progress: false
+
+env:
+  IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/lei-commons/owner-console
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Build and push
+        run: |
+          gcloud auth configure-docker "${{ vars.GCP_REGION }}-docker.pkg.dev" --quiet
+          docker build -f services/console/Dockerfile -t "$IMAGE:$GITHUB_SHA" -t "$IMAGE:latest" .
+          docker push --all-tags "$IMAGE"
+      - name: Roll out, if the service exists
+        run: |
+          if gcloud run services describe owner-console --region "${{ vars.GCP_REGION }}" >/dev/null 2>&1; then
+            gcloud run services update owner-console --region "${{ vars.GCP_REGION }}" --image "$IMAGE:$GITHUB_SHA"
+          else
+            echo "::notice::owner-console doesn't exist yet; the image is pushed"
+          fi
