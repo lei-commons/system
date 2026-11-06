@@ -49,3 +49,24 @@ def test_corrupt_state_file_fails_closed(tmp_path):
     p.write_text("{not json")
     with pytest.raises(SystemHalted):
         require_running("job:x", {"LC_CONTROL_STATE_URI": str(p)})
+
+
+def test_manual_mode_lets_proposing_work_continue():
+    assert require_running("agent:engineering", {"SYSTEM_STATE": "manual"}, allow_manual=True).state == "manual"
+
+
+def test_manual_mode_still_stops_merging_and_deploying():
+    with pytest.raises(SystemHalted):
+        require_running("job:publish", {"SYSTEM_STATE": "manual"})
+
+
+@pytest.mark.parametrize("state", ["paused", "stopped"])
+def test_allow_manual_does_not_get_past_pause_or_stop(state):
+    with pytest.raises(SystemHalted):
+        require_running("agent:engineering", {"SYSTEM_STATE": state}, allow_manual=True)
+
+
+def test_allow_manual_still_honours_a_paused_component():
+    env = {"SYSTEM_STATE": "manual", "PAUSED_COMPONENTS": "agent:engineering"}
+    with pytest.raises(SystemHalted):
+        require_running("agent:engineering", env, allow_manual=True)

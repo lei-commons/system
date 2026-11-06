@@ -37,7 +37,7 @@ def main(argv=None) -> int:
 
     component = f"agent:{a.role}"
     try:
-        require_running(component)  # before any model client exists
+        require_running(component, allow_manual=True)  # before any model client exists
     except SystemHalted as exc:
         print(f"not starting: {exc}", file=sys.stderr)
         return 3
@@ -54,7 +54,7 @@ def main(argv=None) -> int:
             system=build_system(root, a.role),
             task=Path(a.task_file).read_text(encoding="utf-8"),
             budgets=Budgets(),
-            gate=lambda: require_running(component),
+            gate=lambda: require_running(component, allow_manual=True),
             trace=trace,
         )
     print(json.dumps({"status": result.status, "reason": result.reason, "steps": result.steps, "tokens": result.tokens}))
