@@ -1,0 +1,98 @@
+# Required checks for every pull request to lei-commons/system.
+# Protected path: changes here are Tier 3.
+# Action versions are pinned to tags for M1; the guardian pins them to commit SHAs in M2.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  control-gate:
+    # Fails fast when the owner has paused or stopped the system.
+    # Owner pushes are never blocked, so the owner can always fix things in manual mode.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check SYSTEM_STATE
+        env:
+          SYSTEM_STATE: ${{ vars.SYSTEM_STATE }}
+          ACTOR_TYPE: ${{ github.event.sender.type }}
+          ACTOR: ${{ github.actor }}
+          OWNER: ${{ vars.OWNER_LOGIN }}
+        run: |
+          if [ -z "${SYSTEM_STATE:-}" ] && [ -z "${OWNER:-}" ]; then
+            # Before bootstrap no agent identities exist, so only the owner can be pushing.
+            echo "::warning::org variables not set yet (pre-bootstrap); gate skipped"; exit 0
+          fi
+          if [ "$ACTOR" = "$OWNER" ]; then echo "owner change; gate skipped"; exit 0; fi
+          case "${SYSTEM_STATE:-}" in
+            running) echo "system running" ;;
+            *) echo "::error::system is '${SYSTEM_STATE:-unset}'; agent changes are blocked"; exit 1 ;;
+          esac
+
+  tests:
+    needs: control-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e "packages/lc_core[test]"
+      - run: pytest -q packages/lc_core
+      - run: pytest -q scripts/tests
+
+  conduct-policy:
+    needs: control-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml
+      - name: Conduct rules (Articles 2 and 3)
+        run: python scripts/conduct_check.py
+      - name: Protected paths
+        if: github.event_name == 'pull_request'
+        run: |
+          python scripts/conduct_check.py --base "origin/${{ github.base_ref }}" --json > conduct.json
+          python - <<'EOF'
+          import json
+          d = json.load(open("conduct.json"))
+          if d["protected_paths_changed"]:
+              print("::notice::Protected paths changed; Tier 3 review and 7-day cooldown apply:")
+              for p in d["protected_paths_changed"]:
+                  print("  " + p)
+          EOF
+
+  lint:
+    needs: control-gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: YAML parses
+        run: |
+          pip install pyyaml
+          python -c "import yaml,glob,sys; [yaml.safe_load(open(f)) for f in glob.glob('config/*.yaml')+glob.glob('.github/workflows/*.yml')]"
+      - name: shellcheck
+        run: shellcheck bootstrap/*.sh
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+      - name: terraform fmt and validate
+        working-directory: infra/terraform
+        run: |
+          terraform fmt -check -recursive
+          terraform init -backend=false
+          terraform validate

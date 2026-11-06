@@ -1,0 +1,65 @@
+# Sources. Changes adding a source are Tier 2; changes to access/credentials are Tier 3.
+# access:
+#   open          - public bulk file or keyless API
+#   owner-key     - needs a credential the owner creates and enters in the console
+#   web-discovery - no registry access; build from public web pages
+# status: active | awaiting-owner | disabled
+
+version: 1
+
+sources:
+  - id: gleif
+    name: GLEIF golden copy (LEI-CDF, RR-CDF)
+    country: "*"
+    access: open
+    method: bulk
+    licence: CC0-1.0
+    cadence: daily
+    status: active
+
+  - id: gb-coh
+    name: UK Companies House
+    country: GB
+    access: open
+    method: bulk           # monthly basic company data
+    licence: OGL-UK-3.0
+    cadence: monthly
+    status: active
+    upgrade:
+      access: owner-key    # streaming API for daily changes
+      secret: sources/gb-coh/api-key
+      status: awaiting-owner
+
+  - {id: us-ny-dos, name: New York Department of State (open data), country: US, access: open, method: api, licence: public-domain, cadence: daily, status: active}
+  - {id: us-co-sos, name: Colorado Secretary of State (open data), country: US, access: open, method: api, licence: public-domain, cadence: daily, status: active}
+  - {id: us-pa-dos, name: Pennsylvania Department of State, country: US, access: open, method: bulk, licence: public-domain, cadence: monthly, status: active}
+  - {id: us-or-sos, name: Oregon Secretary of State (open data), country: US, access: open, method: api, licence: public-domain, cadence: daily, status: active}
+  - {id: us-ct-sots, name: Connecticut Secretary of the State (open data), country: US, access: open, method: api, licence: public-domain, cadence: daily, status: active}
+
+  - {id: br-rfb-cnpj, name: Receita Federal CNPJ open data, country: BR, access: open, method: bulk, licence: to-be-verified, cadence: monthly, status: active}
+
+  - id: in-mca
+    name: India Ministry of Corporate Affairs
+    country: IN
+    access: owner-key
+    method: api
+    secret: sources/in-mca/credentials
+    status: awaiting-owner
+    fallback: web-discovery
+
+  - id: sg-acra
+    name: Singapore ACRA (data.gov.sg)
+    country: SG
+    access: open
+    method: bulk
+    licence: SG-Open-Data-1.0
+    cadence: monthly
+    status: active
+
+  - id: web
+    name: Public web discovery (entity websites, schema.org, Common Crawl)
+    country: "*"
+    access: web-discovery
+    method: crawl
+    licence: per-page
+    status: active

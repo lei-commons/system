@@ -1,0 +1,85 @@
+# Field allow-list. Protected path (Tier 3; Article 3 changes need the owner).
+# Any field not listed here is dropped at the first pipeline step.
+# personal: true  -> value is about a natural person; salted Merkle leaf; redactable.
+# Forbidden fields can never be added by any agent.
+
+version: 1
+
+forbidden:
+  # Article 3.2 — never stored, from any source.
+  - person.phone
+  - person.email
+  - person.address
+  - person.residentialAddress
+  - person.serviceAddress
+  - person.dateOfBirth
+  - person.nationalId
+  - person.taxId
+  - person.passportNumber
+  - person.signature
+  - person.photo
+  # Excluded in round 5 (decision 37):
+  - person.nationality
+  - person.birthMonthYear
+  - person.countryOfResidence
+  - person.occupation
+  - person.socialProfiles
+  - person.controlNature        # individual shareholders / PSC details
+  - person.ownershipBand
+
+entity:
+  - {name: directoryId,        personal: false}
+  - {name: lei,                personal: false}
+  - {name: legalName,          personal: false}
+  - {name: otherNames,         personal: false}
+  - {name: transliteratedNames, personal: false}
+  - {name: legalForm,          personal: false}   # ISO 20275 ELF code
+  - {name: legalJurisdiction,  personal: false}
+  - {name: registrationAuthority, personal: false}
+  - {name: registrationNumber, personal: false}
+  - {name: legalAddress,       personal: false}
+  - {name: headquartersAddress, personal: false}
+  - {name: legalStatus,        personal: false}
+  - {name: incorporationDate,  personal: false}
+  - {name: dissolutionDate,    personal: false}
+  - {name: website,            personal: false}
+  - {name: entityEmail,        personal: false, note: "Generic entity address published by the entity (info@, contact@). Never a named person's mailbox."}
+  - {name: entityPhone,        personal: false, note: "Switchboard number published by the entity."}
+  - {name: industryCodes,      personal: false}
+  - {name: taxIdentifiers,     personal: false, note: "Entity tax IDs only where public (e.g. GSTIN, CNPJ, UEN, EIN not stored)."}
+  - {name: geo,                personal: false}
+  - {name: socialProfiles,     personal: false}
+  - {name: recordMode,         personal: false}   # mirror | linked | web-built
+  - {name: registryUrl,        personal: false}
+  - {name: labels,             personal: false}
+
+relationship:
+  - {name: startNode,          personal: false}
+  - {name: endNode,            personal: false}
+  - {name: relationshipType,   personal: false}
+  - {name: percentage,         personal: false}
+  - {name: periodStart,        personal: false}
+  - {name: periodEnd,          personal: false}
+
+person_role:
+  # Only names and roles of people connected to an entity (Article 3.1).
+  - {name: personName,         personal: true}
+  - {name: role,               personal: true}
+  - {name: appointedOn,        personal: true}
+  - {name: resignedOn,         personal: true}
+  # Decision 37: officer appointment/resignation dates and US registered-agent
+  # name/role are approved. Nothing else about people is stored.
+
+contributor:
+  # Intake contributors (decision 37): public GitHub identity only.
+  - {name: githubUsername,     personal: true}
+  - {name: reputation,         personal: false}
+
+provenance:
+  # Every value carries these (decision: explicit source for every field).
+  - source
+  - sourceUrl
+  - retrievedAt
+  - method
+  - licence
+  - label

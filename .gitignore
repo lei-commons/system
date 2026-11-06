@@ -1,0 +1,23 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.plan
+crash.log
+*.tfvars
+!example.tfvars
+
+# Never commit credentials
+*.pem
+*.key
+*credentials*.json
+service-account*.json
+.env

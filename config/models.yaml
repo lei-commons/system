@@ -1,0 +1,30 @@
+# Model routing. Protected path (Tier 3).
+# All calls go through Vertex AI. Batch wherever latency allows (50% discount).
+# Checker must come from a different vendor than the maker for Tier 2.
+
+version: 1
+
+endpoints:
+  gemini: {location: us-central1}
+  claude: {location: global}
+  open:   {location: us-central1}
+
+tasks:
+  extract_entity_page:
+    maker:   {vendor: gemini, model: gemini-flash, mode: batch}
+    checker: {vendor: claude, model: claude-haiku, mode: batch}
+  resolve_residual_pair:
+    maker:   {vendor: gemini, model: gemini-flash, mode: batch}
+    checker: {vendor: claude, model: claude-sonnet, mode: batch}
+  tier2_judge:
+    judges:
+      - {vendor: gemini, model: gemini-pro}
+      - {vendor: claude, model: claude-sonnet}
+  code_change:
+    maker:   {vendor: claude, model: claude-opus, mode: online}
+    checker: {vendor: gemini, model: gemini-pro, mode: online}
+  translit_names:
+    maker:   {vendor: open, model: open-small, mode: batch}
+
+limits:
+  max_daily_model_usd: 40   # soft; hard limit is the owner's monthly budget

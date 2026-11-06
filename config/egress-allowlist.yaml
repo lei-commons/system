@@ -1,0 +1,42 @@
+# Egress allow-list for registry/API traffic through the conduct-policy proxy.
+# Protected path. Adding a host needs owner approval in the console (Article 2).
+# Web discovery uses a separate crawler profile: any public host, robots.txt honoured,
+# 1 req/s per host, GET/HEAD only, no cookies, no form posts, no auth headers.
+
+version: 1
+
+registry_hosts:
+  - api.gleif.org
+  - goldencopy.gleif.org
+  - leidata-preview.gleif.org
+  - download.companieshouse.gov.uk
+  - data.ny.gov
+  - data.colorado.gov
+  - data.oregon.gov
+  - data.ct.gov
+  - www.dos.pa.gov
+  - dadosabertos.rfb.gov.br
+  - arquivos.receitafederal.gov.br
+  - data.gov.sg
+  - api-production.data.gov.sg
+  - index.commoncrawl.org
+  - data.commoncrawl.org
+
+owner_key_hosts:
+  # Enabled only when the owner has entered and approved a credential for the source.
+  - {host: api.company-information.service.gov.uk, source: gb-coh}
+  - {host: stream.companieshouse.gov.uk, source: gb-coh}
+
+model_hosts:
+  - us-central1-aiplatform.googleapis.com
+  - aiplatform.googleapis.com
+
+crawler_policy:
+  methods: [GET, HEAD]
+  max_rps_per_host: 1
+  honour_robots_txt: true
+  send_cookies: false
+  send_auth_headers: false
+  user_agent: "lei-commons-crawler/0.1 (+https://github.com/lei-commons)"
+  deny_paths_matching:
+    - "(?i)/(login|signin|sign-in|account|admin|wp-admin|checkout|cart)(/|$)"

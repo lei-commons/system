@@ -1,0 +1,26 @@
+# Verification labels. Protected path (Tier 3).
+# Each field value carries one label; a record carries the set of its values' labels
+# plus legalStatus and recordMode.
+# stale_after_days: when a value passes this age without re-confirmation it gains `stale`.
+
+version: 1
+
+labels:
+  - {id: registry-fetched,   meaning: "Copied from the official registry's bulk file or API.", stale_after_days: 35}
+  - {id: registry-linked,    meaning: "Registry holds the record; we keep a pointer and minimal public fields.", stale_after_days: 35}
+  - {id: gleif-fetched,      meaning: "From the GLEIF golden copy.", stale_after_days: 3}
+  - {id: filing-derived,     meaning: "Extracted from a public company filing.", stale_after_days: 400}
+  - {id: owner-verified,     meaning: "Confirmed by the entity via website file or DNS record.", stale_after_days: 365}
+  - {id: web-asserted,       meaning: "Found on the entity's own website or another public page.", stale_after_days: 180}
+  - {id: multi-source,       meaning: "Same value seen in two or more independent sources.", stale_after_days: 180}
+  - {id: model-extracted,    meaning: "Extracted by a model and passed maker-checker.", stale_after_days: 180}
+  - {id: crowd-suggested,    meaning: "Proposed through intake and passed checks.", stale_after_days: 180}
+  - {id: disputed,           meaning: "Sources disagree; all values shown.", stale_after_days: null}
+  - {id: stale,              meaning: "Not re-confirmed within its window.", stale_after_days: null}
+  - {id: redacted,           meaning: "Value withdrawn; hash commitment kept.", stale_after_days: null}
+  - {id: merged,             meaning: "Record merged into another; tombstone points to survivor.", stale_after_days: null}
+  - {id: needs-review,       meaning: "Held for a higher checker tier.", stale_after_days: null}
+  - {id: source-gone,        meaning: "Source no longer reachable or withdrew the value.", stale_after_days: null}
+
+legal_status: [active, inactive, dissolved, in-liquidation, struck-off, merged, unknown]
+record_mode: [mirror, linked, web-built]
