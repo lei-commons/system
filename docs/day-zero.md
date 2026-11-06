@@ -46,6 +46,18 @@ Project IDs are global, so pick a unique one such as `lei-commons-prod-01`. The 
 
 At the end it prints the GitHub org variables. If you are logged in to `gh` in Cloud Shell (`gh auth login`), it can set them for you; otherwise add them at *Org settings → Secrets and variables → Actions → Variables*.
 
+## Deploy the gateway
+
+Jobs reach the internet only through the conduct gateway. From the root of this repo in Cloud Shell:
+
+```bash
+./bootstrap/build-gateway.sh <project-id>
+./bootstrap/bootstrap.sh --project <project-id> --billing <BILLING-ACCOUNT-ID> --gateway-image <IMAGE-FROM-THE-LAST-LINE>
+gcloud run jobs execute egress-check --region us-central1 --wait
+```
+
+Pass the same `--currency`, `--budget` and `--no-budget-pubsub` options as on the first run. The last command must succeed: it tries to reach the internet directly from inside the jobs network and fails if it can.
+
 ## 3. What now exists
 
 | Thing | Purpose |

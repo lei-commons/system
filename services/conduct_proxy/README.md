@@ -49,10 +49,17 @@ Every decision is one JSON line on stdout, for the security agent. Query strings
 python -m conduct_proxy.server
 ```
 
-## Deployment requirements
+## On Cloud Run
 
-These are not met yet. They arrive with the infrastructure change, after GCP day zero.
+Jobs prove who they are with an ID token, sent in **`X-Serverless-Authorization`**, not `Authorization`. The policy would treat `Authorization` as a credential meant for the target host. Health is at `/health`, because Cloud Run reserves `/healthz`.
 
-- **One instance only.** Pacing and the robots cache are in memory, so a second instance would double the rate to each host and break Article 2.4.
-- **Firewall.** The gateway is only enforcement if other egress is denied, so jobs must have no other route out.
-- **Caller authentication.** `X-LC-Actor` is what the caller claims, so it is only useful for logs until access to the gateway is restricted by IAM.
+`infra/terraform/network.tf` and `gateway.tf` provide the rest:
+
+- **One instance.** Pacing and the robots cache are in memory, so `max_instance_count` is 1. A brief overlap is possible during a new deployment.
+- **No other way out.** Jobs run on a VPC with no default route and a deny-all egress firewall. `conduct_proxy.egress_check` proves this from the inside; run it after any network change.
+- **Caller authentication.** Only the listed service accounts can invoke the gateway. `X-LC-Actor` is still whatever the caller claims, so use it for logs only.
+
+## Known limits
+
+- **Google services are reachable directly.** Jobs need Google's private range to reach the gateway and Google APIs, and that range also serves other people's buckets and `run.app` services. Closing this needs VPC Service Controls, which needs organization-level access.
+- **Large downloads are untested.** Cloud Run limits some HTTP/1 response sizes, and bulk files such as the GLEIF golden copy may hit that. Test this in M2 before relying on it; the fix is likely to be chunked responses.

@@ -160,7 +160,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle(self):
         self.close_connection = True  # one request per connection: nothing to smuggle into
-        if self.command == "GET" and self.path == "/healthz":
+        if self.command == "GET" and self.path == "/health":
             body = b"ok\n"
             self.send_response(200)
             self.send_header("Content-Length", str(len(body)))

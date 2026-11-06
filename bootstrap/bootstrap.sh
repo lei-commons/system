@@ -26,6 +26,7 @@ CURRENCY="USD"
 BUDGET="1500"
 AUTO_APPROVE=0
 BUDGET_PUBSUB=true
+GATEWAY_IMAGE=""
 
 usage() {
   sed -n '2,20p' "$0"
@@ -41,6 +42,7 @@ while [[ $# -gt 0 ]]; do
     --currency) CURRENCY="$2"; shift 2 ;;
     --budget) BUDGET="$2"; shift 2 ;;
     --no-budget-pubsub) BUDGET_PUBSUB=false; shift ;;
+    --gateway-image) GATEWAY_IMAGE="$2"; shift 2 ;;
     --yes) AUTO_APPROVE=1; shift ;;
     -h|--help) usage 0 ;;
     *) echo "unknown option: $1" >&2; usage 1 ;;
@@ -118,6 +120,7 @@ TF_VARS=(
   -var "monthly_budget_usd=${BUDGET}"
   -var "budget_currency=${CURRENCY}"
   -var "budget_pubsub_enabled=${BUDGET_PUBSUB}"
+  -var "gateway_image=${GATEWAY_IMAGE}"
 )
 
 terraform plan -input=false -out=day0.plan "${TF_VARS[@]}"

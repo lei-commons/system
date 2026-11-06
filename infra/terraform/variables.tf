@@ -49,6 +49,12 @@ variable "budget_pubsub_enabled" {
   default     = true
 }
 
+variable "gateway_image" {
+  description = "Conduct gateway image, by digest, from bootstrap/build-gateway.sh. Empty until the first build; the gateway and egress check are created once it is set."
+  type        = string
+  default     = ""
+}
+
 variable "enable_deny_policy" {
   description = "Create the IAM deny policy. Needs the Deny Admin role, which some accounts can only grant at organisation level. Least-privilege roles apply either way."
   type        = bool
