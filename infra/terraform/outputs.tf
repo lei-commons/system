@@ -26,6 +26,11 @@ output "gateway_audience" {
   value       = local.gateway_enabled ? google_cloud_run_v2_service.gateway[0].uri : ""
 }
 
+output "console_url" {
+  description = "The owner console. Empty until console_enabled is true."
+  value       = var.console_enabled ? google_cloud_run_v2_service.console[0].uri : ""
+}
+
 output "artifact_registry" {
   value = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.images.repository_id}"
 }

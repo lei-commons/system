@@ -6,6 +6,10 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 6.10"
     }
+    google-beta = {
+      source  = "hashicorp/google-beta"
+      version = "~> 6.10"
+    }
   }
 
   # Bucket is created by bootstrap/bootstrap.sh and passed with -backend-config.
@@ -19,6 +23,14 @@ provider "google" {
   region  = var.region
 
   # Billing budgets API needs a quota project when called with user credentials.
+  user_project_override = true
+  billing_project       = var.project_id
+}
+
+provider "google-beta" {
+  project = var.project_id
+  region  = var.region
+
   user_project_override = true
   billing_project       = var.project_id
 }

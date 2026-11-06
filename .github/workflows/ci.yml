@@ -55,6 +55,10 @@ jobs:
       - run: pytest -q agents/harness
       - name: Sandbox holds against a real escape attempt
         run: bash agents/harness/test-sandbox.sh
+      - run: pip install -e services/console
+      - run: pytest -q services/console
+      - name: Console image builds
+        run: docker build -f services/console/Dockerfile -t owner-console .
       - name: Gateway image builds and starts
         run: |
           docker build -f services/conduct_proxy/Dockerfile -t conduct-gateway .

@@ -39,6 +39,7 @@ PROTECTED = [
     "infra/",
     "bootstrap/",
     "services/conduct_proxy/",
+    "services/console/",
     "agents/harness/",
     "config/sandbox-egress.yaml",
     "packages/lc_core/lc_core/control.py",
