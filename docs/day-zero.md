@@ -22,7 +22,18 @@ You need a billing account. You do **not** need to create the project first; the
 1. Open [Cloud Shell](https://shell.cloud.google.com) signed in as the owner account.
 2. Find your billing account ID: `gcloud billing accounts list`.
 3. Check the billing account's currency (shown in the Billing console). If it isn't USD, pass `--currency INR` (or yours) and `--budget` in that currency.
-4. Run:
+4. Install Terraform if `terraform version` doesn't print a version. Cloud Shell may only have a stub that prints install instructions:
+
+```bash
+mkdir -p ~/bin
+curl -fsSLo /tmp/terraform.zip https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_amd64.zip
+unzip -o /tmp/terraform.zip terraform -d ~/bin
+export PATH="$HOME/bin:$PATH"
+hash -r
+terraform version
+```
+
+5. Run:
 
 ```bash
 git clone https://github.com/lei-commons/system.git && cd system

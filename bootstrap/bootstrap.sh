@@ -50,6 +50,13 @@ done
 [[ -n "$PROJECT" && -n "$BILLING" ]] || { echo "--project and --billing are required" >&2; usage 1; }
 [[ -f infra/terraform/versions.tf ]] || { echo "run from the root of the system repo" >&2; exit 1; }
 
+# Cloud Shell can ship a `terraform` stub that prints install instructions and
+# exits 0, so every Terraform step would appear to pass while doing nothing.
+if ! terraform version -json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["terraform_version"])' >/dev/null 2>&1; then
+  echo "terraform is not installed (or is only a stub). Install it first: see docs/day-zero.md" >&2
+  exit 1
+fi
+
 OWNER="$(gcloud config get-value account 2>/dev/null)"
 [[ -n "$OWNER" ]] || { echo "not logged in to gcloud" >&2; exit 1; }
 
