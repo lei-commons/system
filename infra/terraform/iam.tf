@@ -13,6 +13,7 @@ locals {
     workflow     = "Runs the daily cycle"
     console      = "Owner console backend (behind IAP, owner only)"
     budget-guard = "Pauses the system when spend reaches the owner's cap; cannot resume"
+    gateway      = "Runs the conduct gateway, the only route to the internet for jobs"
   }
 
   # Runtime identities read the control state before every step.
@@ -32,6 +33,7 @@ locals {
     console   = ["roles/datastore.user"]
     # budget-guard has no project roles beyond logging; it writes only the control bucket.
     budget-guard = []
+    gateway      = []
   }
 
   # bucket => { role => [sa keys] }

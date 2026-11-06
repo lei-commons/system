@@ -51,6 +51,13 @@ jobs:
       - run: pytest -q scripts/tests
       - run: pip install -e services/conduct_proxy
       - run: pytest -q services/conduct_proxy
+      - name: Gateway image builds and starts
+        run: |
+          docker build -f services/conduct_proxy/Dockerfile -t conduct-gateway .
+          docker run -d --name gw -p 8080:8080 -e SYSTEM_STATE=paused conduct-gateway
+          for i in 1 2 3 4 5 6 7 8 9 10; do curl -fsS localhost:8080/health && break; sleep 1; done
+          curl -fsS localhost:8080/health
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-LC-Target: https://api.gleif.org/x' localhost:8080/fetch)" = 503
 
   conduct-policy:
     needs: control-gate

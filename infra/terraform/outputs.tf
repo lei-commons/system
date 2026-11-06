@@ -16,6 +16,11 @@ output "control_state_uri" {
   value       = "gs://${google_storage_bucket.control.name}/state.json"
 }
 
+output "gateway_url" {
+  description = "Internal URL of the conduct gateway. Empty until gateway_image is set."
+  value       = local.gateway_enabled ? google_cloud_run_v2_service.gateway[0].uri : ""
+}
+
 output "artifact_registry" {
   value = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.images.repository_id}"
 }

@@ -8,6 +8,8 @@ locals {
     "cloudbuild.googleapis.com",
     "cloudresourcemanager.googleapis.com",
     "cloudscheduler.googleapis.com",
+    "compute.googleapis.com",
+    "dns.googleapis.com",
     "eventarc.googleapis.com",
     "firebase.googleapis.com",
     "firebasehosting.googleapis.com",

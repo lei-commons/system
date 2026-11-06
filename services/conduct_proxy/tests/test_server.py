@@ -132,10 +132,10 @@ def test_missing_target_denied(env):
     assert call(env[0])[0] == 403
 
 
-def test_healthz_works_while_paused(env):
+def test_health_works_while_paused(env):
     port, _, _, _, state = env
     state["halted"] = SystemHalted("system is paused")
-    assert call(port, path="/healthz")[0] == 200
+    assert call(port, path="/health")[0] == 200
 
 
 def test_paused_system_lets_nothing_out(env):
