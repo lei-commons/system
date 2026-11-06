@@ -55,6 +55,106 @@ resource "google_cloud_run_v2_service_iam_member" "gateway_callers" {
   member   = google_service_account.sa[each.value].member
 }
 
+# Jobs reach the gateway through an internal load balancer. Calling the run.app
+# URL through Private Google Access got a 404 from Cloud Run's ingress check even
+# with the documented setup; an internal load balancer is an allowed source.
+# Plain HTTP stays inside the VPC, because a certificate needs a domain or a
+# private key in Terraform state. Revisit before owner keys pass through here.
+resource "google_compute_subnetwork" "proxy_only" {
+  count = local.gateway_enabled ? 1 : 0
+
+  name          = "lc-lb-proxy-${var.region}"
+  region        = var.region
+  network       = google_compute_network.jobs.id
+  ip_cidr_range = "10.20.2.0/24"
+  purpose       = "REGIONAL_MANAGED_PROXY"
+  role          = "ACTIVE"
+}
+
+resource "google_compute_address" "gateway" {
+  count = local.gateway_enabled ? 1 : 0
+
+  name         = "lc-gateway"
+  region       = var.region
+  address_type = "INTERNAL"
+  subnetwork   = google_compute_subnetwork.jobs.id
+  address      = "10.20.0.10"
+}
+
+resource "google_compute_region_network_endpoint_group" "gateway" {
+  count = local.gateway_enabled ? 1 : 0
+
+  name                  = "lc-gateway"
+  region                = var.region
+  network_endpoint_type = "SERVERLESS"
+
+  cloud_run {
+    service = google_cloud_run_v2_service.gateway[0].name
+  }
+}
+
+resource "google_compute_region_backend_service" "gateway" {
+  count = local.gateway_enabled ? 1 : 0
+
+  name                  = "lc-gateway"
+  region                = var.region
+  protocol              = "HTTP"
+  load_balancing_scheme = "INTERNAL_MANAGED"
+
+  backend {
+    group           = google_compute_region_network_endpoint_group.gateway[0].id
+    balancing_mode  = "UTILIZATION"
+    capacity_scaler = 1
+  }
+}
+
+resource "google_compute_region_url_map" "gateway" {
+  count = local.gateway_enabled ? 1 : 0
+
+  name            = "lc-gateway"
+  region          = var.region
+  default_service = google_compute_region_backend_service.gateway[0].id
+}
+
+resource "google_compute_region_target_http_proxy" "gateway" {
+  count = local.gateway_enabled ? 1 : 0
+
+  name    = "lc-gateway"
+  region  = var.region
+  url_map = google_compute_region_url_map.gateway[0].id
+}
+
+resource "google_compute_forwarding_rule" "gateway" {
+  count = local.gateway_enabled ? 1 : 0
+
+  name                  = "lc-gateway"
+  region                = var.region
+  load_balancing_scheme = "INTERNAL_MANAGED"
+  ip_protocol           = "TCP"
+  port_range            = "80"
+  ip_address            = google_compute_address.gateway[0].address
+  target                = google_compute_region_target_http_proxy.gateway[0].id
+  network               = google_compute_network.jobs.id
+  subnetwork            = google_compute_subnetwork.jobs.id
+
+  depends_on = [google_compute_subnetwork.proxy_only]
+}
+
+resource "google_compute_firewall" "allow_gateway" {
+  count = local.gateway_enabled ? 1 : 0
+
+  name               = "lc-allow-gateway"
+  network            = google_compute_network.jobs.id
+  direction          = "EGRESS"
+  priority           = 1000
+  destination_ranges = ["${google_compute_address.gateway[0].address}/32"]
+
+  allow {
+    protocol = "tcp"
+    ports    = ["80"]
+  }
+}
+
 # Tries to escape from inside the jobs network. Run it after any network change.
 resource "google_cloud_run_v2_job" "egress_check" {
   count = local.gateway_enabled ? 1 : 0
@@ -83,11 +183,21 @@ resource "google_cloud_run_v2_job" "egress_check" {
 
         env {
           name  = "LC_GATEWAY_URL"
+          value = "http://${google_compute_address.gateway[0].address}"
+        }
+
+        env {
+          name  = "LC_GATEWAY_AUDIENCE"
           value = google_cloud_run_v2_service.gateway[0].uri
         }
       }
     }
   }
 
-  depends_on = [google_compute_route.private_google, google_dns_record_set.private_google_cname]
+  depends_on = [
+    google_compute_route.private_google,
+    google_dns_record_set.private_google_cname,
+    google_compute_forwarding_rule.gateway,
+    google_compute_firewall.allow_gateway,
+  ]
 }

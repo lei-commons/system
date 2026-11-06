@@ -17,7 +17,12 @@ output "control_state_uri" {
 }
 
 output "gateway_url" {
-  description = "Internal URL of the conduct gateway. Empty until gateway_image is set."
+  description = "Address jobs use to reach the conduct gateway. Empty until gateway_image is set."
+  value       = local.gateway_enabled ? "http://${google_compute_address.gateway[0].address}" : ""
+}
+
+output "gateway_audience" {
+  description = "Audience for the ID token jobs send to the gateway. Empty until gateway_image is set."
   value       = local.gateway_enabled ? google_cloud_run_v2_service.gateway[0].uri : ""
 }
 

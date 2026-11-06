@@ -12,6 +12,7 @@ import os
 import socket
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 METADATA = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity"
@@ -42,7 +43,7 @@ def id_token(audience: str) -> str:
         return resp.read().decode()
 
 
-def run_checks(gateway: str, connects=tcp_connects, get=http_get, token=id_token) -> list:
+def run_checks(gateway: str, audience: str, connects=tcp_connects, get=http_get, token=id_token) -> list:
     results = []
     for host, port in DIRECT_TARGETS:
         escaped = connects(host, port)
@@ -51,7 +52,7 @@ def run_checks(gateway: str, connects=tcp_connects, get=http_get, token=id_token
     status, _ = get(f"{gateway}/health", {})
     results.append(("gateway refuses callers without identity", status in (401, 403), str(status)))
 
-    auth = {"X-Serverless-Authorization": f"Bearer {token(gateway)}"}
+    auth = {"X-Serverless-Authorization": f"Bearer {token(audience)}"}
     status, _ = get(f"{gateway}/health", auth)
     results.append(("gateway reachable with identity", status == 200, str(status)))
 
@@ -62,8 +63,22 @@ def run_checks(gateway: str, connects=tcp_connects, get=http_get, token=id_token
     return results
 
 
+def describe_run_app_route(audience: str, get=http_get, token=id_token) -> dict:
+    """Record what the run.app URL does from here. Evidence only: it never fails the job."""
+    host = urllib.parse.urlsplit(audience).hostname
+    try:
+        info = {"resolved": sorted({a[4][0] for a in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)})}
+        status, headers = get(f"{audience}/health", {"X-Serverless-Authorization": f"Bearer {token(audience)}"})
+        lowered = {k.lower(): v for k, v in headers.items()}
+        return {**info, "status": status, "server": lowered.get("server", "")}
+    except Exception as exc:
+        return {"error": type(exc).__name__}
+
+
 def main() -> int:
-    results = run_checks(os.environ["LC_GATEWAY_URL"].rstrip("/"))
+    audience = os.environ["LC_GATEWAY_AUDIENCE"].rstrip("/")
+    print(json.dumps({"info": "run.app route", **describe_run_app_route(audience)}), flush=True)
+    results = run_checks(os.environ["LC_GATEWAY_URL"].rstrip("/"), audience)
     for name, ok, detail in results:
         print(json.dumps({"check": name, "ok": ok, "detail": detail}), flush=True)
     return 0 if all(ok for _, ok, _ in results) else 1

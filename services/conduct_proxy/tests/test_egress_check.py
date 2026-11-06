@@ -1,6 +1,7 @@
-from conduct_proxy.egress_check import run_checks
+from conduct_proxy.egress_check import describe_run_app_route, run_checks
 
-G = "https://gw.test"
+G = "http://10.20.0.10"
+A = "https://gw.test"
 
 
 def get_ok(url, headers):
@@ -12,7 +13,7 @@ def get_ok(url, headers):
 
 
 def checks(connects=lambda h, p: False, get=get_ok):
-    return run_checks(G, connects=connects, get=get, token=lambda aud: "tok")
+    return run_checks(G, A, connects=connects, get=get, token=lambda aud: "tok")
 
 
 def test_all_pass_on_a_sealed_network():
@@ -38,3 +39,16 @@ def test_gateway_ignoring_paused_state_fails_the_check():
         return (200, {}) if url.endswith("/health") else (403, {"X-LC-Denied": "denied-path"})
 
     assert "gateway applies the control state" in [n for n, ok, _ in checks(get=ignores) if not ok]
+
+
+def test_token_is_requested_for_the_service_not_the_load_balancer():
+    seen = []
+    run_checks(G, A, connects=lambda h, p: False, get=get_ok, token=lambda aud: seen.append(aud) or "tok")
+    assert set(seen) == {A}
+
+
+def test_route_evidence_never_raises():
+    def boom(url, headers):
+        raise OSError("down")
+
+    assert describe_run_app_route("https://localhost", get=boom, token=lambda a: "t") == {"error": "OSError"}
