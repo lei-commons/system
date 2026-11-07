@@ -16,5 +16,10 @@ test = ["pytest>=8", "pyarrow>=15"]
 [tool.setuptools.packages.find]
 include = ["lc_site*"]
 
+# The app's own files. Without this they are left out of the installed
+# package, and the site answers every page with an error.
+[tool.setuptools.package-data]
+lc_site = ["static/*.html", "static/*.css", "static/*.js", "static/views/*.js", "static/vendor/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
