@@ -45,6 +45,14 @@ resource "google_cloud_run_v2_service" "site" {
         name  = "LC_SNAPSHOT_BUCKET"
         value = google_storage_bucket.snapshots.name
       }
+      env {
+        name  = "GCP_PROJECT_ID"
+        value = var.project_id
+      }
+      env {
+        name  = "GCP_REGION"
+        value = var.region
+      }
 
       # Loading the snapshot takes a while; give it time before the first request.
       startup_probe {
