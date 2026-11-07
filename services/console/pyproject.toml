@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Owner console for lei-commons: login, second factor and status"
 requires-python = ">=3.11"
 license = {text = "Apache-2.0"}
-dependencies = ["google-auth[requests]>=2.30", "google-cloud-secret-manager>=2.20"]  # also needs lc-core[gcp]
+dependencies = ["google-auth[requests]>=2.30", "google-cloud-secret-manager>=2.20", "segno>=1.6"]  # also needs lc-core[gcp]
 
 [project.optional-dependencies]
 test = ["pytest>=8"]

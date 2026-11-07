@@ -20,12 +20,15 @@ from lc_core.control import load_state
 
 from .auth import SESSION_SECONDS, Sessions, verify_iap
 from .store import SecretManagerStore
-from .totp import Verifier, new_secret, otpauth_uri
+from .totp import ENROL_WINDOW, Verifier, new_secret, otpauth_uri
 
 COOKIE = "__Host-lc-console"
+# A key waiting for its first good code. It is stored, not held in memory, so a
+# restart can't swap the key after the owner has added it to their app.
+PENDING = "pending:"
 MAX_FORM = 1024
 HEADERS = {
-    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",
+    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'self'; frame-ancestors 'none'",
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
@@ -36,6 +39,16 @@ STYLE = "body{font:16px/1.5 system-ui,sans-serif;max-width:40em;margin:3em auto;
 def page(title, body):
     return (f"<!DOCTYPE html><html lang=en><meta charset=utf-8><title>{html.escape(title)} · lei-commons</title>"
             f"<style>{STYLE}</style><h1>{html.escape(title)}</h1>{body}</html>").encode()
+
+
+def qr_image(uri):
+    """An inline QR code. Setup still works from the typed key if this fails."""
+    try:
+        import segno
+
+        return f'<p><img alt="QR code" width=240 height=240 src="{segno.make(uri, error="m").svg_data_uri(scale=6, border=2)}"></p>'
+    except Exception:
+        return ""
 
 
 CODE_FORM = ("<form method=post action={action}><label>Code from your authenticator app "
@@ -53,7 +66,6 @@ class App:
         self.verifier = verifier or Verifier()
         self.iap = iap
         self.log = log or (lambda record: print(json.dumps(record, sort_keys=True), flush=True))
-        self.pending = None   # secret shown at enrolment, until a code proves it works
         self.lock = threading.Lock()
 
 
@@ -116,11 +128,12 @@ class Handler(BaseHTTPRequestHandler):
         email = self._owner()
         if email is None:
             return None
-        secret = self._load_secret()
-        if secret is False:
+        loaded = self._load()
+        if loaded is None:
             return None
+        secret, pending = loaded
         if secret is None:
-            return self._enrol_page(email)
+            return self._enrol_page(email, pending)
         if not self._session_ok(email):
             return self._send(200, page("Second factor", CODE_FORM.format(action="/verify")))
         if self.path != "/":
@@ -132,27 +145,26 @@ class Handler(BaseHTTPRequestHandler):
         if email is None:
             return None
         code = self._code()
-        secret = self._load_secret()
-        if secret is False:
+        loaded = self._load()
+        if loaded is None:
             return None
+        secret, pending = loaded
         if self.path == "/verify" and secret:
             ok = self.app.verifier.verify(secret, code)
             self._audit(email, "second-factor", ok)
             if ok:
                 return self._send(303, b"", cookie=self.app.sessions.issue(email), location="/")
-            message = "Locked for five minutes after repeated failures." if self.app.verifier.locked() else "That code didn't work."
-            return self._send(403, page("Second factor", f"<p>{message}</p>" + CODE_FORM.format(action="/verify")))
+            return self._send(403, page("Second factor", f"<p>{self._failure()}</p>" + CODE_FORM.format(action="/verify")))
         if self.path == "/enrol" and secret is None:
-            with self.app.lock:
-                pending = self.app.pending
-            if pending and self.app.verifier.verify(pending, code):
-                self.app.store.put(pending)
-                with self.app.lock:
-                    self.app.pending = None
-                self._audit(email, "enrolled", True)
+            ok = bool(pending) and self.app.verifier.verify(pending, code, window=ENROL_WINDOW)
+            self._audit(email, "enrolled", ok)
+            if ok:
+                try:
+                    self.app.store.put(pending)
+                except Exception as exc:
+                    return self._unavailable(exc)
                 return self._send(303, b"", cookie=self.app.sessions.issue(email), location="/")
-            self._audit(email, "enrolled", False)
-            return self._send(403, page("Set up your authenticator", "<p>That code didn't work. Reload to try again.</p>"))
+            return self._enrol_page(email, pending, status=403, note=self._failure())
         return self._send(404, page("Not found", ""))
 
     def do_HEAD(self):
@@ -160,23 +172,38 @@ class Handler(BaseHTTPRequestHandler):
 
     do_PUT = do_PATCH = do_DELETE = do_OPTIONS = do_TRACE = do_CONNECT = do_HEAD
 
-    def _load_secret(self):
-        """Return the secret, None if nobody has enrolled, or False after answering 503."""
-        try:
-            return self.app.store.get()
-        except Exception as exc:
-            self.app.log({"event": "secret-store-error", "ok": False, "error": type(exc).__name__})
-            self._send(503, page("Unavailable", "<p>The console can't read its second-factor secret.</p>"))
-            return False
+    def _failure(self):
+        if self.app.verifier.locked():
+            return "Too many wrong codes. Wait five minutes before trying again, even with the right code."
+        return "That code didn't work. Enter the code your app shows now."
 
-    def _enrol_page(self, email):
-        with self.app.lock:
-            if self.app.pending is None:
-                self.app.pending = new_secret()
-            pending = self.app.pending
-        body = (f"<p>Add this key to your authenticator app, then enter the code it shows.</p><p><code>{pending}</code></p>"
-                f"<p><code>{html.escape(otpauth_uri(pending, email))}</code></p>" + CODE_FORM.format(action="/enrol"))
-        return self._send(200, page("Set up your authenticator", body))
+    def _unavailable(self, exc):
+        self.app.log({"event": "secret-store-error", "ok": False, "error": type(exc).__name__})
+        return self._send(503, page("Unavailable", "<p>The console can't reach its second-factor secret.</p>"))
+
+    def _load(self):
+        """Return (secret, pending key), or None after answering 503. Creates a key if there is none."""
+        try:
+            with self.app.lock:
+                value = self.app.store.get()
+                if value is None:
+                    value = PENDING + new_secret()
+                    self.app.store.put(value)
+        except Exception as exc:
+            self._unavailable(exc)
+            return None
+        if value.startswith(PENDING):
+            return None, value[len(PENDING):]
+        return value, None
+
+    def _enrol_page(self, email, pending, status=200, note=""):
+        uri = otpauth_uri(pending, email)
+        message = f"<p><strong>{html.escape(note)}</strong></p>" if note else ""
+        body = (f"{message}<p>Scan this with your authenticator app, then enter the code it shows. "
+                f"This key stays the same if you reload.</p>{qr_image(uri)}"
+                f"<p>Or enter this key by hand, as a time-based key:</p><p><code>{pending}</code></p>"
+                + CODE_FORM.format(action="/enrol"))
+        return self._send(status, page("Set up your authenticator", body))
 
     def _status_page(self):
         try:
