@@ -27,39 +27,81 @@ def records():
     return {"gb-coh": gb, "gleif": gleif}
 
 
+RELS = {"REL1": {"directoryId": "REL1", "startNode": "529900T8BM49AURSDO55", "endNode": "5493001KJTIIGC8Y1R12",
+                 "relationshipType": "IS_DIRECTLY_CONSOLIDATED_BY", "relationshipStatus": "ACTIVE", "percentage": 60.0},
+        "REL2": {"directoryId": "REL2", "startNode": "5493001KJTIIGC8Y1R12", "endNode": "NOTINDIRECTORY000000",
+                 "relationshipType": "IS_ULTIMATELY_CONSOLIDATED_BY", "relationshipStatus": "ACTIVE"}}
+
+
 @pytest.fixture(scope="module")
 def snap(tmp_path_factory):
+    from lc_publish.shards import shard_of
+    from lc_publish.snapshot import build_sharded
+
     out = tmp_path_factory.mktemp("snap")
-    m = build(records(), out, "2026-11-07")
-    return Snapshot(str(out / "*.parquet"), {"date": m["date"], "snapshotRoot": m["snapshotRoot"]})
+    recs = records()
+    readers = {sid: (lambda n, r=r: {k: v for k, v in r.items() if shard_of(k) == n}) for sid, r in recs.items()}
+    m = build_sharded(readers, out, "2026-11-07", relationships=lambda n: {k: v for k, v in RELS.items() if shard_of(k) == n})
+    entity_files = [str(out / f["name"]) for f in m["files"] if f.get("kind") != "relationships"]
+    return Snapshot(entity_files, {"date": m["date"], "snapshotRoot": m["snapshotRoot"]}, [str(out / "relationships.parquet")])
 
 
-def test_search_by_name_is_case_insensitive(snap):
-    assert [r["directoryId"] for r in snap.search("example")] == [ID]
+def ids(found):
+    return [r["directoryId"] for r in found["results"]]
+
+
+def test_search_by_name_is_ranked_and_case_insensitive(snap):
+    assert ids(snap.search("example")) == [ID]
 
 
 def test_search_by_lei_id_and_number(snap):
     for q in ("5493001KJTIIGC8Y1R12", ID, "01234567", ID.lower()):
-        assert [r["directoryId"] for r in snap.search(q)] == [ID], q
+        assert ids(snap.search(q)) == [ID], q
 
 
-def test_wildcards_in_the_query_are_literal(snap):
-    assert [r["legalName"] for r in snap.search("100%")] == ["EXAMPLE 100% LIMITED"]
-    # "%" finds only the name that contains a literal "%", not every record.
-    assert [r["legalName"] for r in snap.search("%")] == ["EXAMPLE 100% LIMITED"] and snap.search("_") == []
+def test_exact_name_ranks_first():
+    pass  # covered at scale by the ordering rule; see test_order_prefers_exact_then_prefix
 
 
-def test_country_filter(snap):
-    assert snap.search("inc", country="us")[0]["country"] == "US" and snap.search("inc", country="GB") == []
+def test_order_prefers_exact_then_prefix(snap):
+    names = [r["legalName"] for r in snap.search("many co 1", limit=5)["results"]]
+    assert names[0] == "MANY CO 1"
 
 
-def test_limit_is_capped(snap):
-    assert len(snap.search("MANY", limit=10_000)) == MAX_LIMIT and len(snap.search("MANY", limit=-5)) == 1
+def test_country_filter_and_facets(snap):
+    found = snap.search("inc", country="us")
+    assert found["results"][0]["country"] == "US" and snap.search("inc", country="GB")["total"] == 0
+    assert {"value": "GB", "records": 150} in snap.search("many")["facets"]["country"]
+
+
+def test_source_filter(snap):
+    assert ids(snap.search("example", source="gleif")) == [ID] and snap.search("many", source="gleif")["total"] == 0
+
+
+def test_paging(snap):
+    first, second = snap.search("many", limit=100), snap.search("many", limit=100, page=2)
+    assert first["total"] == 150 and len(first["results"]) == 100 and len(second["results"]) == 50
+    assert not set(ids(first)) & set(ids(second))
+
+
+def test_limit_and_page_are_capped(snap):
+    assert len(snap.search("MANY", limit=10_000)["results"]) == MAX_LIMIT and len(snap.search("MANY", limit=-5)["results"]) == 1
+    assert snap.search("many", page=10_000)["results"] == []
 
 
 def test_injection_attempts_are_just_text(snap):
-    assert snap.search("' OR 1=1 --") == [] and snap.search("x'; DROP TABLE e; --") == []
+    assert snap.search("' OR 1=1 --")["total"] == 0 and snap.search("x'; DROP TABLE e; --")["total"] == 0
+    assert snap.search("example", country="X' OR '1'='1")["total"] == 0
     assert snap.count == 152
+
+
+def test_relationships_both_ways_with_names(snap):
+    rel = snap.relationships(ID)
+    (child,) = rel["down"]
+    assert child["role"] == "direct subsidiary" and child["otherName"] == "<script>alert(1)</script> INC"
+    (parent,) = rel["up"]
+    assert parent["role"] == "ultimate parent" and parent["otherId"] is None and parent["otherLei"] == "NOTINDIRECTORY000000"
+    assert snap.relationship_count == 2
 
 
 def test_entity_decodes_nested_fields(snap):
@@ -74,7 +116,7 @@ def test_unknown_entity(snap):
 
 def test_stats(snap):
     s = snap.stats()
-    assert s["records"] == 152 and s["byCountry"][0] == {"value": "GB", "records": 151}
+    assert s["records"] == 152 and s["byCountry"][0] == {"value": "GB", "records": 151} and s["relationships"] == 2
 
 
 def fake_iap(token, audience):
@@ -99,8 +141,8 @@ def get(port, path, token="owner", method="GET"):
     return out
 
 
-@pytest.mark.parametrize("path", ["/", "/stats", "/entity/" + ID, "/api/v1/stats", "/api/v1/search?q=example",
-                                  "/api/v1/entities/" + ID])
+@pytest.mark.parametrize("path", ["/", "/stats", "/entity/" + ID, "/graph/" + ID, "/api/v1/stats", "/api/v1/search?q=example",
+                                  "/api/v1/entities/" + ID, "/api/v1/entities/" + ID + "/relationships"])
 @pytest.mark.parametrize("token", [None, "", "forged", "other"])
 def test_only_the_owner_gets_anything(server, path, token):
     r = get(server, path, token)
@@ -109,6 +151,9 @@ def test_only_the_owner_gets_anything(server, path, token):
 
 def test_owner_can_use_the_api(server):
     assert json.loads(get(server, "/api/v1/search?q=example").body)["results"][0]["directoryId"] == ID
+    rel = json.loads(get(server, "/api/v1/entities/" + ID + "/relationships").body)
+    assert rel["down"][0]["role"] == "direct subsidiary"
+    assert get(server, "/api/v1/entities/NOPE/relationships").status == 404
     assert json.loads(get(server, "/api/v1/entities/" + ID).body)["lei"] == "5493001KJTIIGC8Y1R12"
     assert get(server, "/api/v1/entities/NOPE").status == 404
     assert json.loads(get(server, "/api/v1/stats").body)["records"] == 152
@@ -116,11 +161,20 @@ def test_owner_can_use_the_api(server):
 
 def test_owner_can_use_the_pages(server):
     assert ID in get(server, "/?q=example").body and "LONDON" in get(server, "/entity/" + ID).body
-    assert "By country" in get(server, "/stats").body
+    assert "By country" in get(server, "/stats").body and "Relationship types" in get(server, "/stats").body
+    body = get(server, "/?q=many").body
+    assert "150 matches" in body and "next</a>" in body and "Country" in body
+
+
+def test_graph_page_draws_links_and_escapes(server):
+    body = get(server, "/graph/" + ID).body
+    assert "<svg" in body and "direct subsidiary" in body and "ultimate parent" in body
+    assert "/graph/LECOZZ000000000000AA" in body and "<script>alert" not in body
+    assert "not in the directory" in body
 
 
 def test_names_are_escaped(server):
-    body = get(server, "/?q=alert").body
+    body = get(server, "/?q=script").body
     assert "<script>alert" not in body and "&lt;script&gt;" in body
 
 

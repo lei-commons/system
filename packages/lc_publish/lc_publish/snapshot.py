@@ -28,6 +28,9 @@ SCALARS = ["directoryId", "lei", "legalName", "legalForm", "legalJurisdiction", 
            "registrationNumber", "legalStatus", "incorporationDate", "dissolutionDate", "recordMode", "registryUrl"]
 NESTED = ["otherNames", "legalAddress", "headquartersAddress", "industryCodes", "labels"]
 COLUMNS = SCALARS + NESTED + ["sources"]
+RELATIONSHIP_FILE = "relationships.parquet"
+RELATIONSHIP_COLUMNS = ["relationshipId", "startNode", "endNode", "startId", "endId", "relationshipType",
+                        "relationshipStatus", "percentage", "periodStart", "periodEnd"]
 
 
 def merge(records_by_source: dict) -> dict:
@@ -67,7 +70,33 @@ def _sha256(path: Path) -> str:
     return "sha256:" + h.hexdigest()
 
 
-def build_sharded(readers: dict, out: Path, date: str, shards: int = 256) -> dict:
+def _write_relationships(read, lei_to_id: dict, out: Path, shards: int) -> dict:
+    """Write relationships.parquet, resolving each LEI to its directory ID where we hold it."""
+    schema = pa.schema([(c, pa.string()) for c in RELATIONSHIP_COLUMNS])
+    path = out / RELATIONSHIP_FILE
+    leaves, count, resolved = [], 0, 0
+    with pq.ParquetWriter(path, schema, compression="zstd") as writer:
+        for n in range(shards):
+            rows = []
+            for key in sorted(shard := read(n)):
+                rel = shard[key]
+                row = {"relationshipId": key, "startId": lei_to_id.get(rel.get("startNode")),
+                       "endId": lei_to_id.get(rel.get("endNode"))}
+                for c in RELATIONSHIP_COLUMNS[1:]:
+                    if c not in row:
+                        value = rel.get(c)
+                        row[c] = None if value is None else str(value)
+                rows.append(row)
+                leaves.append(leaf(row))
+                resolved += bool(row["startId"] and row["endId"])
+            if rows:
+                writer.write_table(pa.table({c: [r[c] for r in rows] for c in RELATIONSHIP_COLUMNS}, schema=schema))
+            count += len(rows)
+    return {"name": RELATIONSHIP_FILE, "kind": "relationships", "records": count, "bothEndsInDirectory": resolved,
+            "root": root(leaves), "sha256": _sha256(path)}
+
+
+def build_sharded(readers: dict, out: Path, date: str, shards: int = 256, relationships=None) -> dict:
     """Write one Parquet file per country and return the manifest, a shard at a time.
 
     ``readers`` maps a source ID to ``read(n)``, which returns that source's
@@ -77,7 +106,7 @@ def build_sharded(readers: dict, out: Path, date: str, shards: int = 256) -> dic
     """
     out.mkdir(parents=True, exist_ok=True)
     schema = pa.schema([(c, pa.string()) for c in COLUMNS])
-    writers, leaves, per_country = {}, defaultdict(list), defaultdict(int)
+    writers, leaves, per_country, lei_to_id = {}, defaultdict(list), defaultdict(int), {}
     counts = {s["id"]: 0 for s in SOURCES}
     total = shared = 0
     try:
@@ -90,6 +119,8 @@ def build_sharded(readers: dict, out: Path, date: str, shards: int = 256) -> dic
             for directory_id in sorted(merged):
                 record = merged[directory_id]
                 by_country[country_of(record)].append(record)
+                if record.get("lei"):
+                    lei_to_id[record["lei"]] = directory_id
                 shared += len(record["sources"]) > 1
             total += len(merged)
             for country, records in by_country.items():
@@ -108,12 +139,15 @@ def build_sharded(readers: dict, out: Path, date: str, shards: int = 256) -> dic
         path = out / f"{country}.parquet"
         files.append({"name": path.name, "country": country, "records": per_country[country],
                       "root": root(leaves[country]), "sha256": _sha256(path)})
+    if relationships is not None:
+        files.append(_write_relationships(relationships, lei_to_id, out, shards))
     manifest = {
         "date": date,
         "schemaVersion": SCHEMA_VERSION,
         "records": total,
         "recordsPerSource": counts,
         "inMoreThanOneSource": shared,
+        "relationships": next((f["records"] for f in files if f.get("kind") == "relationships"), 0),
         "files": files,
         "snapshotRoot": root([bytes.fromhex(f["root"].split(":", 1)[1]) for f in files]),
         "sources": [{k: s[k] for k in ("id", "name", "licence", "attribution")} for s in SOURCES],

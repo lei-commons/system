@@ -107,3 +107,33 @@ def test_many_records_split_across_shards_and_countries(tmp_path):
     m = build({"gb-coh": many}, tmp_path, "2026-11-07")
     assert m["records"] == 3000 and {f["country"]: f["records"] for f in m["files"]} == {"GB": 2000, "US": 1000}
     assert pq.read_table(tmp_path / "GB.parquet").num_rows == 2000
+
+
+def test_relationships_are_published_with_resolved_ends(tmp_path):
+    from lc_publish.shards import shard_of
+    from lc_publish.snapshot import build_sharded
+
+    rels = {"REL1": {"directoryId": "REL1", "startNode": "529900T8BM49AURSDO55", "endNode": "5493001KJTIIGC8Y1R12",
+                     "relationshipType": "IS_DIRECTLY_CONSOLIDATED_BY", "relationshipStatus": "ACTIVE", "percentage": 75.5},
+            "REL2": {"directoryId": "REL2", "startNode": "529900T8BM49AURSDO55", "endNode": "UNKNOWNLEI0000000000",
+                     "relationshipType": "IS_ULTIMATELY_CONSOLIDATED_BY"}}
+    s = sources()
+    readers = {sid: (lambda n, recs=recs: {k: v for k, v in recs.items() if shard_of(k) == n}) for sid, recs in s.items()}
+    m = build_sharded(readers, tmp_path, "2026-11-07",
+                      relationships=lambda n: {k: v for k, v in rels.items() if shard_of(k) == n})
+    rel_file = [f for f in m["files"] if f.get("kind") == "relationships"][0]
+    assert m["relationships"] == 2 and rel_file["bothEndsInDirectory"] == 1
+    rows = {r["relationshipId"]: r for r in pq.read_table(tmp_path / "relationships.parquet").to_pylist()}
+    assert rows["REL1"]["startId"] == "LECOZZ000000000000XX" and rows["REL1"]["endId"] == GB_ID
+    assert rows["REL1"]["percentage"] == "75.5" and rows["REL2"]["endId"] is None
+
+
+def test_relationships_change_the_snapshot_root(tmp_path):
+    from lc_publish.snapshot import build_sharded
+
+    s = sources()
+    readers = {sid: (lambda n, recs=recs: dict(recs) if n == 0 else {}) for sid, recs in s.items()}
+    without = build_sharded(readers, tmp_path / "a", "2026-11-07", shards=1)
+    rel = {"REL1": {"directoryId": "REL1", "startNode": "A" * 20, "endNode": "B" * 20, "relationshipType": "X"}}
+    withrel = build_sharded(readers, tmp_path / "b", "2026-11-07", shards=1, relationships=lambda n: dict(rel))
+    assert without["snapshotRoot"] != withrel["snapshotRoot"]

@@ -17,11 +17,12 @@ from pathlib import Path
 def upload(bucket, directory: Path) -> dict:
     manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
     prefix = manifest["date"]
-    for path in sorted(directory.iterdir()):
+    for path in sorted(directory.iterdir()):  # every file, relationships included
         if path.is_file():
             bucket.blob(f"{prefix}/{path.name}").upload_from_filename(str(path))
     latest = {"date": manifest["date"], "prefix": prefix, "snapshotRoot": manifest["snapshotRoot"],
-              "files": [f["name"] for f in manifest["files"]]}
+              "files": [f["name"] for f in manifest["files"] if f.get("kind") != "relationships"],
+              "relationships": [f["name"] for f in manifest["files"] if f.get("kind") == "relationships"]}
     # Written last, so readers never see a pointer to a half-copied snapshot.
     bucket.blob("latest.json").upload_from_string(json.dumps(latest, indent=2), content_type="application/json")
     return latest

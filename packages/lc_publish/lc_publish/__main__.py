@@ -46,8 +46,10 @@ def main(argv=None) -> int:
     from google.cloud import storage
 
     bucket = storage.Client().bucket(a.bucket)
-    manifest = build_sharded({s["id"]: shard_reader(bucket, s["prefix"]) for s in SOURCES}, Path(a.out), a.date)
-    print(json.dumps({k: manifest[k] for k in ("date", "records", "recordsPerSource", "inMoreThanOneSource", "snapshotRoot")}))
+    manifest = build_sharded({s["id"]: shard_reader(bucket, s["prefix"]) for s in SOURCES}, Path(a.out), a.date,
+                             relationships=shard_reader(bucket, "gleif-rr"))
+    print(json.dumps({k: manifest[k] for k in ("date", "records", "recordsPerSource", "inMoreThanOneSource", "relationships",
+                                               "snapshotRoot")}))
     return 0
 
 
