@@ -249,3 +249,24 @@ def test_no_snapshot_yet():
 def test_health_reveals_nothing(server):
     r = get(server, "/health", token=None)
     assert r.status == 200 and r.body == "ok\n"
+
+
+class FakeDirectory:
+    def __init__(self, count):
+        self.count = count
+
+
+@pytest.mark.parametrize("env,database,expected", [
+    ({}, None, "snapshot"),
+    ({"LC_DB_HOST": "10.0.0.1"}, lambda: FakeDirectory(4_189_860), "database"),
+    ({"LC_DB_HOST": "10.0.0.1"}, lambda: FakeDirectory(0), "snapshot"),
+    ({"LC_DB_HOST": "10.0.0.1"}, lambda: (_ for _ in ()).throw(TimeoutError("no route")), "snapshot"),
+])
+def test_site_uses_the_database_only_when_it_is_loaded_and_reachable(monkeypatch, env, database, expected):
+    from lc_site.server import choose_directory
+
+    monkeypatch.delenv("LC_DB_HOST", raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    chosen = choose_directory("bucket", open_database=database, load_snapshot=lambda: "snapshot")
+    assert ("database" if isinstance(chosen, FakeDirectory) else chosen) == expected

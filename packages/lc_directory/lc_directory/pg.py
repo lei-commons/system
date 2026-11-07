@@ -46,7 +46,9 @@ class Directory:
 
     def __init__(self, pool):
         self._pool = pool
-        meta = self._one("SELECT date, snapshot_root, records, relationships FROM live.meta", [])
+        meta = None
+        if self._one("SELECT 1 AS ok FROM information_schema.tables WHERE table_schema = 'live' AND table_name = 'meta'", []):
+            meta = self._one("SELECT date, snapshot_root, records, relationships FROM live.meta", [])
         self.meta = {"date": meta["date"], "snapshotRoot": meta["snapshot_root"]} if meta else {}
         self.count = meta["records"] if meta else 0
         self.relationship_count = meta["relationships"] if meta else 0

@@ -184,17 +184,37 @@ def main() -> int:
         system = SystemView(GoogleReader(project, os.environ.get("GCP_REGION", "us-central1"), buckets))
     except Exception as exc:  # the rest of the site works without it
         print(json.dumps({"event": "system-view-unavailable", "error": type(exc).__name__}), flush=True)
-    if os.environ.get("LC_DB_HOST"):
-        # The serving database: starts at once and holds any size of directory.
-        from lc_directory.pg import Directory, token_pool
-
-        directory = Directory(token_pool(os.environ["LC_DB_HOST"], os.environ.get("LC_DB_NAME", "lei_commons"),
-                                         os.environ["LC_DB_USER"]))
-    else:
-        directory = load_latest(bucket)  # in memory, for small directories and local previews
-    make_server(directory, owners, audience, ("0.0.0.0", int(os.environ.get("PORT", "8080"))),
+    make_server(choose_directory(bucket), owners, audience, ("0.0.0.0", int(os.environ.get("PORT", "8080"))),
                 system=system).serve_forever()
     return 0
+
+
+def choose_directory(bucket, open_database=None, load_snapshot=None):
+    """The serving database if it is configured and loaded; otherwise the snapshot in memory.
+
+    The database can be empty, before its first load, or unreachable. Either
+    way the site keeps working from the snapshot instead of failing to start.
+    """
+    load_snapshot = load_snapshot or (lambda: load_latest(bucket))
+    if not os.environ.get("LC_DB_HOST"):
+        return load_snapshot()
+    try:
+        directory = (open_database or _open_database)()
+        if directory.count > 0:
+            print(json.dumps({"event": "serving-from-database", "records": directory.count}), flush=True)
+            return directory
+        print(json.dumps({"event": "database-empty", "fallback": "snapshot in memory"}), flush=True)
+    except Exception as exc:
+        print(json.dumps({"event": "database-unavailable", "error": type(exc).__name__, "fallback": "snapshot in memory"}),
+              flush=True)
+    return load_snapshot()
+
+
+def _open_database():
+    from lc_directory.pg import Directory, token_pool
+
+    return Directory(token_pool(os.environ["LC_DB_HOST"], os.environ.get("LC_DB_NAME", "lei_commons"), os.environ["LC_DB_USER"]))
+
 
 
 if __name__ == "__main__":
