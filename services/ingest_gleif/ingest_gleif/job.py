@@ -38,7 +38,9 @@ def choose(manifest: dict, publish: str) -> str:
     last = manifest.get("lastKey")
     if not manifest.get("records") or not last:
         return "full"
-    gap = _when(publish) - _when(last)
+    if last[:19] == publish:
+        return None  # this publication is already loaded
+    gap = _when(publish) - _when(last[:19])  # keys are "<publish> <kind>"
     for limit, name in DELTAS:
         if gap <= limit:
             return name
@@ -49,10 +51,14 @@ def find(gateway, manifest):
     listing = gateway.get_json(LISTING)["data"]
     publish = listing["publish_date"]
     kind = choose(manifest, publish)
+    if kind is None:
+        return manifest["lastKey"], "", ""  # already processed, so the runner stops here
     files = listing["lei2"]
     url = files["full_file"]["csv"]["url"] if kind == "full" else files["delta_files"][kind]["csv"]["url"]
     name = publish.replace(" ", "T").replace(":", "")
-    return publish, url, f"{name}-{kind}.zip"
+    # The key names the file type as well as the publish time: a full load and
+    # a delta from the same publication are different work.
+    return f"{publish} {kind}", url, f"{name}-{kind}.zip"
 
 
 def run(gateway, store, gate=lambda: require_running(COMPONENT), allowlist=None, log=log) -> str:
