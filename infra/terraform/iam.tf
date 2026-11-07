@@ -38,7 +38,8 @@ locals {
     # budget-guard has no project roles beyond logging; it writes only the control bucket.
     budget-guard = []
     gateway      = []
-    site         = []
+    # Read-only, for the system view: job runs, services and schedules.
+    site = ["roles/run.viewer", "roles/cloudscheduler.viewer"]
     # No project roles: it only touches the two buckets below.
     control-operator = []
   }
@@ -48,7 +49,7 @@ locals {
     data = {
       "roles/storage.objectUser"    = ["ingest", "crawler", "resolver", "publisher"]
       "roles/storage.objectCreator" = ["maker", "checker"]
-      "roles/storage.objectViewer"  = ["maker", "checker", "console"]
+      "roles/storage.objectViewer"  = ["maker", "checker", "console", "site"]
     }
     snapshots = {
       "roles/storage.objectUser"   = ["publisher"]
@@ -56,7 +57,7 @@ locals {
     }
     decision_log = {
       "roles/storage.objectCreator" = ["ingest", "crawler", "resolver", "maker", "checker", "publisher", "workflow", "console", "budget-guard", "control-operator"]
-      "roles/storage.objectViewer"  = ["publisher", "console"]
+      "roles/storage.objectViewer"  = ["publisher", "console", "site"]
     }
     frames = {
       "roles/storage.objectCreator" = ["publisher", "workflow"]

@@ -37,10 +37,36 @@ def esc(value) -> str:
     return html.escape("" if value is None else str(value))
 
 
-def page(title, body):
-    nav = ("<p><a href=/>Search</a> · <a href=/stats>Statistics</a> · <a href=/api/v1/stats>API</a></p>")
-    return (f"<!DOCTYPE html><html lang=en><meta charset=utf-8><title>{esc(title)} · lei-commons</title>"
+def page(title, body, refresh: int = 0):
+    nav = ("<p><a href=/>Search</a> · <a href=/system>System</a> · <a href=/stats>Statistics</a> · "
+           "<a href=/api/v1/stats>API</a></p>")
+    meta = f"<meta http-equiv=refresh content={int(refresh)}>" if refresh else ""
+    return (f"<!DOCTYPE html><html lang=en><meta charset=utf-8>{meta}<title>{esc(title)} · lei-commons</title>"
             f"<style>{STYLE}</style>{nav}<h1>{esc(title)}</h1>{body}{FOOTER}</html>").encode()
+
+
+def system_page(data: dict) -> str:
+    from .system import diagram
+
+    def unavailable(error):
+        return f"<p class=note>Unavailable ({esc(error)}).</p>" if error else ""
+
+    c = data["control"]
+    control = (f"<p>Control state: <b>{esc(c['state'] or 'unknown')}</b>"
+               f"{' · paused: ' + esc(', '.join(c['pausedComponents'])) if c['pausedComponents'] else ''}"
+               f" · last set by {esc(c['updatedBy'])} at {esc(c['updatedAt'])}</p>{unavailable(c['error'])}")
+    snap = data["snapshot"]
+    stores = [{"source": s["label"], "records": f"{s['records']:,}" if s["records"] else s["error"] or "none",
+               "last processed": s["last"]} for s in data["stores"].values()]
+    return (control + diagram(data, esc)
+            + f"<p class=note>Latest snapshot {esc(snap.get('date'))}. Refreshes every minute.</p>"
+            + "<h2>Jobs</h2>" + table(data["jobs"]) + unavailable(data["jobsError"])
+            + "<h2>Schedules</h2>" + table(data["schedules"]) + unavailable(data["schedulesError"])
+            + "<h2>Services</h2>" + table(data["services"]) + unavailable(data["servicesError"])
+            + "<h2>Data</h2>" + table(stores)
+            + "<h2>Decisions</h2>" + (table(data["decisions"]) if data["decisions"] else "<p>None recorded yet.</p>")
+            + unavailable(data["decisionsError"])
+            + "<h2>Agents</h2>" + table(data["agents"]))
 
 
 def table(rows, link=False):
@@ -167,6 +193,7 @@ class Handler(BaseHTTPRequestHandler):
     owners: set = set()
     audience: str = ""
     snapshot = None
+    system = None
     iap = staticmethod(verify_iap)
 
     def log_message(self, *args):
@@ -218,6 +245,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, record) if record else self._json(404, {"error": "not found"})
         if path == "/api/v1/stats":
             return self._json(200, snap.stats())
+        if path in ("/system", "/api/v1/system"):
+            if self.system is None:
+                return self._send(503, page("System", "<p>The system view isn't configured.</p>"))
+            data = self.system.collect({k: snap.meta.get(k) for k in ("date", "snapshotRoot")})
+            if path == "/api/v1/system":
+                return self._json(200, data)
+            return self._send(200, page("System", system_page(data), refresh=60))
         if path == "/":
             return self._send(200, page("lei-commons", search_page(snap, q)))
         if path.startswith("/entity/") or path.startswith("/graph/"):
@@ -272,9 +306,9 @@ def load_latest(bucket_name: str):
     return snap
 
 
-def make_server(snapshot, owners, audience, address, iap=verify_iap):
+def make_server(snapshot, owners, audience, address, iap=verify_iap, system=None):
     attrs = {"snapshot": snapshot, "owners": {o.strip().lower() for o in owners if o.strip()}, "audience": audience,
-             "iap": staticmethod(iap)}
+             "iap": staticmethod(iap), "system": system}
     return ThreadingHTTPServer(address, type("Bound", (Handler,), attrs))
 
 
@@ -284,7 +318,17 @@ def main() -> int:
     except KeyError as exc:
         print(f"refusing to start: {exc} is not set", file=sys.stderr)
         return 1
-    make_server(load_latest(bucket), owners, audience, ("0.0.0.0", int(os.environ.get("PORT", "8080")))).serve_forever()
+    system = None
+    try:
+        from .system import GoogleReader, SystemView
+
+        project = os.environ["GCP_PROJECT_ID"]
+        buckets = {"data": f"{project}-data", "control": f"{project}-control", "decision_log": f"{project}-decision-log"}
+        system = SystemView(GoogleReader(project, os.environ.get("GCP_REGION", "us-central1"), buckets))
+    except Exception as exc:  # the rest of the site works without it
+        print(json.dumps({"event": "system-view-unavailable", "error": type(exc).__name__}), flush=True)
+    make_server(load_latest(bucket), owners, audience, ("0.0.0.0", int(os.environ.get("PORT", "8080"))),
+                system=system).serve_forever()
     return 0
 
 
