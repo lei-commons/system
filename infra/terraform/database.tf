@@ -11,12 +11,21 @@
 # address inside the jobs network. No network peering, which nfh.global's
 # compute.restrictVpcPeering policy forbids (and which would link our network
 # to another). Cloud SQL only offers this when an instance is created.
+# Its own small subnet: Cloud Run's direct network access takes addresses from
+# the jobs subnet for its instances, so a fixed address there can collide.
+resource "google_compute_subnetwork" "endpoints" {
+  name                     = "lc-endpoints-${var.region}"
+  region                   = var.region
+  network                  = google_compute_network.jobs.id
+  ip_cidr_range            = "10.20.3.0/28"
+  private_ip_google_access = true
+}
+
 resource "google_compute_address" "database" {
   name         = "lc-database"
   region       = var.region
   address_type = "INTERNAL"
-  subnetwork   = google_compute_subnetwork.jobs.id
-  address      = "10.20.0.20"
+  subnetwork   = google_compute_subnetwork.endpoints.id
 }
 
 resource "google_compute_forwarding_rule" "database" {
