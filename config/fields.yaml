@@ -57,6 +57,7 @@ relationship:
   - {name: startNode,          personal: false}
   - {name: endNode,            personal: false}
   - {name: relationshipType,   personal: false}
+  - {name: relationshipStatus, personal: false}   # ACTIVE or INACTIVE, as GLEIF reports it
   - {name: percentage,         personal: false}
   - {name: periodStart,        personal: false}
   - {name: periodEnd,          personal: false}
