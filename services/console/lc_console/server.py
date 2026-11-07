@@ -20,7 +20,7 @@ from lc_core.control import load_state
 
 from .auth import SESSION_SECONDS, Sessions, verify_iap
 from .store import SecretManagerStore
-from .totp import ENROL_WINDOW, Verifier, new_secret, otpauth_uri
+from .totp import Verifier, new_secret, otpauth_uri
 
 COOKIE = "__Host-lc-console"
 # A key waiting for its first good code. It is stored, not held in memory, so a
@@ -156,7 +156,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(303, b"", cookie=self.app.sessions.issue(email), location="/")
             return self._send(403, page("Second factor", f"<p>{self._failure()}</p>" + CODE_FORM.format(action="/verify")))
         if self.path == "/enrol" and secret is None:
-            ok = bool(pending) and self.app.verifier.verify(pending, code, window=ENROL_WINDOW)
+            ok = bool(pending) and self.app.verifier.verify(pending, code)
             self._audit(email, "enrolled", ok)
             if ok:
                 try:

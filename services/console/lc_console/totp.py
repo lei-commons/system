@@ -17,8 +17,9 @@ import time
 
 STEP = 30
 DIGITS = 6
-WINDOW = 1            # one step either side, for clock drift
-ENROL_WINDOW = 4      # two minutes either way, so a slow phone clock can't block setup
+# Two minutes either way. Phones without automatic time drift, and login must accept
+# whatever setup accepted. With the lockout, guessing stays out of reach, and IAP comes first.
+WINDOW = 4
 MAX_FAILURES = 5
 LOCKOUT_SECONDS = 300
 
