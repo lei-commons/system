@@ -194,7 +194,7 @@ def test_wrong_code_keeps_the_same_key_on_screen(env):
     call(env)
     first = pending_key(env)
     r = call(env, "/enrol", "POST", body="code=abc")
-    assert first in r.body and "didn't work" in r.body
+    assert first in r.body and "Enter the code your app shows now" in r.body
 
 
 def test_enrolment_tolerates_a_slow_phone_clock(env):
