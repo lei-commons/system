@@ -23,9 +23,11 @@ def shard_of(directory_id: str) -> int:
 
 class GcsStore:
     def __init__(self, bucket: str, prefix: str):
-        from google.cloud import storage
+        if isinstance(bucket, str):
+            from google.cloud import storage
 
-        self._bucket = storage.Client().bucket(bucket) if isinstance(bucket, str) else bucket
+            bucket = storage.Client().bucket(bucket)
+        self._bucket = bucket
         self._prefix = prefix
         self._stale = True  # until a current-format manifest has been read
 
