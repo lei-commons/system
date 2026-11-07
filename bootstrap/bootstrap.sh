@@ -28,6 +28,7 @@ AUTO_APPROVE=0
 BUDGET_PUBSUB=true
 GATEWAY_IMAGE=""
 CONSOLE=false
+BUDGET_GUARD=false
 
 usage() {
   sed -n '2,20p' "$0"
@@ -45,6 +46,7 @@ while [[ $# -gt 0 ]]; do
     --no-budget-pubsub) BUDGET_PUBSUB=false; shift ;;
     --gateway-image) GATEWAY_IMAGE="$2"; shift 2 ;;
     --console) CONSOLE=true; shift ;;
+    --budget-guard) BUDGET_GUARD=true; shift ;;
     --yes) AUTO_APPROVE=1; shift ;;
     -h|--help) usage 0 ;;
     *) echo "unknown option: $1" >&2; usage 1 ;;
@@ -117,6 +119,9 @@ fi
 if [[ "$CONSOLE" == false ]] && gcloud run services describe owner-console --project "$PROJECT" --region "$REGION" >/dev/null 2>&1; then
   CONSOLE=true
 fi
+if [[ "$BUDGET_GUARD" == false ]] && gcloud run services describe budget-guard --project "$PROJECT" --region "$REGION" >/dev/null 2>&1; then
+  BUDGET_GUARD=true
+fi
 
 cd infra/terraform
 terraform init -input=false -backend-config="bucket=${STATE_BUCKET}"
@@ -133,6 +138,7 @@ TF_VARS=(
   -var "budget_pubsub_enabled=${BUDGET_PUBSUB}"
   -var "gateway_image=${GATEWAY_IMAGE}"
   -var "console_enabled=${CONSOLE}"
+  -var "budget_guard_enabled=${BUDGET_GUARD}"
 )
 
 terraform plan -input=false -out=day0.plan "${TF_VARS[@]}"
