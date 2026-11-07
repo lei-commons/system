@@ -40,13 +40,13 @@ def test_current_code_passes(v):
     assert v.verify(s, now_code(v, s))
 
 
-@pytest.mark.parametrize("offset", [-1, 1])
-def test_one_step_of_drift_passes(v, offset):
+@pytest.mark.parametrize("offset", [-4, -1, 1, 4])
+def test_two_minutes_of_drift_passes(v, offset):
     s = new_secret()
     assert v.verify(s, now_code(v, s, offset))
 
 
-@pytest.mark.parametrize("offset", [-2, 2, 100])
+@pytest.mark.parametrize("offset", [-5, 5, 100])
 def test_old_and_future_codes_fail(v, offset):
     s = new_secret()
     assert not v.verify(s, now_code(v, s, offset))

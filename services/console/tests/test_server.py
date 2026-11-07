@@ -312,3 +312,8 @@ def test_iap_verifier_crash_refuses():
 @pytest.mark.parametrize("token,aud", [(None, AUD), ("", AUD), ("t", ""), ("t", None)])
 def test_missing_token_or_audience_refuses(token, aud):
     assert verify_iap(token, aud, verify=lambda t, a: pytest.fail("verified")) is None
+
+
+def test_login_accepts_the_same_clock_drift_as_setup(env):
+    """The second enrolment bug: setup tolerated a slow phone, and login then refused it."""
+    assert call(env, "/verify", "POST", body=f"code={code(env, -3)}").status == 303
