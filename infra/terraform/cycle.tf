@@ -171,7 +171,7 @@ resource "google_cloud_run_v2_job" "load_db" {
         }
         env {
           name  = "LC_DB_HOST"
-          value = google_sql_database_instance.directory.private_ip_address
+          value = google_compute_address.database.address
         }
         env {
           name  = "LC_SITE_DB_USER"

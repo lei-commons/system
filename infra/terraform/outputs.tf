@@ -42,7 +42,7 @@ output "database_connection" {
 }
 
 output "database_private_ip" {
-  value = google_sql_database_instance.directory.private_ip_address
+  value = google_compute_address.database.address
 }
 
 output "artifact_registry" {

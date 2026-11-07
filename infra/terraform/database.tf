@@ -1,35 +1,40 @@
 # The serving database for the private site and API (owner decision 2026-11-07:
 # Cloud SQL Postgres, so search and the graph hold at 30 million records and beyond).
 #
-# Private IP only, on the jobs network: nothing on the internet can reach it.
+# Private only, on the jobs network: nothing on the internet can reach it.
 # Connections must be encrypted. The site signs in with its own Google identity
 # (IAM database authentication), so it holds no password. The one admin password,
 # used by the loader to rebuild tables, lives in Secret Manager and only the
 # loader identity can read it.
 
-resource "google_compute_global_address" "services" {
-  name          = "lc-private-services"
-  purpose       = "VPC_PEERING"
-  address_type  = "INTERNAL"
-  prefix_length = 20
-  network       = google_compute_network.jobs.id
+# Reached through Private Service Connect: the database gets one private
+# address inside the jobs network. No network peering, which nfh.global's
+# compute.restrictVpcPeering policy forbids (and which would link our network
+# to another). Cloud SQL only offers this when an instance is created.
+resource "google_compute_address" "database" {
+  name         = "lc-database"
+  region       = var.region
+  address_type = "INTERNAL"
+  subnetwork   = google_compute_subnetwork.jobs.id
+  address      = "10.20.0.20"
 }
 
-resource "google_service_networking_connection" "services" {
-  network                 = google_compute_network.jobs.id
-  service                 = "servicenetworking.googleapis.com"
-  reserved_peering_ranges = [google_compute_global_address.services.name]
-
-  depends_on = [google_project_service.apis]
+resource "google_compute_forwarding_rule" "database" {
+  name                  = "lc-database"
+  region                = var.region
+  network               = google_compute_network.jobs.id
+  ip_address            = google_compute_address.database.id
+  load_balancing_scheme = ""
+  target                = google_sql_database_instance.directory.psc_service_attachment_link
 }
 
-# The jobs network denies all egress by default; this opens Postgres only.
+# The jobs network denies all egress by default; this opens Postgres on that one address.
 resource "google_compute_firewall" "allow_database" {
   name               = "lc-allow-database"
   network            = google_compute_network.jobs.id
   direction          = "EGRESS"
   priority           = 1000
-  destination_ranges = ["${google_compute_global_address.services.address}/${google_compute_global_address.services.prefix_length}"]
+  destination_ranges = ["${google_compute_address.database.address}/32"]
 
   allow {
     protocol = "tcp"
@@ -53,10 +58,13 @@ resource "google_sql_database_instance" "directory" {
     deletion_protection_enabled = true
 
     ip_configuration {
-      ipv4_enabled                                  = false
-      private_network                               = google_compute_network.jobs.id
-      enable_private_path_for_google_cloud_services = true
-      ssl_mode                                      = "ENCRYPTED_ONLY"
+      ipv4_enabled = false
+      ssl_mode     = "ENCRYPTED_ONLY"
+
+      psc_config {
+        psc_enabled               = true
+        allowed_consumer_projects = [var.project_id]
+      }
     }
 
     backup_configuration {
@@ -85,7 +93,7 @@ resource "google_sql_database_instance" "directory" {
     }
   }
 
-  depends_on = [google_service_networking_connection.services]
+  depends_on = [google_project_service.apis]
 }
 
 resource "google_sql_database" "directory" {
