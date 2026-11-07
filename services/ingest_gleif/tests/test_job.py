@@ -98,7 +98,7 @@ def test_first_run_loads_the_full_file():
     out, _ = go(gw, store)
     assert out == "done" and gw.fetched == ["https://goldencopy.gleif.org/full.zip"]
     assert store.manifest["records"] == 2 and len(all_records(store)) == 2
-    assert store.sources == ["2026-11-07T080000-full.zip"] and store.manifest["lastKey"] == "2026-11-07 08:00:00"
+    assert store.sources == ["2026-11-07T080000-full.zip"] and store.manifest["lastKey"] == "2026-11-07 08:00:00 full"
     assert all(shard_of(k) == n for n, s in store.shards.items() for k in s)
 
 
@@ -186,7 +186,7 @@ def test_mass_change_to_existing_records_is_held_and_nothing_written():
     before = list(store.writes)
     rows = [row(lei(i), f"{i:08d}", status="INACTIVE") for i in range(200)]
     out, _ = go(FakeGateway([zipped(rows)]), store)
-    assert out == "held" and store.writes == before and "2026-11-07 08:00:00" not in store.manifest["processed"]
+    assert out == "held" and store.writes == before and not any(k.startswith("2026-11-07") for k in store.manifest["processed"])
 
 
 def test_many_new_records_are_not_a_mass_change():
@@ -204,3 +204,18 @@ def test_every_record_lands_in_its_own_shard_at_scale():
     records = all_records(store)
     assert len(records) == 3000 and len(store.shards) > 200
     assert all(shard_of(k) == n for n, s in store.shards.items() for k in s)
+
+
+def test_a_delta_already_processed_does_not_block_the_full_load():
+    """The bug behind the first full load being skipped: keys were the publish time alone."""
+    store = MemStore()
+    store.manifest = {"format": 2, "records": 16717, "processed": ["2026-11-07 08:00:00"]}
+    gw = FakeGateway([zipped([row(lei(1), "01234567")])])
+    out, _ = go(gw, store)
+    assert out == "done" and gw.fetched == ["https://goldencopy.gleif.org/full.zip"]
+
+
+@pytest.mark.parametrize("last,kind", [("2026-11-06 08:00:00 full", "LastDay"), ("2026-11-06 08:00:00 LastDay", "LastDay"),
+                                       ("2026-11-06 08:00:00", "LastDay")])
+def test_choose_reads_keys_with_or_without_a_kind(last, kind):
+    assert choose({"records": 5, "lastKey": last}, "2026-11-07 08:00:00") == kind
