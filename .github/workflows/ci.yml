@@ -51,6 +51,8 @@ jobs:
       - run: pytest -q scripts/tests
       - run: pip install -e packages/lc_ingest
       - run: pytest -q packages/lc_ingest
+      - run: pip install -e services/ingest_gleif
+      - run: pytest -q services/ingest_gleif
       - run: pip install -e services/conduct_proxy
       - run: pytest -q services/conduct_proxy
       - run: pip install -e agents/harness
@@ -63,6 +65,10 @@ jobs:
       - run: pytest -q services/budget_guard
       - name: Budget guard image builds
         run: docker build -f services/budget_guard/Dockerfile -t budget-guard .
+      - name: Ingest job image builds and loads the allow-list
+        run: |
+          docker build -f services/ingest_gleif/Dockerfile -t ingest-gleif .
+          docker run --rm ingest-gleif python -c "import os; from lc_core.allowlist import AllowList; a = AllowList.load(os.environ['LC_FIELDS_CONFIG']); assert 'legalName' in a.allowed['entity']; print('allow-list loads')"
       - name: Console image builds
         run: docker build -f services/console/Dockerfile -t owner-console .
       - name: Gateway image builds and starts

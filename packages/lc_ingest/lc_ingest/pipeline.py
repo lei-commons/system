@@ -28,19 +28,11 @@ def separate_collision(record: dict, owners: dict, counts: Counter) -> dict:
     return record
 
 
-def ingest(raws, current: dict, source_id: str, maker: str, allowlist: AllowList = None):
-    """Return (changes, counts). ``current`` maps directory ID to the record as it stands.
-
-    Raises VolumeGuardTripped, with nothing returned, if the batch looks wrong.
-    """
-    allowlist = allowlist or AllowList.load()
-    counts = Counter()
-    changes = []
-    changed_records = 0
-    owners = {k: v["lei"] for k, v in current.items() if v.get("lei")}
+def map_records(raws, counts: Counter, allowlist: AllowList):
+    """Source records to allow-listed directory records. Skips are counted, never fatal."""
     for raw in raws:
         try:
-            record = separate_collision(to_record(raw), owners, counts)
+            record = to_record(raw)
         except Skip as exc:
             counts[f"skipped: {exc}"] += 1
             continue
@@ -50,11 +42,32 @@ def ingest(raws, current: dict, source_id: str, maker: str, allowlist: AllowList
         kept, dropped = allowlist.filter("entity", record)
         if dropped:
             counts["fields dropped"] += len(dropped)
-        found = diff(current.get(kept["directoryId"], {"directoryId": kept["directoryId"]}), kept, source_id, maker)
+        yield kept
+
+
+def diff_records(records, current: dict, total: int, source_id: str, maker: str, counts: Counter):
+    """Return (changes, new records by ID). ``current`` must hold every record these IDs touch.
+
+    Raises VolumeGuardTripped, with nothing returned, if the batch looks wrong.
+    """
+    owners = {k: v["lei"] for k, v in current.items() if v.get("lei")}
+    changes, updated = [], {}
+    for record in records:
+        record = separate_collision(record, owners, counts)
+        old = updated.get(record["directoryId"]) or current.get(record["directoryId"], {"directoryId": record["directoryId"]})
+        found = diff(old, record, source_id, maker)
         if found:
-            changed_records += 1
             changes.extend(found)
+            updated[record["directoryId"]] = record
         counts["records"] += 1
-    if current:
-        volume_guard(changed_records, len(current))
+    if total:
+        volume_guard(len(updated), total)
+    return changes, updated
+
+
+def ingest(raws, current: dict, source_id: str, maker: str, allowlist: AllowList = None):
+    """Map and diff in one go, with ``current`` as the whole directory. Returns (changes, counts)."""
+    counts = Counter()
+    records = map_records(raws, counts, allowlist or AllowList.load())
+    changes, _ = diff_records(records, current, len(current), source_id, maker, counts)
     return changes, counts
