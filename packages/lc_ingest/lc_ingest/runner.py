@@ -54,7 +54,8 @@ class _Partitions:
                 yield json.loads(line)
 
 
-def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: str, allowlist: AllowList, log) -> str:
+def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: str, allowlist: AllowList, log,
+               kind: str = "entity") -> str:
     """Return the outcome: halted, denied, already-done, held or done.
 
     ``find(gateway, manifest)`` returns (key, url, filename). ``key`` identifies
@@ -63,7 +64,7 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
     try:
         gate()
     except SystemHalted as exc:
-        log({"event": "halted", "reason": str(exc)})
+        log({"event": "halted", "source": source, "reason": str(exc)})
         return "halted"
 
     manifest = store.read_manifest()
@@ -92,7 +93,7 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
 
         partitions = _Partitions(os.path.join(work, "in"))
         with open(download, "rb") as f:
-            for record in map_records(read(f), counts, allowlist, mapper=mapper):
+            for record in map_records(read(f), counts, allowlist, mapper=mapper, kind=kind):
                 partitions.add(record)
         shards = partitions.close()
         os.remove(download)  # the disk is memory on Cloud Run
@@ -160,7 +161,7 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
         manifest["lastKey"] = key
         store.write_manifest(manifest)
 
-    log({"event": "done", "publish": key, "bytes": size, "changes": changes_written,
+    log({"event": "done", "source": source, "publish": key, "bytes": size, "changes": changes_written,
          "records_changed": changed_existing + new_records, "existing_changed": changed_existing,
          "new_records": new_records, "total": manifest["records"], **dict(counts)})
     return "done"

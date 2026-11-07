@@ -98,7 +98,7 @@ def test_first_run_loads_the_full_file():
     out, _ = go(gw, store)
     assert out == "done" and gw.fetched == ["https://goldencopy.gleif.org/full.zip"]
     assert store.manifest["records"] == 2 and len(all_records(store)) == 2
-    assert store.sources == ["2026-11-07T080000-full.zip"] and store.manifest["lastKey"] == "2026-11-07 08:00:00 full"
+    assert store.sources == ["2026-11-07T080000-lei2-full.zip"] and store.manifest["lastKey"] == "2026-11-07 08:00:00 full"
     assert all(shard_of(k) == n for n, s in store.shards.items() for k in s)
 
 
@@ -149,7 +149,7 @@ def test_next_day_takes_the_day_delta_and_records_only_what_changed():
     gw = FakeGateway([zipped([row(lei(1), "01234567", status="INACTIVE")])])
     go(gw, store)
     assert gw.fetched == ["https://goldencopy.gleif.org/LastDay.zip"]
-    (change,) = store.changes["2026-11-07T080000-LastDay"]
+    (change,) = store.changes["2026-11-07T080000-lei2-LastDay"]
     assert change["fieldPath"] == "legalStatus" and change["newValue"] == "INACTIVE" and store.manifest["records"] == 1
 
 
@@ -162,7 +162,7 @@ def test_crash_before_manifest_reruns_without_duplicates():
         go(gw, store)
     del store.write_manifest
     out, _ = go(gw, store)
-    assert out == "done" and store.changes["2026-11-07T080000-full"] == [] and len(all_records(store)) == 1
+    assert out == "done" and store.changes["2026-11-07T080000-lei2-full"] == [] and len(all_records(store)) == 1
 
 
 def test_sole_proprietors_never_stored():
@@ -223,3 +223,36 @@ def test_choose_reads_keys_with_or_without_a_kind(last, kind):
 
 def test_the_publication_already_loaded_means_nothing_new():
     assert choose({"records": 5, "lastKey": "2026-11-07 08:00:00 full"}, "2026-11-07 08:00:00") is None
+
+
+def rr_zipped(pairs):
+    cols = ["Relationship.StartNode.NodeID", "Relationship.StartNode.NodeIDType", "Relationship.EndNode.NodeID",
+            "Relationship.EndNode.NodeIDType", "Relationship.RelationshipType", "Relationship.RelationshipStatus"]
+    text = io.StringIO()
+    w = csv.writer(text)
+    w.writerow(cols)
+    for start, end in pairs:
+        w.writerow([start, "LEI", end, "LEI", "IS_ULTIMATELY_CONSOLIDATED_BY", "ACTIVE"])
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("rr.csv", text.getvalue())
+    return buf.getvalue()
+
+
+class RRGateway(FakeGateway):
+    def get_json(self, target):
+        d = super().get_json(target)
+        d["data"]["rr"] = {"full_file": {"csv": {"url": "https://goldencopy.gleif.org/rr-full.zip"}},
+                           "delta_files": {"LastDay": {"csv": {"url": "https://goldencopy.gleif.org/rr-day.zip"}}}}
+        return d
+
+
+def test_relationships_load_into_their_own_store():
+    from ingest_gleif.job import run_relationships
+
+    store, gw = MemStore(), RRGateway([rr_zipped([(lei(1), lei(2)), (lei(3), lei(2))])])
+    out = run_relationships(gw, store, gate=lambda: None, log=lambda r: None)
+    rels = all_records(store)
+    assert out == "done" and gw.fetched == ["https://goldencopy.gleif.org/rr-full.zip"] and len(rels) == 2
+    assert {r["endNode"] for r in rels.values()} == {lei(2)} and all(k.startswith("REL") for k in rels)
+    assert store.sources == ["2026-11-07T080000-rr-full.zip"]

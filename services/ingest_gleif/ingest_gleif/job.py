@@ -17,6 +17,8 @@ from lc_core.control import require_running
 from lc_core.fetch import Gateway
 from lc_ingest.gleif import to_record
 from lc_ingest.gleif_csv import read_zip
+from lc_ingest.gleif_rr import read_zip as read_rr_zip
+from lc_ingest.gleif_rr import to_relationship
 from lc_ingest.runner import run_ingest
 from lc_ingest.store import GcsStore
 
@@ -47,18 +49,25 @@ def choose(manifest: dict, publish: str) -> str:
     return "full"
 
 
-def find(gateway, manifest):
-    listing = gateway.get_json(LISTING)["data"]
-    publish = listing["publish_date"]
-    kind = choose(manifest, publish)
-    if kind is None:
-        return manifest["lastKey"], "", ""  # already processed, so the runner stops here
-    files = listing["lei2"]
-    url = files["full_file"]["csv"]["url"] if kind == "full" else files["delta_files"][kind]["csv"]["url"]
-    name = publish.replace(" ", "T").replace(":", "")
-    # The key names the file type as well as the publish time: a full load and
-    # a delta from the same publication are different work.
-    return f"{publish} {kind}", url, f"{name}-{kind}.zip"
+def finder(dataset: str):
+    """``dataset`` is "lei2" for entities or "rr" for relationships."""
+    def find(gateway, manifest):
+        listing = gateway.get_json(LISTING)["data"]
+        publish = listing["publish_date"]
+        kind = choose(manifest, publish)
+        if kind is None:
+            return manifest["lastKey"], "", ""  # already processed, so the runner stops here
+        files = listing[dataset]
+        url = files["full_file"]["csv"]["url"] if kind == "full" else files["delta_files"][kind]["csv"]["url"]
+        name = publish.replace(" ", "T").replace(":", "")
+        # The key names the file type as well as the publish time: a full load and
+        # a delta from the same publication are different work.
+        return f"{publish} {kind}", url, f"{name}-{dataset}-{kind}.zip"
+
+    return find
+
+
+find = finder("lei2")
 
 
 def run(gateway, store, gate=lambda: require_running(COMPONENT), allowlist=None, log=log) -> str:
@@ -66,12 +75,20 @@ def run(gateway, store, gate=lambda: require_running(COMPONENT), allowlist=None,
                       source="gleif", maker="ingestion@gleif", allowlist=allowlist or AllowList.load(), log=log)
 
 
+def run_relationships(gateway, store, gate=lambda: require_running(COMPONENT), allowlist=None, log=log) -> str:
+    return run_ingest(gateway=gateway, store=store, gate=gate, find=finder("rr"), read=read_rr_zip,
+                      mapper=to_relationship, source="gleif-rr", maker="ingestion@gleif",
+                      allowlist=allowlist or AllowList.load(), log=log, kind="relationship")
+
+
 def main() -> int:
     gateway = Gateway(os.environ["LC_GATEWAY_URL"], COMPONENT)
     # An explicit path: a missing allow-list must stop the job, never fall back to nothing.
     allowlist = AllowList.load(os.environ["LC_FIELDS_CONFIG"])
-    outcome = run(gateway, GcsStore(os.environ["LC_DATA_BUCKET"], "gleif"), allowlist=allowlist)
-    return 0 if outcome in ("done", "already-done", "halted") else 1
+    bucket = os.environ["LC_DATA_BUCKET"]
+    outcomes = [run(gateway, GcsStore(bucket, "gleif"), allowlist=allowlist),
+                run_relationships(gateway, GcsStore(bucket, "gleif-rr"), allowlist=allowlist)]
+    return 0 if all(o in ("done", "already-done", "halted") for o in outcomes) else 1
 
 
 if __name__ == "__main__":

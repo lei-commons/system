@@ -30,7 +30,7 @@ def separate_collision(record: dict, owners: dict, counts: Counter) -> dict:
     return record
 
 
-def map_records(raws, counts: Counter, allowlist: AllowList, mapper=to_record):
+def map_records(raws, counts: Counter, allowlist: AllowList, mapper=to_record, kind: str = "entity"):
     """Source records to allow-listed directory records. Skips are counted, never fatal."""
     for raw in raws:
         try:
@@ -41,7 +41,9 @@ def map_records(raws, counts: Counter, allowlist: AllowList, mapper=to_record):
         except (KeyError, TypeError, AttributeError, ValueError):
             counts["skipped: malformed"] += 1
             continue
-        kept, dropped = allowlist.filter("entity", record)
+        kept, dropped = allowlist.filter(kind, record)
+        kept["directoryId"] = record["directoryId"]  # the storage key, for relationships too
+        dropped = [d for d in dropped if d != "directoryId"]
         if dropped:
             counts["fields dropped"] += len(dropped)
         yield kept
