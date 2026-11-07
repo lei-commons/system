@@ -141,59 +141,106 @@ def get(port, path, token="owner", method="GET"):
     return out
 
 
-@pytest.mark.parametrize("path", ["/", "/stats", "/entity/" + ID, "/graph/" + ID, "/api/v1/stats", "/api/v1/search?q=example",
-                                  "/api/v1/entities/" + ID, "/api/v1/entities/" + ID + "/relationships"])
+PATHS = ["/", "/index.html", "/static/app.js", "/static/views/graph.js", "/static/vendor/cytoscape-3.34.4.esm.min.js",
+         "/api/v1/meta", "/api/v1/stats", "/api/v1/search?q=example", "/api/v1/suggest?q=ex", "/api/v1/entities/" + ID,
+         "/api/v1/entities/" + ID + "/relationships", "/api/v1/graph/" + ID]
+
+
+@pytest.mark.parametrize("path", PATHS)
 @pytest.mark.parametrize("token", [None, "", "forged", "other"])
 def test_only_the_owner_gets_anything(server, path, token):
     r = get(server, path, token)
-    assert r.status == 403 and "EXAMPLE" not in r.body and ID not in r.body
+    assert r.status == 403 and "EXAMPLE" not in r.body and ID not in r.body and "cytoscape" not in r.body.lower()
 
 
-def test_owner_can_use_the_api(server):
+@pytest.mark.parametrize("path", PATHS)
+def test_owner_gets_everything(server, path):
+    assert get(server, path).status == 200
+
+
+def test_app_shell_and_assets_have_the_right_types(server):
+    assert "text/html" in get(server, "/").headers["content-type"]
+    assert get(server, "/static/app.js").headers["content-type"].startswith("text/javascript")
+    assert get(server, "/static/app.css").headers["content-type"].startswith("text/css")
+    assert "/static/app.js" in get(server, "/").body
+
+
+@pytest.mark.parametrize("path", ["/static/../server.py", "/static/../../tests/test_site.py", "/static/%2e%2e/server.py",
+                                  "/static/", "/static/nope.js", "/static/vendor/README.md/../../server.py", "/server.py", "/entity/x"])
+def test_only_listed_files_are_served(server, path):
+    r = get(server, path)
+    assert r.status == 404 and "import" not in r.body
+
+
+def test_content_policy_allows_only_our_own_scripts(server):
+    csp = get(server, "/").headers["content-security-policy"]
+    assert "script-src 'self'" in csp and "unsafe" not in csp and "default-src 'none'" in csp
+    assert "connect-src 'self'" in csp and "frame-ancestors 'none'" in csp
+    assert get(server, "/").headers["cache-control"] == "no-store"
+
+
+def test_vendored_library_matches_its_recorded_checksum():
+    import hashlib
+    from pathlib import Path
+
+    static = Path(__file__).resolve().parents[1] / "lc_site" / "static" / "vendor"
+    digest = hashlib.sha256((static / "cytoscape-3.34.4.esm.min.js").read_bytes()).hexdigest()
+    assert digest == "0d7e373a706f0f01d6fb7a6ccf04988c01307cee1c2f9bcc7b068e9f6b431e3f"
+    assert digest in (static / "README.md").read_text()
+
+
+def test_api_meta_suggest_and_search(server):
+    assert json.loads(get(server, "/api/v1/meta").body)["records"] == 152
+    names = [r["legalName"] for r in json.loads(get(server, "/api/v1/suggest?q=many%20co%201").body)["results"]]
+    assert names[0] == "MANY CO 1" and all(n.startswith("MANY CO 1") for n in names)
+    assert json.loads(get(server, "/api/v1/suggest?q=m").body)["results"] == []
     assert json.loads(get(server, "/api/v1/search?q=example").body)["results"][0]["directoryId"] == ID
+
+
+def test_api_entity_and_relationships(server):
+    assert json.loads(get(server, "/api/v1/entities/" + ID).body)["lei"] == "5493001KJTIIGC8Y1R12"
     rel = json.loads(get(server, "/api/v1/entities/" + ID + "/relationships").body)
     assert rel["down"][0]["role"] == "direct subsidiary"
-    assert get(server, "/api/v1/entities/NOPE/relationships").status == 404
-    assert json.loads(get(server, "/api/v1/entities/" + ID).body)["lei"] == "5493001KJTIIGC8Y1R12"
-    assert get(server, "/api/v1/entities/NOPE").status == 404
-    assert json.loads(get(server, "/api/v1/stats").body)["records"] == 152
+    assert get(server, "/api/v1/entities/NOPE").status == 404 and get(server, "/api/v1/entities/NOPE/relationships").status == 404
 
 
-def test_owner_can_use_the_pages(server):
-    assert ID in get(server, "/?q=example").body and "LONDON" in get(server, "/entity/" + ID).body
-    assert "By country" in get(server, "/stats").body and "Relationship types" in get(server, "/stats").body
-    body = get(server, "/?q=many").body
-    assert "150 matches" in body and "next</a>" in body and "Country" in body
+def test_api_graph_neighbourhood(server):
+    g = json.loads(get(server, "/api/v1/graph/" + ID).body)
+    nodes = {n["id"]: n for n in g["nodes"]}
+    assert g["focus"] == ID and len(g["edges"]) == 2 and not g["truncated"]
+    assert nodes["LECOZZ000000000000AA"]["inDirectory"] and nodes["LEI:NOTINDIRECTORY000000"]["inDirectory"] is False
+    child = next(e for e in g["edges"] if e["type"] == "IS_DIRECTLY_CONSOLIDATED_BY")
+    assert (child["source"], child["target"]) == ("LECOZZ000000000000AA", ID)
+    assert get(server, "/api/v1/graph/NOPE").status == 404
 
 
-def test_graph_page_draws_links_and_escapes(server):
-    body = get(server, "/graph/" + ID).body
-    assert "<svg" in body and "direct subsidiary" in body and "ultimate parent" in body
-    assert "/graph/LECOZZ000000000000AA" in body and "<script>alert" not in body
-    assert "not in the directory" in body
+def test_graph_caps_large_neighbourhoods(snap):
+    g = snap.graph(ID, per_node=1)
+    assert len(g["edges"]) == 1 and g["truncated"]
+    assert snap.graph(ID, depth=99)["focus"] == ID
 
 
-def test_names_are_escaped(server):
-    body = get(server, "/?q=script").body
-    assert "<script>alert" not in body and "&lt;script&gt;" in body
+def test_names_come_back_as_data_not_markup(server):
+    body = get(server, "/api/v1/search?q=script").body
+    assert json.loads(body)["results"][0]["legalName"] == "<script>alert(1)</script> INC"
 
 
-def test_every_page_says_it_is_private(server):
-    assert "Private test instance" in get(server, "/").body
+def test_unknown_api_path(server):
+    assert get(server, "/api/v1/nope").status == 404
 
 
-def test_security_headers_and_read_only(server):
-    r = get(server, "/")
-    assert r.headers["cache-control"] == "no-store" and "default-src 'none'" in r.headers["content-security-policy"]
-    assert get(server, "/", method="POST").status == 405
+def test_read_only(server):
+    for method in ("POST", "PUT", "DELETE", "PATCH"):
+        assert get(server, "/api/v1/stats", method=method).status == 405
 
 
 def test_no_snapshot_yet():
     srv = make_server(None, [OWNER], AUD, ("127.0.0.1", 0), iap=fake_iap)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     try:
-        assert get(srv.server_address[1], "/").status == 503
-        assert get(srv.server_address[1], "/", token=None).status == 403
+        assert get(srv.server_address[1], "/api/v1/stats").status == 503
+        assert get(srv.server_address[1], "/").status == 200
+        assert get(srv.server_address[1], "/api/v1/stats", token=None).status == 403
     finally:
         srv.shutdown()
         srv.server_close()
