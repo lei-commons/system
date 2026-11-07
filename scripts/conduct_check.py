@@ -44,6 +44,7 @@ PROTECTED = [
     "agents/harness/",
     "config/sandbox-egress.yaml",
     "packages/lc_ingest/lc_ingest/gleif.py",
+    "packages/lc_publish/lc_publish/snapshot.py",
     "packages/lc_core/lc_core/control.py",
     "packages/lc_core/lc_core/events.py",
 ]

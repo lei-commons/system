@@ -55,6 +55,8 @@ jobs:
       - run: pytest -q services/ingest_gleif
       - run: pip install -e services/ingest_gb
       - run: pytest -q services/ingest_gb
+      - run: pip install -e packages/lc_publish
+      - run: pytest -q packages/lc_publish
       - run: pip install -e services/conduct_proxy
       - run: pytest -q services/conduct_proxy
       - run: pip install -e agents/harness

@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lc-publish"
+version = "0.1.0"
+description = "Builds the daily lei-commons snapshot"
+requires-python = ">=3.11"
+license = {text = "Apache-2.0"}
+dependencies = ["pyarrow>=15"]  # also needs lc-core[gcp]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+include = ["lc_publish*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
