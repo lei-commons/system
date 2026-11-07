@@ -49,6 +49,12 @@ variable "budget_pubsub_enabled" {
   default     = true
 }
 
+variable "budget_guard_enabled" {
+  description = "Create the budget guard. Push the image first: the deploy-budget-guard workflow does this."
+  type        = bool
+  default     = false
+}
+
 variable "console_enabled" {
   description = "Create the owner console. Push the image first: the deploy-console workflow does this."
   type        = bool

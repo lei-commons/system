@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lc-budget-guard"
+version = "0.1.0"
+description = "Pauses lei-commons when spend reaches the cap"
+requires-python = ">=3.11"
+license = {text = "Apache-2.0"}
+dependencies = ["google-cloud-storage>=2.16"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+include = ["budget_guard*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

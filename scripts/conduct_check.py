@@ -40,6 +40,7 @@ PROTECTED = [
     "bootstrap/",
     "services/conduct_proxy/",
     "services/console/",
+    "services/budget_guard/",
     "agents/harness/",
     "config/sandbox-egress.yaml",
     "packages/lc_core/lc_core/control.py",
