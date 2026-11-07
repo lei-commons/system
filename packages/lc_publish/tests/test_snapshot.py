@@ -79,3 +79,31 @@ def test_nothing_outside_the_columns_is_published(tmp_path):
     s["gb-coh"][GB_ID] = {**CH, "careOf": "MR PERSON"}
     build(s, tmp_path, "2026-11-07")
     assert "MR PERSON" not in json.dumps(pq.read_table(tmp_path / "GB.parquet").to_pylist())
+
+
+def test_shard_function_matches_ingestion():
+    import hashlib
+
+    from lc_publish.shards import shard_of
+
+    for i in range(500):
+        directory_id = f"LECOZZ{i:012d}XX"
+        assert shard_of(directory_id) == hashlib.sha256(directory_id.encode()).digest()[0] % 256
+
+
+def test_sharded_build_merges_across_sources(tmp_path):
+    from lc_publish.shards import shard_of
+    from lc_publish.snapshot import build_sharded
+
+    s = sources()
+    readers = {sid: (lambda n, recs=recs: {k: v for k, v in recs.items() if shard_of(k) == n}) for sid, recs in s.items()}
+    m = build_sharded(readers, tmp_path / "a", "2026-11-07")
+    assert m["records"] == 2 and m["inMoreThanOneSource"] == 1 and m == build(s, tmp_path / "b", "2026-11-07")
+
+
+def test_many_records_split_across_shards_and_countries(tmp_path):
+    many = {f"LECOZZ{i:012d}XX": {"directoryId": f"LECOZZ{i:012d}XX", "legalName": f"CO {i}",
+                                   "legalJurisdiction": "GB" if i % 3 else "US"} for i in range(3000)}
+    m = build({"gb-coh": many}, tmp_path, "2026-11-07")
+    assert m["records"] == 3000 and {f["country"]: f["records"] for f in m["files"]} == {"GB": 2000, "US": 1000}
+    assert pq.read_table(tmp_path / "GB.parquet").num_rows == 2000

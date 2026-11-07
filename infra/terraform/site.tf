@@ -29,7 +29,7 @@ resource "google_cloud_run_v2_service" "site" {
       resources {
         limits = {
           cpu    = "2"
-          memory = "4Gi"
+          memory = "8Gi"
         }
       }
 

@@ -29,7 +29,7 @@ def log(record):
     print(json.dumps(record, sort_keys=True), flush=True)
 
 
-def find(gateway):
+def find(gateway, manifest=None):
     page = io.BytesIO()
     gateway.download(PAGE, page)
     match = PART.search(page.getvalue().decode("utf-8", "replace"))

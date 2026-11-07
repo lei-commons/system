@@ -67,31 +67,53 @@ def _sha256(path: Path) -> str:
     return "sha256:" + h.hexdigest()
 
 
-def build(records_by_source: dict, out: Path, date: str) -> dict:
-    """Write one Parquet file per country and return the manifest."""
+def build_sharded(readers: dict, out: Path, date: str, shards: int = 256) -> dict:
+    """Write one Parquet file per country and return the manifest, a shard at a time.
+
+    ``readers`` maps a source ID to ``read(n)``, which returns that source's
+    records in shard ``n``. A company has the same directory ID, and so the same
+    shard, in every source, so merging shard by shard merges everything. Only
+    one shard is in memory at once. Records are ordered by shard, then ID.
+    """
     out.mkdir(parents=True, exist_ok=True)
-    merged = merge(records_by_source)
-    by_country = defaultdict(list)
-    for directory_id in sorted(merged):
-        by_country[country_of(merged[directory_id])].append(merged[directory_id])
+    schema = pa.schema([(c, pa.string()) for c in COLUMNS])
+    writers, leaves, per_country = {}, defaultdict(list), defaultdict(int)
+    counts = {s["id"]: 0 for s in SOURCES}
+    total = shared = 0
+    try:
+        for n in range(shards):
+            shard = {sid: readers[sid](n) for sid in readers}
+            for sid, records in shard.items():
+                counts[sid] += len(records)
+            merged = merge(shard)
+            by_country = defaultdict(list)
+            for directory_id in sorted(merged):
+                record = merged[directory_id]
+                by_country[country_of(record)].append(record)
+                shared += len(record["sources"]) > 1
+            total += len(merged)
+            for country, records in by_country.items():
+                if country not in writers:
+                    writers[country] = pq.ParquetWriter(out / f"{country}.parquet", schema, compression="zstd")
+                rows = [_row(r) for r in records]
+                writers[country].write_table(pa.table({c: [r[c] for r in rows] for c in COLUMNS}, schema=schema))
+                leaves[country].extend(leaf(r) for r in records)
+                per_country[country] += len(records)
+    finally:
+        for writer in writers.values():
+            writer.close()
 
     files = []
-    for country in sorted(by_country):
-        records = by_country[country]
+    for country in sorted(writers):
         path = out / f"{country}.parquet"
-        table = pa.table({c: [_row(r)[c] for r in records] for c in COLUMNS},
-                         schema=pa.schema([(c, pa.string()) for c in COLUMNS]))
-        pq.write_table(table, path, compression="zstd")
-        files.append({"name": path.name, "country": country, "records": len(records),
-                      "root": root([leaf(r) for r in records]), "sha256": _sha256(path)})
-
-    counts = {s["id"]: len(records_by_source.get(s["id"], {})) for s in SOURCES}
+        files.append({"name": path.name, "country": country, "records": per_country[country],
+                      "root": root(leaves[country]), "sha256": _sha256(path)})
     manifest = {
         "date": date,
         "schemaVersion": SCHEMA_VERSION,
-        "records": len(merged),
+        "records": total,
         "recordsPerSource": counts,
-        "inMoreThanOneSource": sum(1 for r in merged.values() if len(r["sources"]) > 1),
+        "inMoreThanOneSource": shared,
         "files": files,
         "snapshotRoot": root([bytes.fromhex(f["root"].split(":", 1)[1]) for f in files]),
         "sources": [{k: s[k] for k in ("id", "name", "licence", "attribution")} for s in SOURCES],
@@ -102,3 +124,14 @@ def build(records_by_source: dict, out: Path, date: str) -> dict:
     notice += [f"{s['name']} ({s['licence']}). {s['attribution']}".strip() for s in SOURCES]
     (out / "NOTICE.txt").write_text("\n".join(notice) + "\n", encoding="utf-8")
     return manifest
+
+
+def build(records_by_source: dict, out: Path, date: str) -> dict:
+    """The same, from records already in memory: {source ID: {directory ID: record}}."""
+    from .shards import shard_of
+
+    by_shard = {sid: defaultdict(dict) for sid in records_by_source}
+    for sid, records in records_by_source.items():
+        for directory_id, record in records.items():
+            by_shard[sid][shard_of(directory_id)][directory_id] = record
+    return build_sharded({sid: (lambda n, b=by_shard[sid]: dict(b.get(n, {}))) for sid in by_shard}, out, date)
