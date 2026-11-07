@@ -39,6 +39,15 @@ def _date(value):
     return value[:10] if value else None
 
 
+def lei_id(country: str, lei: str) -> str:
+    """The ID for a record identified by its LEI alone."""
+    return mint(country, "LEI", lei)
+
+
+def record_country(record: dict) -> str:
+    return (record.get("legalAddress") or {}).get("country") or (record.get("legalJurisdiction") or "")[:2]
+
+
 def to_record(raw: dict) -> dict:
     """Map one record from the GLEIF API to directory fields. Raises Skip to drop it."""
     attributes = raw["attributes"]
@@ -56,7 +65,7 @@ def to_record(raw: dict) -> dict:
     if authority and number:
         directory_id = mint(country, REGISTRIES.get(authority, authority), number)
     else:
-        directory_id = mint(country, "LEI", lei)
+        directory_id = lei_id(country, lei)
 
     record = {
         "directoryId": directory_id,

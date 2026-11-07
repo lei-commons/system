@@ -53,10 +53,10 @@ def zipped(rows, names=("data.csv",)):
 
 
 def test_read_zip_streams_rows():
-    rows = [ROW, {**ROW, "LEI": "529900T8BM49AURSDO55", "Entity.LegalName": "SECOND, \\"QUOTED\\" LTD"}]
+    rows = [ROW, {**ROW, "LEI": "529900T8BM49AURSDO55", "Entity.LegalName": 'SECOND, "QUOTED" LTD'}]
     out = [to_record(r) for r in read_zip(zipped(rows))]
     assert [r["lei"] for r in out] == ["5493001KJTIIGC8Y1R12", "529900T8BM49AURSDO55"]
-    assert out[1]["legalName"] == 'SECOND, \\"QUOTED\\" LTD'
+    assert out[1]["legalName"] == 'SECOND, "QUOTED" LTD'
 
 
 @pytest.mark.parametrize("names", [(), ("a.csv", "b.csv")])
