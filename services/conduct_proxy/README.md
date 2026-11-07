@@ -51,7 +51,7 @@ python -m conduct_proxy.server
 
 ## On Cloud Run
 
-Jobs call the internal load balancer at `http://10.20.0.10`. They prove who they are with an ID token for the service's `run.app` URL, sent in **`X-Serverless-Authorization`**, not `Authorization`. The policy would treat `Authorization` as a credential meant for the target host. Health is at `/health`, because Cloud Run reserves `/healthz`.
+Jobs call the service's `run.app` URL over HTTPS, which private DNS routes through Google's private range. They prove who they are with an ID token, sent in **`X-Serverless-Authorization`**, not `Authorization`. The policy would treat `Authorization` as a credential meant for the target host. Health is at `/health`, because Cloud Run reserves `/healthz`.
 
 `infra/terraform/network.tf` and `gateway.tf` provide the rest:
 
@@ -61,6 +61,5 @@ Jobs call the internal load balancer at `http://10.20.0.10`. They prove who they
 
 ## Known limits
 
-- **Plain HTTP inside the VPC.** A certificate needs a domain or a private key in Terraform state. ID tokens are short-lived, but owner-entered registry keys would cross this hop too, so settle this before any owner key goes live.
 - **Google services are reachable directly.** Jobs need Google's private range to reach the gateway and Google APIs, and that range also serves other people's buckets and `run.app` services. Closing this needs VPC Service Controls, which needs organization-level access.
 - **Large downloads are untested.** Cloud Run limits some HTTP/1 response sizes, and bulk files such as the GLEIF golden copy may hit that. Test this in M2 before relying on it; the fix is likely to be chunked responses.

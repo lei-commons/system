@@ -18,7 +18,7 @@ output "control_state_uri" {
 
 output "gateway_url" {
   description = "Address jobs use to reach the conduct gateway. Empty until gateway_image is set."
-  value       = local.gateway_enabled ? "http://${google_compute_address.gateway[0].address}" : ""
+  value       = local.gateway_enabled ? google_cloud_run_v2_service.gateway[0].uri : ""
 }
 
 output "gateway_audience" {
