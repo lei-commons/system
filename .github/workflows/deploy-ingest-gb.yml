@@ -1,0 +1,58 @@
+# Builds the Companies House ingestion job and deploys it on the sealed jobs network,
+# schedules it daily, then runs it once. While the system is paused every run
+# stops at its first check.
+name: deploy-ingest-gb
+
+on:
+  push:
+    branches: [main]
+    paths: ["services/ingest_gb/**", "packages/lc_ingest/**", "packages/lc_core/**", "config/fields.yaml", ".github/workflows/deploy-ingest-gb.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-ingest-gb
+  cancel-in-progress: false
+
+env:
+  REGION: ${{ vars.GCP_REGION }}
+  PROJECT: ${{ vars.GCP_PROJECT_ID }}
+  IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/lei-commons/ingest-gb
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Build and push
+        run: |
+          gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+          docker build -f services/ingest_gb/Dockerfile -t "$IMAGE:$GITHUB_SHA" .
+          docker push "$IMAGE:$GITHUB_SHA"
+      - name: Deploy the job
+        run: |
+          GATEWAY="$(gcloud run services describe conduct-gateway --region "$REGION" --format='value(status.url)')"
+          gcloud run jobs deploy ingest-gb --region "$REGION" --image "$IMAGE:$GITHUB_SHA" \
+            --service-account "lc-ingest@$PROJECT.iam.gserviceaccount.com" \
+            --network lc-jobs --subnet "lc-jobs-$REGION" --vpc-egress all-traffic \
+            --set-env-vars "LC_GATEWAY_URL=$GATEWAY,LC_DATA_BUCKET=$PROJECT-data,LC_CONTROL_STATE_URI=gs://$PROJECT-control/state.json" \
+            --max-retries 0 --task-timeout 3600 --memory 16Gi --cpu 4
+      - name: Schedule it daily at 03:00 UTC (processes each month once)
+        run: |
+          VERB=create
+          gcloud scheduler jobs describe ingest-gb-daily --location "$REGION" >/dev/null 2>&1 && VERB=update
+          gcloud scheduler jobs "$VERB" http ingest-gb-daily --location "$REGION" \
+            --schedule "0 3 * * *" --time-zone UTC --http-method POST \
+            --uri "https://run.googleapis.com/v2/projects/$PROJECT/locations/$REGION/jobs/ingest-gb:run" \
+            --oauth-service-account-email "lc-workflow@$PROJECT.iam.gserviceaccount.com"
+      # Safe to repeat: a publish already processed is skipped, and a paused system stops at the gate.
+      - name: Run once now
+        run: gcloud run jobs execute ingest-gb --region "$REGION" --wait

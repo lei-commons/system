@@ -16,6 +16,9 @@ REGISTRIES = {
     "RA000586": "GB-COH",  # Companies House, Northern Ireland
     "RA000587": "GB-COH",  # Companies House, Scotland
 }
+# A register's own country, so a company with a foreign address still gets the
+# same ID from GLEIF as from the register itself.
+REGISTRY_COUNTRY = {"GB-COH": "GB"}
 NATURAL_PERSON_CATEGORIES = {"SOLE_PROPRIETOR"}
 ADDRESS_FIELDS = ("addressLines", "city", "region", "country", "postalCode")
 
@@ -63,7 +66,8 @@ def to_record(raw: dict) -> dict:
     number = entity.get("registeredAs")
 
     if authority and number:
-        directory_id = mint(country, REGISTRIES.get(authority, authority), number)
+        registry = REGISTRIES.get(authority, authority)
+        directory_id = mint(REGISTRY_COUNTRY.get(registry, country), registry, number)
     else:
         directory_id = lei_id(country, lei)
 

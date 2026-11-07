@@ -17,6 +17,8 @@ def separate_collision(record: dict, owners: dict, counts: Counter) -> dict:
     number. A wrong merge costs more than a missed one, so the first LEI keeps the
     registry-based ID and any other gets its own, with a label for resolution.
     """
+    if not record.get("lei"):
+        return record  # register numbers are unique within their register
     owner = owners.setdefault(record["directoryId"], record["lei"])
     if owner == record["lei"]:
         return record
@@ -28,15 +30,15 @@ def separate_collision(record: dict, owners: dict, counts: Counter) -> dict:
     return record
 
 
-def map_records(raws, counts: Counter, allowlist: AllowList):
+def map_records(raws, counts: Counter, allowlist: AllowList, mapper=to_record):
     """Source records to allow-listed directory records. Skips are counted, never fatal."""
     for raw in raws:
         try:
-            record = to_record(raw)
+            record = mapper(raw)
         except Skip as exc:
             counts[f"skipped: {exc}"] += 1
             continue
-        except (KeyError, TypeError, AttributeError):
+        except (KeyError, TypeError, AttributeError, ValueError):
             counts["skipped: malformed"] += 1
             continue
         kept, dropped = allowlist.filter("entity", record)
