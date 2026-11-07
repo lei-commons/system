@@ -18,6 +18,17 @@ resource "google_cloud_run_v2_service" "site" {
     service_account = google_service_account.sa["site"].email
     timeout         = "300s"
 
+    # Private ranges only, to reach the serving database. Unlike the jobs, the site
+    # must also reach www.gstatic.com for IAP's signing keys, which the private DNS
+    # zones don't cover, and it never fetches third-party content.
+    vpc_access {
+      egress = "PRIVATE_RANGES_ONLY"
+      network_interfaces {
+        network    = google_compute_network.jobs.id
+        subnetwork = google_compute_subnetwork.jobs.id
+      }
+    }
+
     scaling {
       min_instance_count = 0
       max_instance_count = 1
@@ -52,6 +63,14 @@ resource "google_cloud_run_v2_service" "site" {
       env {
         name  = "GCP_REGION"
         value = var.region
+      }
+      env {
+        name  = "LC_DB_HOST"
+        value = google_sql_database_instance.directory.private_ip_address
+      }
+      env {
+        name  = "LC_DB_USER"
+        value = google_sql_user.site.name
       }
 
       # Loading the snapshot takes a while; give it time before the first request.

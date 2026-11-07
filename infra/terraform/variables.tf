@@ -49,6 +49,12 @@ variable "budget_pubsub_enabled" {
   default     = true
 }
 
+variable "cycle_enabled" {
+  description = "Create the build-snapshot and load-db jobs of the daily cycle. Push their images first: their deploy workflows do this."
+  type        = bool
+  default     = false
+}
+
 variable "alert_email" {
   description = "Where alerts go. Defaults to the owner's account."
   type        = string
