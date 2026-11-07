@@ -49,6 +49,8 @@ jobs:
       - run: pip install -e "packages/lc_core[test]"
       - run: pytest -q packages/lc_core
       - run: pytest -q scripts/tests
+      - run: pip install -e packages/lc_ingest
+      - run: pytest -q packages/lc_ingest
       - run: pip install -e services/conduct_proxy
       - run: pytest -q services/conduct_proxy
       - run: pip install -e agents/harness
