@@ -102,10 +102,9 @@ def test_system_page_through_the_server(tmp_path):
             r = c.getresponse()
             return r.status, r.read().decode()
 
-        status, body = get("/system")
-        assert status == 200 and "<svg" in body and "http-equiv=refresh" in body and "&lt;b&gt;test&lt;/b&gt;" in body
-        assert json.loads(get("/api/v1/system")[1])["control"]["state"] == "running"
-        assert get("/system", token="bad")[0] == 403 and get("/api/v1/system", token="bad")[0] == 403
+        data = json.loads(get("/api/v1/system")[1])
+        assert data["control"]["state"] == "running" and data["decisions"][0]["reason"] == "<b>test</b>"
+        assert get("/api/v1/system", token="bad")[0] == 403
     finally:
         srv.shutdown()
         srv.server_close()

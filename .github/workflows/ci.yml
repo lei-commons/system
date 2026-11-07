@@ -59,6 +59,8 @@ jobs:
       - run: pytest -q packages/lc_publish
       - run: pip install -e services/site
       - run: pytest -q services/site
+      - name: Front-end modules parse
+        run: for f in services/site/lc_site/static/*.js services/site/lc_site/static/views/*.js; do node --check "$f"; done
       - run: pip install -e services/conduct_proxy
       - run: pytest -q services/conduct_proxy
       - run: pip install -e agents/harness

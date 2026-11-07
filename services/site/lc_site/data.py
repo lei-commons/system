@@ -27,6 +27,8 @@ SUMMARY = "directoryId, legalName, country, registrationNumber, lei, legalStatus
 ID_LIKE = re.compile(r"^[0-9A-Z]{20}$")
 EXTENSIONS = os.environ.get("LC_DUCKDB_EXTENSIONS", "")
 GRAPH_LIMIT = 40
+GRAPH_PER_NODE = 60
+GRAPH_MAX_EDGES = 400
 # Relationship types in plain words, read from the record's own side.
 UPWARD = {  # this entity -> the other
     "IS_DIRECTLY_CONSOLIDATED_BY": "direct parent",
@@ -147,6 +149,77 @@ class Snapshot:
         for row in down:
             row["role"] = DOWNWARD.get(row["relationshipType"], row["relationshipType"].lower())
         return {"up": up[:GRAPH_LIMIT], "down": down[:GRAPH_LIMIT], "downTotal": down_total}
+
+    def suggest(self, q: str, limit: int = 8):
+        """Names starting with the query, shortest first, for search-as-you-type."""
+        q = (q or "").strip()[:100]
+        if len(q) < 2:
+            return []
+        prefix = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        return self._rows("SELECT directoryId, legalName, country FROM e WHERE legalName ILIKE ? ESCAPE '\\' "
+                          "ORDER BY length(legalName), legalName LIMIT ?", [prefix, max(1, min(int(limit), 20))])
+
+    def graph(self, directory_id: str, depth: int = 1, per_node: int = GRAPH_PER_NODE, max_edges: int = GRAPH_MAX_EDGES):
+        """The neighbourhood of an entity: nodes and edges ready to draw.
+
+        Walks relationships both ways for up to ``depth`` steps. Each node shows at
+        most ``per_node`` of its relationships and the whole graph at most
+        ``max_edges``; ``truncated`` says when something was left out. Entities we
+        don't hold appear by LEI only, with ``inDirectory`` false.
+        """
+        directory_id = directory_id.strip().upper()
+        depth = max(1, min(int(depth), 3))
+        if not self._rows("SELECT 1 FROM e WHERE directoryId = ?", [directory_id]):
+            return None
+        edges, seen_edges, frontier, visited, truncated = [], set(), [directory_id], {directory_id}, False
+        for _ in range(depth):
+            if not frontier or len(edges) >= max_edges:
+                break
+            rows = self._rows(
+                "SELECT * FROM (SELECT relationshipId, startNode, endNode, startId, endId, relationshipType, relationshipStatus, "
+                "percentage, CASE WHEN list_contains(?, startId) THEN startId ELSE endId END AS via, "
+                "row_number() OVER (PARTITION BY CASE WHEN list_contains(?, startId) THEN startId ELSE endId END "
+                "ORDER BY relationshipType, relationshipId) AS n "
+                "FROM r WHERE list_contains(?, startId) OR list_contains(?, endId)) WHERE n <= ? + 1",
+                [frontier, frontier, frontier, frontier, per_node])
+            per_via = {}
+            for row in rows:
+                per_via[row["via"]] = per_via.get(row["via"], 0) + 1
+            nxt = []
+            for row in rows:
+                if row["n"] > per_node:
+                    truncated = True
+                    continue
+                if row["relationshipId"] in seen_edges:
+                    continue
+                if len(edges) >= max_edges:
+                    truncated = True
+                    break
+                seen_edges.add(row["relationshipId"])
+                edges.append(row)
+                for side in ("startId", "endId"):
+                    other = row[side]
+                    if other and other not in visited:
+                        visited.add(other)
+                        nxt.append(other)
+            frontier = nxt
+        known = self._rows("SELECT directoryId, lei, legalName, country, legalStatus, legalJurisdiction FROM e "
+                           "WHERE list_contains(?, directoryId)", [sorted(visited)])
+        nodes = {k["directoryId"]: {"id": k["directoryId"], "lei": k["lei"], "name": k["legalName"], "country": k["country"],
+                                    "status": k["legalStatus"], "inDirectory": True} for k in known}
+        out_edges = []
+        for row in edges:
+            ends = []
+            for side, lei in (("startId", row["startNode"]), ("endId", row["endNode"])):
+                node_id = row[side] or f"LEI:{lei}"
+                if node_id not in nodes:
+                    nodes[node_id] = {"id": node_id, "lei": lei, "name": None, "country": None, "status": None,
+                                      "inDirectory": False}
+                ends.append(node_id)
+            out_edges.append({"id": row["relationshipId"], "source": ends[0], "target": ends[1],
+                              "type": row["relationshipType"], "status": row["relationshipStatus"],
+                              "percentage": row["percentage"]})
+        return {"focus": directory_id, "nodes": list(nodes.values()), "edges": out_edges, "truncated": truncated}
 
     def stats(self):
         def top(column, n):
