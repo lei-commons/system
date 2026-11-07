@@ -160,3 +160,26 @@ def test_mass_change_returns_nothing():
         current[r["directoryId"]] = r
     with pytest.raises(VolumeGuardTripped):
         run([raw(registeredAs=str(i), status="INACTIVE") for i in range(200)], current)
+
+
+def test_two_leis_sharing_a_registration_stay_two_flagged_records():
+    first, second = raw(), raw()
+    second["attributes"]["lei"] = "529900T8BM49AURSDO55"
+    changes, counts = run([first, second])
+    ids = {c["directoryId"] for c in changes}
+    assert len(ids) == 2 and counts["kept apart: shared registration"] == 1
+    labels = [c["newValue"] for c in changes if c["fieldPath"] == "labels"]
+    assert labels == [["possible-duplicate:LECOZZFZ6LZCOJBDKT73"]]
+
+
+def test_the_lei_already_in_the_directory_keeps_its_id():
+    existing = to_record(raw())
+    newcomer = raw()
+    newcomer["attributes"]["lei"] = "529900T8BM49AURSDO55"
+    changes, _ = run([newcomer], {existing["directoryId"]: existing})
+    assert existing["directoryId"] not in {c["directoryId"] for c in changes}
+
+
+def test_the_same_lei_twice_is_not_a_collision():
+    changes, counts = run([raw(), raw()])
+    assert counts["kept apart: shared registration"] == 0 and len({c["directoryId"] for c in changes}) == 1
