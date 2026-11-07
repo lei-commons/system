@@ -34,7 +34,7 @@ locals {
     maker     = ["roles/aiplatform.user"]
     checker   = ["roles/aiplatform.user"]
     publisher = ["roles/bigquery.jobUser", "roles/bigquery.dataEditor"]
-    workflow  = ["roles/run.invoker", "roles/workflows.invoker"]
+    workflow  = ["roles/run.invoker", "roles/run.viewer", "roles/workflows.invoker"]
     console   = ["roles/datastore.user"]
     # budget-guard has no project roles beyond logging; it writes only the control bucket.
     budget-guard = []

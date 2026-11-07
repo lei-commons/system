@@ -5,8 +5,9 @@ FROM python:3.12-slim
 RUN useradd --create-home --uid 10001 site
 WORKDIR /app
 COPY packages/lc_core packages/lc_core
+COPY packages/lc_directory packages/lc_directory
 COPY services/site services/site
-RUN pip install --no-cache-dir "./packages/lc_core[gcp]" ./services/site
+RUN pip install --no-cache-dir "./packages/lc_core[gcp]" ./packages/lc_directory ./services/site
 # The full-text search extension is fetched at build time and loaded from here,
 # so the running service never downloads code.
 ENV LC_DUCKDB_EXTENSIONS=/opt/duckdb-extensions

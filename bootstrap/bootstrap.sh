@@ -30,6 +30,7 @@ GATEWAY_IMAGE=""
 CONSOLE=false
 BUDGET_GUARD=false
 SITE=false
+CYCLE=false
 
 usage() {
   sed -n '2,20p' "$0"
@@ -49,6 +50,7 @@ while [[ $# -gt 0 ]]; do
     --console) CONSOLE=true; shift ;;
     --budget-guard) BUDGET_GUARD=true; shift ;;
     --site) SITE=true; shift ;;
+    --cycle) CYCLE=true; shift ;;
     --yes) AUTO_APPROVE=1; shift ;;
     -h|--help) usage 0 ;;
     *) echo "unknown option: $1" >&2; usage 1 ;;
@@ -121,6 +123,9 @@ fi
 if [[ "$CONSOLE" == false ]] && gcloud run services describe owner-console --project "$PROJECT" --region "$REGION" >/dev/null 2>&1; then
   CONSOLE=true
 fi
+if [[ "$CYCLE" == false ]] && gcloud run jobs describe load-db --project "$PROJECT" --region "$REGION" >/dev/null 2>&1; then
+  CYCLE=true
+fi
 if [[ "$SITE" == false ]] && gcloud run services describe lei-commons-site --project "$PROJECT" --region "$REGION" >/dev/null 2>&1; then
   SITE=true
 fi
@@ -145,6 +150,7 @@ TF_VARS=(
   -var "console_enabled=${CONSOLE}"
   -var "budget_guard_enabled=${BUDGET_GUARD}"
   -var "site_enabled=${SITE}"
+  -var "cycle_enabled=${CYCLE}"
 )
 
 terraform plan -input=false -out=day0.plan "${TF_VARS[@]}"

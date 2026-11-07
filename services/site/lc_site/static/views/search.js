@@ -96,7 +96,8 @@ export async function render(root, _arg, params) {
   const page = Number(params.get("page") || 1);
   const sourceNames = { "gb-coh": "Companies House", gleif: "GLEIF" };
   body.replaceChildren(
-    h("div", { class: "toolbar" }, h("strong", { class: "num" }, `${fmt(found.total)} matches`),
+    h("div", { class: "toolbar" }, h("strong", { class: "num" }, `${fmt(found.total)}${found.totalCapped ? "+" : ""} matches`),
+      found.totalCapped ? h("span", { class: "muted" }, "(counts and filters cover the first 10,000)") : null,
       h("span", { class: "muted" }, `for “${q}”`)),
     h("div", { class: "card card-pad facets" },
       facetRow("Country", "country", found.facets.country, params),

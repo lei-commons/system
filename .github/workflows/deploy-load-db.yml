@@ -1,0 +1,43 @@
+# Builds the load-db image and rolls it out to its job. The job itself is created
+# by Terraform (bootstrap.sh --cycle) and run by the daily cycle, not here.
+name: deploy-load-db
+
+on:
+  push:
+    branches: [main]
+    paths: ["services/load_db/**", "packages/lc_core/**", "packages/lc_directory/**", "services/load_db/Dockerfile", ".github/workflows/deploy-load-db.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-load-db
+  cancel-in-progress: false
+
+env:
+  IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/lei-commons/load-db
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Build and push
+        run: |
+          gcloud auth configure-docker "${{ vars.GCP_REGION }}-docker.pkg.dev" --quiet
+          docker build -f services/load_db/Dockerfile -t "$IMAGE:$GITHUB_SHA" -t "$IMAGE:latest" .
+          docker push --all-tags "$IMAGE"
+      - name: Roll out, if the job exists
+        run: |
+          if gcloud run jobs describe load-db --region "${{ vars.GCP_REGION }}" >/dev/null 2>&1; then
+            gcloud run jobs update load-db --region "${{ vars.GCP_REGION }}" --image "$IMAGE:$GITHUB_SHA"
+          else
+            echo "::notice::load-db doesn't exist yet; the image is pushed"
+          fi

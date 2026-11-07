@@ -184,7 +184,15 @@ def main() -> int:
         system = SystemView(GoogleReader(project, os.environ.get("GCP_REGION", "us-central1"), buckets))
     except Exception as exc:  # the rest of the site works without it
         print(json.dumps({"event": "system-view-unavailable", "error": type(exc).__name__}), flush=True)
-    make_server(load_latest(bucket), owners, audience, ("0.0.0.0", int(os.environ.get("PORT", "8080"))),
+    if os.environ.get("LC_DB_HOST"):
+        # The serving database: starts at once and holds any size of directory.
+        from lc_directory.pg import Directory, token_pool
+
+        directory = Directory(token_pool(os.environ["LC_DB_HOST"], os.environ.get("LC_DB_NAME", "lei_commons"),
+                                         os.environ["LC_DB_USER"]))
+    else:
+        directory = load_latest(bucket)  # in memory, for small directories and local previews
+    make_server(directory, owners, audience, ("0.0.0.0", int(os.environ.get("PORT", "8080"))),
                 system=system).serve_forever()
     return 0
 

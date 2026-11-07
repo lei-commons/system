@@ -45,14 +45,21 @@ jobs:
             --network lc-jobs --subnet "lc-jobs-$REGION" --vpc-egress all-traffic \
             --set-env-vars "LC_GATEWAY_URL=$GATEWAY,LC_DATA_BUCKET=$PROJECT-data,LC_CONTROL_STATE_URI=gs://$PROJECT-control/state.json" \
             --max-retries 0 --task-timeout 3600 --memory 4Gi --cpu 2
-      - name: Schedule it daily at 03:00 UTC (processes each month once)
+      # Once the daily cycle exists it runs this job in order with the others, so the
+      # job's own schedule goes; until then the job keeps it.
+      - name: Schedule, unless the daily cycle runs it
         run: |
-          VERB=create
-          gcloud scheduler jobs describe ingest-gb-daily --location "$REGION" >/dev/null 2>&1 && VERB=update
-          gcloud scheduler jobs "$VERB" http ingest-gb-daily --location "$REGION" \
-            --schedule "0 3 * * *" --time-zone UTC --http-method POST \
-            --uri "https://run.googleapis.com/v2/projects/$PROJECT/locations/$REGION/jobs/ingest-gb:run" \
-            --oauth-service-account-email "lc-workflow@$PROJECT.iam.gserviceaccount.com"
+          if gcloud scheduler jobs describe daily-cycle --location "$REGION" >/dev/null 2>&1; then
+            gcloud scheduler jobs delete ingest-gb-daily --location "$REGION" --quiet 2>/dev/null || true
+            echo "::notice::the daily cycle runs this job"
+          else
+            VERB=create
+            gcloud scheduler jobs describe ingest-gb-daily --location "$REGION" >/dev/null 2>&1 && VERB=update
+            gcloud scheduler jobs "$VERB" http ingest-gb-daily --location "$REGION" \
+              --schedule "0 3 * * *" --time-zone UTC --http-method POST \
+              --uri "https://run.googleapis.com/v2/projects/$PROJECT/locations/$REGION/jobs/ingest-gb:run" \
+              --oauth-service-account-email "lc-workflow@$PROJECT.iam.gserviceaccount.com"
+          fi
       # Safe to repeat: a publish already processed is skipped, and a paused system stops at the gate.
       - name: Run once now
         run: gcloud run jobs execute ingest-gb --region "$REGION" --wait
