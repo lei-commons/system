@@ -38,7 +38,7 @@ jobs:
       - name: Roll out, if the service exists
         run: |
           if gcloud run services describe lei-commons-site --region "${{ vars.GCP_REGION }}" >/dev/null 2>&1; then
-            gcloud run services update lei-commons-site --region "${{ vars.GCP_REGION }}" --image "$IMAGE:$GITHUB_SHA"
+            gcloud run services update lei-commons-site --region "${{ vars.GCP_REGION }}" --image "$IMAGE:$GITHUB_SHA" --memory 8Gi --cpu 2
           else
             echo "::notice::lei-commons-site doesn't exist yet; the image is pushed"
           fi

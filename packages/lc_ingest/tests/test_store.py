@@ -11,6 +11,10 @@ class Blob:
     def __init__(self, files, name):
         self.files, self.name = files, name
 
+    def upload_from_filename(self, path, content_type=None):
+        with open(path, "rb") as f:
+            self.files[self.name] = f.read()
+
     def exists(self):
         return self.name in self.files
 
@@ -52,10 +56,21 @@ def test_one_json_object_per_real_line():
     s = store(b)
     s.read_manifest()
     s.write_shard(1, RECORDS)
-    s.write_changes("day", [{"a": 1}, {"b": 2}])
-    for name in ("gb/records/001.jsonl.gz", "gb/changes/day.jsonl.gz"):
+    for name in ("gb/records/001.jsonl.gz",):
         lines = gzip.decompress(b.files[name]).decode().split("\n")
         assert lines[-1] == "" and all(json.loads(line) for line in lines[:-1]) and len(lines) == 3
+
+
+def test_staged_file_and_direct_write_are_the_same_bytes(tmp_path):
+    from lc_ingest.store import encode_records
+
+    b = Bucket()
+    s = store(b)
+    s.read_manifest()
+    s.write_shard(3, RECORDS)
+    path = tmp_path / "003.jsonl.gz"
+    path.write_bytes(encode_records(RECORDS))
+    assert b.files["gb/records/003.jsonl.gz"] == path.read_bytes()
 
 
 def test_old_format_is_treated_as_absent_and_rebuilt():

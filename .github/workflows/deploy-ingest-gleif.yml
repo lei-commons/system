@@ -44,7 +44,7 @@ jobs:
             --service-account "lc-ingest@$PROJECT.iam.gserviceaccount.com" \
             --network lc-jobs --subnet "lc-jobs-$REGION" --vpc-egress all-traffic \
             --set-env-vars "LC_GATEWAY_URL=$GATEWAY,LC_DATA_BUCKET=$PROJECT-data,LC_CONTROL_STATE_URI=gs://$PROJECT-control/state.json" \
-            --max-retries 0 --task-timeout 3600 --memory 2Gi
+            --max-retries 0 --task-timeout 3600 --memory 8Gi --cpu 2
       - name: Schedule it daily at 02:00 UTC, the design's cycle time
         run: |
           VERB=create

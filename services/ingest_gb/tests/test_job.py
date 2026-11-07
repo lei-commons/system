@@ -1,4 +1,5 @@
 import csv
+import gzip
 import io
 import json
 import zipfile
@@ -7,6 +8,7 @@ import pytest
 
 from lc_core.control import SystemHalted
 from lc_core.fetch import FetchError
+from lc_ingest.store import decode_records
 from ingest_gb.job import PAGE, run
 
 FIELDS = ["CompanyName", " CompanyNumber", "RegAddress.CareOf", "RegAddress.AddressLine1", "RegAddress.PostTown",
@@ -56,11 +58,13 @@ class MemStore:
     def read_shard(self, n):
         return dict(self.shards.get(n, {}))
 
-    def write_shard(self, n, records):
-        self.shards[n] = dict(records)
+    def write_shard_file(self, n, path):
+        with open(path, "rb") as f:
+            self.shards[n] = decode_records(f.read())
 
-    def write_changes(self, name, changes):
-        self.changes[name] = changes
+    def write_changes_file(self, name, path):
+        with gzip.open(path, "rt") as f:
+            self.changes[name] = [json.loads(line) for line in f]
 
     def keep_source(self, name, path):
         self.sources.append(name)
