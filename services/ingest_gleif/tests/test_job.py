@@ -219,3 +219,7 @@ def test_a_delta_already_processed_does_not_block_the_full_load():
                                        ("2026-11-06 08:00:00", "LastDay")])
 def test_choose_reads_keys_with_or_without_a_kind(last, kind):
     assert choose({"records": 5, "lastKey": last}, "2026-11-07 08:00:00") == kind
+
+
+def test_the_publication_already_loaded_means_nothing_new():
+    assert choose({"records": 5, "lastKey": "2026-11-07 08:00:00 full"}, "2026-11-07 08:00:00") is None
