@@ -79,8 +79,11 @@ jobs:
           docker run --rm ingest-gleif python -c "import os; from lc_core.allowlist import AllowList; a = AllowList.load(os.environ['LC_FIELDS_CONFIG']); assert 'legalName' in a.allowed['entity']; print('allow-list loads')"
       - name: Companies House job image builds
         run: docker build -f services/ingest_gb/Dockerfile -t ingest-gb .
-      - name: Site image builds
-        run: docker build -f services/site/Dockerfile -t lei-commons-site .
+      - name: Site image builds and contains the app
+        run: |
+          docker build -f services/site/Dockerfile -t lei-commons-site .
+          # The installed package, not the source tree: tests run from source and would not notice missing files.
+          docker run --rm lei-commons-site python -c "from lc_site.server import STATIC, static_files; files = static_files(); assert (STATIC / 'index.html').is_file(); assert '/static/app.js' in files and '/static/views/graph.js' in files and '/static/vendor/cytoscape-3.34.4.esm.min.js' in files, sorted(files); print(len(files), 'app files installed')"
       - name: Console image builds
         run: docker build -f services/console/Dockerfile -t owner-console .
       - name: Gateway image builds and starts
