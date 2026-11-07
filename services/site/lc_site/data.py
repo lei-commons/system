@@ -1,7 +1,12 @@
-"""The latest snapshot, loaded into DuckDB, and the read-only queries on it.
+"""The latest snapshot in DuckDB, and the read-only queries on it.
 
 Every query takes parameters, never formatted strings, and every result is
 capped, so nothing a caller types can change what runs.
+
+Records go into a DuckDB database file, because DuckDB compresses tables on
+disk but not purely in memory: 3.35 million records took 9.6 GB in memory and
+2.7 GB this way. Search uses DuckDB's full-text index over legal and other
+names (BM25), with exact names, then names starting with the query, ranked first.
 """
 
 from __future__ import annotations
@@ -15,29 +20,59 @@ import threading
 import duckdb
 
 MAX_LIMIT = 100
+MAX_PAGE = 100
+FACET_LIMIT = 15
 NESTED = ("otherNames", "legalAddress", "headquartersAddress", "industryCodes", "labels")
 SUMMARY = "directoryId, legalName, country, registrationNumber, lei, legalStatus, sources"
 ID_LIKE = re.compile(r"^[0-9A-Z]{20}$")
+EXTENSIONS = os.environ.get("LC_DUCKDB_EXTENSIONS", "")
+GRAPH_LIMIT = 40
+# Relationship types in plain words, read from the record's own side.
+UPWARD = {  # this entity -> the other
+    "IS_DIRECTLY_CONSOLIDATED_BY": "direct parent",
+    "IS_ULTIMATELY_CONSOLIDATED_BY": "ultimate parent",
+    "IS_FUND-MANAGED_BY": "fund manager",
+    "IS_SUBFUND_OF": "umbrella fund",
+    "IS_FEEDER_TO": "master fund",
+    "IS_INTERNATIONAL_BRANCH_OF": "head office",
+}
+DOWNWARD = {  # the other -> this entity
+    "IS_DIRECTLY_CONSOLIDATED_BY": "direct subsidiary",
+    "IS_ULTIMATELY_CONSOLIDATED_BY": "ultimately owned",
+    "IS_FUND-MANAGED_BY": "managed fund",
+    "IS_SUBFUND_OF": "sub-fund",
+    "IS_FEEDER_TO": "feeder fund",
+    "IS_INTERNATIONAL_BRANCH_OF": "branch",
+}
 
 
 class Snapshot:
-    """Loads the snapshot into a DuckDB database file.
-
-    DuckDB compresses tables on disk but not purely in memory: 3.35 million
-    records took 9.6 GB in memory and 2.7 GB this way, with searches under 100 ms.
-    """
-
-    def __init__(self, parquet_glob: str, meta: dict, path: str = None):
+    def __init__(self, entity_files: list, meta: dict, relationship_files: list = (), path: str = None):
         self.meta = meta
         path = path or os.path.join(tempfile.mkdtemp(prefix="site-db-"), "snapshot.duckdb")
         self._con = duckdb.connect(path)
-        for setting in ("SET memory_limit='2GB'", "SET threads=2", "SET preserve_insertion_order=false"):
+        settings = ["SET memory_limit='2GB'", "SET threads=2", "SET preserve_insertion_order=false"]
+        if EXTENSIONS:
+            settings.append(f"SET extension_directory='{EXTENSIONS}'")
+        for setting in settings:
             self._con.execute(setting)
         self._con.execute(
-            "CREATE TABLE e AS SELECT *, regexp_extract(filename, '([A-Z]{2})\\.parquet$', 1) AS country "
-            "FROM read_parquet(?, filename = true)", [parquet_glob])
+            "CREATE TABLE e AS SELECT * EXCLUDE (filename), regexp_extract(filename, '([A-Z]{2})\\.parquet$', 1) AS country "
+            "FROM read_parquet(?, filename = true)", [list(entity_files)])
+        self._con.execute("INSTALL fts")
+        self._con.execute("LOAD fts")
+        # Keep digits: "3M" and "APPLE 12" are names. The default tokenizer drops them.
+        self._con.execute("PRAGMA create_fts_index('e', 'directoryId', 'legalName', 'otherNames', "
+                          "stemmer='none', stopwords='none', ignore='(\\.|[^a-z0-9])+', overwrite=1)")
+        if relationship_files:
+            self._con.execute("CREATE TABLE r AS SELECT * FROM read_parquet(?)", [list(relationship_files)])
+        else:
+            self._con.execute("CREATE TABLE r (relationshipId VARCHAR, startNode VARCHAR, endNode VARCHAR, startId VARCHAR, "
+                              "endId VARCHAR, relationshipType VARCHAR, relationshipStatus VARCHAR, percentage VARCHAR, "
+                              "periodStart VARCHAR, periodEnd VARCHAR)")
         self._con.execute("CHECKPOINT")
         self.count = self._con.execute("SELECT count(*) FROM e").fetchone()[0]
+        self.relationship_count = self._con.execute("SELECT count(*) FROM r").fetchone()[0]
         self._lock = threading.Lock()
 
     def _rows(self, sql, params):
@@ -46,28 +81,48 @@ class Snapshot:
             names = [d[0] for d in cur.description]
             return [dict(zip(names, row)) for row in cur.fetchall()]
 
-    def search(self, q: str, country: str = "", limit: int = 25):
+    def search(self, q: str, country: str = "", status: str = "", source: str = "", limit: int = 25, page: int = 1):
+        """Return {"results", "total", "facets"} for a query, with optional filters."""
         q = (q or "").strip()[:200]
-        limit = max(1, min(int(limit), MAX_LIMIT))
+        empty = {"results": [], "total": 0, "facets": {}}
         if not q:
-            return []
-        country = country.strip().upper()[:2]
-        where, params = [], []
-        if ID_LIKE.match(q.upper()):
-            where.append("(directoryId = ? OR lei = ?)")
-            params += [q.upper(), q.upper()]
+            return empty
+        limit = max(1, min(int(limit), MAX_LIMIT))
+        page = max(1, min(int(page), MAX_PAGE))
+        filters, params = [], []
+        for column, value in (("country", country.strip().upper()[:2]), ("legalStatus", status.strip()[:60])):
+            if value:
+                filters.append(f"{column} = ?")
+                params.append(value)
+        if source:
+            filters.append("list_contains(string_split(sources, ','), ?)")
+            params.append(source.strip()[:40])
+        where = "".join(f" AND {f}" for f in filters)
+
+        # IDs and registration numbers are looked up exactly; "3M" is still a name.
+        if ID_LIKE.match(q.upper()) or (q.isalnum() and len(q) >= 6 and any(c.isdigit() for c in q)):
+            matched = "SELECT *, 1.0 AS score FROM e WHERE (directoryId = ? OR lei = ? OR registrationNumber = ?)"
+            match_params = [q.upper(), q.upper(), q.upper()]
+            order = "legalName"
         else:
-            pattern = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-            where.append("(legalName ILIKE ? ESCAPE '\\' OR registrationNumber = ?)")
-            params += [pattern, q.upper()]
-        if country:
-            where.append("country = ?")
-            params.append(country)
-        sql = f"SELECT {SUMMARY} FROM e WHERE {' AND '.join(where)} ORDER BY legalName LIMIT ?"
-        return self._rows(sql, params + [limit])
+            matched = ("SELECT *, fts_main_e.match_bm25(directoryId, ?, conjunctive := 1) AS score FROM e")
+            match_params = [q]
+            order = "(upper(legalName) = upper(?)) DESC, starts_with(upper(legalName), upper(?)) DESC, score DESC, legalName"
+        base = f"SELECT * FROM ({matched}) WHERE score IS NOT NULL{where}"
+        order_params = [] if order == "legalName" else [q, q]
+
+        total = self._rows(f"SELECT count(*) AS n FROM ({base})", match_params + params)[0]["n"]
+        results = self._rows(f"SELECT {SUMMARY} FROM ({base}) ORDER BY {order} LIMIT ? OFFSET ?",
+                             match_params + params + order_params + [limit, (page - 1) * limit])
+        facets = {}
+        for name, expr in (("country", "country"), ("status", "legalStatus"), ("source", "unnest(string_split(sources, ','))")):
+            # The expression goes in an inner query, because DuckDB can't group by an unnest directly.
+            facets[name] = self._rows(f"SELECT value, count(*) AS records FROM (SELECT {expr} AS value FROM ({base})) "
+                                      f"GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT {FACET_LIMIT}", match_params + params)
+        return {"results": results, "total": total, "facets": facets}
 
     def entity(self, directory_id: str):
-        rows = self._rows("SELECT * EXCLUDE (filename) FROM e WHERE directoryId = ?", [directory_id.strip().upper()])
+        rows = self._rows("SELECT * FROM e WHERE directoryId = ?", [directory_id.strip().upper()])
         if not rows:
             return None
         record = {k: v for k, v in rows[0].items() if v is not None}
@@ -77,9 +132,27 @@ class Snapshot:
         record["sources"] = record["sources"].split(",")
         return record
 
+    def relationships(self, directory_id: str):
+        """The entity's relationships in both directions, each with the other side's name if we hold it."""
+        directory_id = directory_id.strip().upper()
+        sql = ("SELECT r.relationshipType, r.relationshipStatus, r.percentage, r.{other}Node AS otherLei, "
+               "r.{other}Id AS otherId, e.legalName AS otherName, e.country AS otherCountry "
+               "FROM r LEFT JOIN e ON e.directoryId = r.{other}Id WHERE r.{this}Id = ? "
+               "ORDER BY r.relationshipType, otherName LIMIT ?")
+        up = self._rows(sql.format(other="end", this="start"), [directory_id, GRAPH_LIMIT + 1])
+        down = self._rows(sql.format(other="start", this="end"), [directory_id, GRAPH_LIMIT + 1])
+        down_total = self._rows("SELECT count(*) AS n FROM r WHERE endId = ?", [directory_id])[0]["n"]
+        for row in up:
+            row["role"] = UPWARD.get(row["relationshipType"], row["relationshipType"].lower())
+        for row in down:
+            row["role"] = DOWNWARD.get(row["relationshipType"], row["relationshipType"].lower())
+        return {"up": up[:GRAPH_LIMIT], "down": down[:GRAPH_LIMIT], "downTotal": down_total}
+
     def stats(self):
         def top(column, n):
             return self._rows(f"SELECT {column} AS value, count(*) AS records FROM e GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT ?", [n])
 
-        return {"snapshot": self.meta, "records": self.count, "byCountry": top("country", 30),
-                "bySources": top("sources", 10), "byStatus": top("legalStatus", 15)}
+        rel_types = self._rows("SELECT relationshipType AS value, count(*) AS records FROM r GROUP BY 1 ORDER BY 2 DESC", [])
+        return {"snapshot": self.meta, "records": self.count, "relationships": self.relationship_count,
+                "byCountry": top("country", 30), "bySources": top("sources", 10), "byStatus": top("legalStatus", 15),
+                "relationshipTypes": rel_types}

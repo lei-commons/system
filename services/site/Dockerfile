@@ -7,6 +7,11 @@ WORKDIR /app
 COPY packages/lc_core packages/lc_core
 COPY services/site services/site
 RUN pip install --no-cache-dir "./packages/lc_core[gcp]" ./services/site
+# The full-text search extension is fetched at build time and loaded from here,
+# so the running service never downloads code.
+ENV LC_DUCKDB_EXTENSIONS=/opt/duckdb-extensions
+RUN python -c "import duckdb; c = duckdb.connect(); c.execute(\"SET extension_directory='/opt/duckdb-extensions'\"); c.execute('INSTALL fts')" \
+ && chmod -R a+rX /opt/duckdb-extensions
 
 USER site
 ENV PYTHONUNBUFFERED=1
