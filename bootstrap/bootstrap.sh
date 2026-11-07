@@ -29,6 +29,7 @@ BUDGET_PUBSUB=true
 GATEWAY_IMAGE=""
 CONSOLE=false
 BUDGET_GUARD=false
+SITE=false
 
 usage() {
   sed -n '2,20p' "$0"
@@ -47,6 +48,7 @@ while [[ $# -gt 0 ]]; do
     --gateway-image) GATEWAY_IMAGE="$2"; shift 2 ;;
     --console) CONSOLE=true; shift ;;
     --budget-guard) BUDGET_GUARD=true; shift ;;
+    --site) SITE=true; shift ;;
     --yes) AUTO_APPROVE=1; shift ;;
     -h|--help) usage 0 ;;
     *) echo "unknown option: $1" >&2; usage 1 ;;
@@ -119,6 +121,9 @@ fi
 if [[ "$CONSOLE" == false ]] && gcloud run services describe owner-console --project "$PROJECT" --region "$REGION" >/dev/null 2>&1; then
   CONSOLE=true
 fi
+if [[ "$SITE" == false ]] && gcloud run services describe lei-commons-site --project "$PROJECT" --region "$REGION" >/dev/null 2>&1; then
+  SITE=true
+fi
 if [[ "$BUDGET_GUARD" == false ]] && gcloud run services describe budget-guard --project "$PROJECT" --region "$REGION" >/dev/null 2>&1; then
   BUDGET_GUARD=true
 fi
@@ -139,6 +144,7 @@ TF_VARS=(
   -var "gateway_image=${GATEWAY_IMAGE}"
   -var "console_enabled=${CONSOLE}"
   -var "budget_guard_enabled=${BUDGET_GUARD}"
+  -var "site_enabled=${SITE}"
 )
 
 terraform plan -input=false -out=day0.plan "${TF_VARS[@]}"

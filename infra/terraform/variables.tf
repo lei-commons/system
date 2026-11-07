@@ -49,6 +49,12 @@ variable "budget_pubsub_enabled" {
   default     = true
 }
 
+variable "site_enabled" {
+  description = "Create the private site and API. Push the image first: the deploy-site workflow does this."
+  type        = bool
+  default     = false
+}
+
 variable "budget_guard_enabled" {
   description = "Create the budget guard. Push the image first: the deploy-budget-guard workflow does this."
   type        = bool

@@ -31,6 +31,11 @@ output "console_url" {
   value       = var.console_enabled ? google_cloud_run_v2_service.console[0].uri : ""
 }
 
+output "site_url" {
+  description = "The private site and API. Empty until site_enabled is true."
+  value       = var.site_enabled ? google_cloud_run_v2_service.site[0].uri : ""
+}
+
 output "artifact_registry" {
   value = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.images.repository_id}"
 }
