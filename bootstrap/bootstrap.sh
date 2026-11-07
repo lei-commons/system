@@ -109,6 +109,15 @@ if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
   ORG_ID="$(gh api "orgs/${ORG}" --jq .id 2>/dev/null || true)"
 fi
 
+# Services that exist must stay: leaving these options out must never remove them.
+if [[ -z "$GATEWAY_IMAGE" ]]; then
+  GATEWAY_IMAGE="$(gcloud run services describe conduct-gateway --project "$PROJECT" --region "$REGION" \
+    --format='value(spec.template.spec.containers[0].image)' 2>/dev/null || true)"
+fi
+if [[ "$CONSOLE" == false ]] && gcloud run services describe owner-console --project "$PROJECT" --region "$REGION" >/dev/null 2>&1; then
+  CONSOLE=true
+fi
+
 cd infra/terraform
 terraform init -input=false -backend-config="bucket=${STATE_BUCKET}"
 
@@ -133,6 +142,17 @@ if [[ "$AUTO_APPROVE" != 1 ]]; then
 fi
 terraform apply -input=false day0.plan
 
+# The control state belongs to the owner: write it once, and never over an existing file.
+# The budget field is in USD, so it is only set when the budget given here is USD too.
+STATE_FILE="$(mktemp)"
+if [[ "$CURRENCY" == "USD" ]]; then
+  printf '{"state":"paused","paused_components":[],"monthly_budget_usd":%s,"updated_by":"bootstrap"}\n' "$BUDGET" > "$STATE_FILE"
+else
+  printf '{"state":"paused","paused_components":[],"updated_by":"bootstrap"}\n' > "$STATE_FILE"
+fi
+gcloud storage cp --no-clobber --content-type=application/json "$STATE_FILE" "gs://${PROJECT}-control/state.json"
+rm -f "$STATE_FILE"
+
 WIF="$(terraform output -raw workload_identity_provider)"
 DEPLOYER="$(terraform output -json service_accounts | python3 -c 'import json,sys; print(json.load(sys.stdin)["deployer"])')"
 PUBLISHER="$(terraform output -json service_accounts | python3 -c 'import json,sys; print(json.load(sys.stdin)["publisher"])')"
@@ -150,6 +170,10 @@ declare -A VARS=(
   [MONTHLY_BUDGET_USD]="$BUDGET"
   [OWNER_LOGIN]="$GH_LOGIN"
 )
+
+if [[ "$CURRENCY" != "USD" ]]; then
+  unset 'VARS[MONTHLY_BUDGET_USD]'  # the budget given here isn't in USD
+fi
 
 echo
 echo "GitHub organisation variables for ${ORG}:"

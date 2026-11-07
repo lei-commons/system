@@ -93,21 +93,13 @@ resource "google_storage_bucket" "control" {
   depends_on = [google_project_service.apis]
 }
 
-# The system starts paused. The owner switches it to running from the console
-# (or by editing this object) after the day-zero checks pass.
-resource "google_storage_bucket_object" "control_state" {
-  bucket       = google_storage_bucket.control.name
-  name         = "state.json"
-  content_type = "application/json"
-  content = jsonencode({
-    state              = "paused"
-    paused_components  = []
-    monthly_budget_usd = var.monthly_budget_usd
-    updated_by         = "bootstrap"
-  })
+# state.json belongs to the owner, so Terraform must never manage it. While it
+# did, a rerun replaced the file as soon as it differed, undoing owner commands.
+# bootstrap.sh creates it once, if it is missing. This forgets it without deleting it.
+removed {
+  from = google_storage_bucket_object.control_state
 
   lifecycle {
-    # After day zero the owner owns this object. Terraform never overwrites it.
-    ignore_changes = [content]
+    destroy = false
   }
 }
