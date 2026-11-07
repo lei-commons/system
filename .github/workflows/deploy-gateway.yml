@@ -1,0 +1,43 @@
+# Builds the conduct gateway image and rolls it out to the gateway and the
+# egress-check job, then proves the network again. The deployer identity can
+# do this from system@main only.
+name: deploy-gateway
+
+on:
+  push:
+    branches: [main]
+    paths: ["services/conduct_proxy/**", "packages/lc_core/**", "config/egress-allowlist.yaml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-gateway
+  cancel-in-progress: false
+
+env:
+  IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/lei-commons/conduct-gateway
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Build and push
+        run: |
+          gcloud auth configure-docker "${{ vars.GCP_REGION }}-docker.pkg.dev" --quiet
+          docker build -f services/conduct_proxy/Dockerfile -t "$IMAGE:$GITHUB_SHA" .
+          docker push "$IMAGE:$GITHUB_SHA"
+      - name: Roll out
+        run: |
+          gcloud run services update conduct-gateway --region "${{ vars.GCP_REGION }}" --image "$IMAGE:$GITHUB_SHA"
+          gcloud run jobs update egress-check --region "${{ vars.GCP_REGION }}" --image "$IMAGE:$GITHUB_SHA"
+      - name: Prove the network again
+        run: gcloud run jobs execute egress-check --region "${{ vars.GCP_REGION }}" --wait
