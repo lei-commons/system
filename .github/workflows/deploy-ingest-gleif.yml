@@ -1,6 +1,6 @@
 # Builds the GLEIF ingestion job and deploys it on the sealed jobs network,
-# then runs it once. While the system is paused the run stops at its first
-# check, which proves the job is wired up without fetching anything.
+# schedules it daily, then runs it once. While the system is paused every run
+# stops at its first check.
 name: deploy-ingest-gleif
 
 on:
@@ -45,5 +45,14 @@ jobs:
             --network lc-jobs --subnet "lc-jobs-$REGION" --vpc-egress all-traffic \
             --set-env-vars "LC_GATEWAY_URL=$GATEWAY,LC_DATA_BUCKET=$PROJECT-data,LC_CONTROL_STATE_URI=gs://$PROJECT-control/state.json" \
             --max-retries 0 --task-timeout 3600 --memory 2Gi
-      - name: Run once (stops at the control gate while paused)
+      - name: Schedule it daily at 02:00 UTC, the design's cycle time
+        run: |
+          VERB=create
+          gcloud scheduler jobs describe ingest-gleif-daily --location "$REGION" >/dev/null 2>&1 && VERB=update
+          gcloud scheduler jobs "$VERB" http ingest-gleif-daily --location "$REGION" \
+            --schedule "0 2 * * *" --time-zone UTC --http-method POST \
+            --uri "https://run.googleapis.com/v2/projects/$PROJECT/locations/$REGION/jobs/ingest-gleif:run" \
+            --oauth-service-account-email "lc-workflow@$PROJECT.iam.gserviceaccount.com"
+      # Safe to repeat: a publish already processed is skipped, and a paused system stops at the gate.
+      - name: Run once now
         run: gcloud run jobs execute ingest-gleif --region "$REGION" --wait
