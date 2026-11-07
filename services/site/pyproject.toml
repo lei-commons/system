@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lc-site"
+version = "0.1.0"
+description = "The lei-commons site and API, private to the owner until they approve going public"
+requires-python = ">=3.11"
+license = {text = "Apache-2.0"}
+dependencies = ["duckdb>=1.0", "google-auth[requests]>=2.30", "google-cloud-storage>=2.16"]  # also needs lc-core
+
+[project.optional-dependencies]
+test = ["pytest>=8", "pyarrow>=15"]
+
+[tool.setuptools.packages.find]
+include = ["lc_site*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

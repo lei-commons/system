@@ -14,6 +14,7 @@ locals {
     console      = "Owner console backend (behind IAP, owner only)"
     budget-guard = "Pauses the system when spend reaches the owner's cap; cannot resume"
     gateway      = "Runs the conduct gateway, the only route to the internet for jobs"
+    site         = "Serves the private site and API from the latest snapshot; reads snapshots only"
     # Used only by the owner's workflows in the control repo. Never an agent identity.
     control-operator = "Writes the control state on the owner's command, from control@main only"
   }
@@ -24,7 +25,8 @@ locals {
   common_roles = ["roles/logging.logWriter", "roles/monitoring.metricWriter"]
 
   project_roles = {
-    deployer  = ["roles/run.developer", "roles/workflows.editor", "roles/artifactregistry.writer", "roles/cloudscheduler.admin"]
+    # logging.viewer lets deploy workflows read job results; it grants no write access.
+    deployer  = ["roles/run.developer", "roles/workflows.editor", "roles/artifactregistry.writer", "roles/cloudscheduler.admin", "roles/logging.viewer"]
     ingest    = []
     crawler   = []
     resolver  = ["roles/bigquery.jobUser"]
@@ -36,6 +38,7 @@ locals {
     # budget-guard has no project roles beyond logging; it writes only the control bucket.
     budget-guard = []
     gateway      = []
+    site         = []
     # No project roles: it only touches the two buckets below.
     control-operator = []
   }
@@ -49,7 +52,7 @@ locals {
     }
     snapshots = {
       "roles/storage.objectUser"   = ["publisher"]
-      "roles/storage.objectViewer" = ["console"]
+      "roles/storage.objectViewer" = ["console", "site"]
     }
     decision_log = {
       "roles/storage.objectCreator" = ["ingest", "crawler", "resolver", "maker", "checker", "publisher", "workflow", "console", "budget-guard", "control-operator"]

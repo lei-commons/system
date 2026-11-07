@@ -57,6 +57,8 @@ jobs:
       - run: pytest -q services/ingest_gb
       - run: pip install -e packages/lc_publish
       - run: pytest -q packages/lc_publish
+      - run: pip install -e services/site
+      - run: pytest -q services/site
       - run: pip install -e services/conduct_proxy
       - run: pytest -q services/conduct_proxy
       - run: pip install -e agents/harness
@@ -75,6 +77,8 @@ jobs:
           docker run --rm ingest-gleif python -c "import os; from lc_core.allowlist import AllowList; a = AllowList.load(os.environ['LC_FIELDS_CONFIG']); assert 'legalName' in a.allowed['entity']; print('allow-list loads')"
       - name: Companies House job image builds
         run: docker build -f services/ingest_gb/Dockerfile -t ingest-gb .
+      - name: Site image builds
+        run: docker build -f services/site/Dockerfile -t lei-commons-site .
       - name: Console image builds
         run: docker build -f services/console/Dockerfile -t owner-console .
       - name: Gateway image builds and starts
