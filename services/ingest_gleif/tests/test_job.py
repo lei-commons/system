@@ -122,7 +122,7 @@ def test_next_day_records_only_what_changed():
     store = MemStore()
     go(FakeGateway([zipped([row("5493001KJTIIGC8Y1R12", "01234567")])], publish="2026-11-06 08:00:00"), store)
     go(FakeGateway([zipped([row("5493001KJTIIGC8Y1R12", "01234567", status="INACTIVE")])]), store)
-    (change,) = store.changes["2026-11-07T080000"]
+    (change,) = store.changes["2026-11-07T080000-LastDay"]
     assert change["fieldPath"] == "legalStatus" and change["newValue"] == "INACTIVE"
     assert store.manifest["records"] == 1
 
@@ -136,7 +136,7 @@ def test_crash_before_manifest_reruns_without_duplicates():
         go(gw, store)
     del store.write_manifest
     out, _ = go(gw, store)
-    assert out == "done" and store.changes["2026-11-07T080000"] == [] and len(all_records(store)) == 1
+    assert out == "done" and store.changes["2026-11-07T080000-LastDay"] == [] and len(all_records(store)) == 1
 
 
 def test_sole_proprietors_never_stored():

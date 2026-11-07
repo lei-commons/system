@@ -6,7 +6,7 @@ name: deploy-ingest-gleif
 on:
   push:
     branches: [main]
-    paths: ["services/ingest_gleif/**", "packages/lc_ingest/**", "packages/lc_core/**", "config/fields.yaml"]
+    paths: ["services/ingest_gleif/**", "packages/lc_ingest/**", "packages/lc_core/**", "config/fields.yaml", ".github/workflows/deploy-ingest-gleif.yml"]
   workflow_dispatch:
 
 permissions:
