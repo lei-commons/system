@@ -250,3 +250,25 @@ def test_failure_mid_stream_is_logged(env):
             break
         time.sleep(0.01)
     assert logs[-1]["rule"] == "stream-failed"
+
+
+def test_bodies_go_back_chunked_for_cloud_runs_size_cap(env):
+    port, up, _, _, _ = env
+    big = bytes(range(256)) * 4096  # 1 MiB, several gateway chunks
+    up.routes[("api.gleif.org", "/big")] = FakeResponse(200, big, {"Content-Length": str(len(big))})
+    status, headers, body = call(port, "https://api.gleif.org/big")
+    assert status == 200 and body == big
+    assert headers.get("Transfer-Encoding") == "chunked" and "Content-Length" not in headers
+
+
+def test_head_keeps_the_length_and_sends_no_body(env):
+    port, up, _, _, _ = env
+    up.routes[("api.gleif.org", "/f")] = FakeResponse(200, b"", {"Content-Length": "485000000"})
+    status, headers, body = call(port, "https://api.gleif.org/f", method="HEAD")
+    assert status == 200 and headers.get("Content-Length") == "485000000" and body == b""
+
+
+def test_empty_body_is_a_valid_chunked_response(env):
+    port, up, _, _, _ = env
+    up.routes[("api.gleif.org", "/empty")] = FakeResponse(204, b"")
+    assert call(port, "https://api.gleif.org/empty")[2] == b""

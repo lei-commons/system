@@ -62,4 +62,4 @@ Jobs call the service's `run.app` URL over HTTPS, which private DNS routes throu
 ## Known limits
 
 - **Google services are reachable directly.** Jobs need Google's private range to reach the gateway and Google APIs, and that range also serves other people's buckets and `run.app` services. Closing this needs VPC Service Controls, which needs organization-level access.
-- **Large downloads are untested.** Cloud Run limits some HTTP/1 response sizes, and bulk files such as the GLEIF golden copy may hit that. Test this in M2 before relying on it; the fix is likely to be chunked responses.
+- **Large downloads.** Bodies go back chunked, because Cloud Run caps an unchunked HTTP/1 response at 32 MiB. Requests still time out after an hour, so a very large file on a slow host could fail.

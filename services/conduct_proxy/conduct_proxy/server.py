@@ -39,8 +39,11 @@ GATE_TTL = 30.0
 CHUNK = 64 * 1024
 
 # Only these response headers come back. Set-Cookie is absent by design.
+# Content-Length is left out on purpose: bodies go back chunked, because Cloud Run
+# caps an HTTP/1 response at 32 MiB unless it is chunked or streamed, and the
+# GLEIF full file is 485 MB.
 RETURN_HEADERS = (
-    "content-type", "content-length", "content-encoding", "content-range", "accept-ranges",
+    "content-type", "content-encoding", "content-range", "accept-ranges",
     "etag", "last-modified", "cache-control", "location", "retry-after",
 )
 
@@ -205,13 +208,20 @@ class Handler(BaseHTTPRequestHandler):
                 if value is not None:
                     self.send_header(name, value)
             self.send_header("Connection", "close")
-            self.end_headers()
-            if self.command != "HEAD":
+            if self.command == "HEAD":
+                length = resp.getheader("content-length")
+                if length is not None:
+                    self.send_header("Content-Length", length)
+                self.end_headers()
+            else:
+                self.send_header("Transfer-Encoding", "chunked")
+                self.end_headers()
                 while True:
                     chunk = resp.read(CHUNK)
                     if not chunk:
                         break
-                    self.wfile.write(chunk)
+                    self.wfile.write(b"%x\r\n%s\r\n" % (len(chunk), chunk))
+                self.wfile.write(b"0\r\n\r\n")
             self._record(d, resp.status, "allowed")
         except (OSError, http.client.HTTPException):
             self.close_connection = True  # headers are already sent, so all we can do is cut it
