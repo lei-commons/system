@@ -7,7 +7,7 @@ from types import SimpleNamespace as NS
 import pytest
 
 from lc_console.auth import IAP_ISSUER, SESSION_SECONDS, Sessions, verify_iap
-from lc_console.server import COOKIE, App, make_server
+from lc_console.server import COOKIE, PENDING, App, make_server
 from lc_console.totp import Verifier, code_at, new_secret
 
 AUD = "/projects/1/locations/us-central1/services/owner-console"
@@ -146,24 +146,89 @@ def test_login_failures_are_audited_without_the_code(env):
     assert "999999" not in str(env.logs)
 
 
-def test_enrolment_needs_iap_and_a_working_code(env):
+def pending_key(e):
+    assert e.store.value.startswith(PENDING)
+    return e.store.value[len(PENDING):]
+
+
+def test_enrolment_needs_iap(env):
     env.store.value = None
     assert call(env, token=None).status == 403
-    r = call(env)
-    assert "Set up your authenticator" in r.body and env.store.value is None
-    pending = env.app.pending
-    assert pending in r.body
-    assert call(env, "/enrol", "POST", body="code=000000").status == 403
     assert env.store.value is None
 
 
-def test_enrolment_stores_the_secret_only_after_a_good_code(env):
+def test_enrolment_shows_a_stored_pending_key_and_a_qr_code(env):
+    env.store.value = None
+    r = call(env)
+    assert "Set up your authenticator" in r.body and pending_key(env) in r.body
+    assert "data:image/svg+xml" in r.body and "img-src data:" in r.headers["content-security-policy"]
+
+
+def test_key_survives_reloads_and_a_restart(env):
+    """The bug that blocked the first enrolment: a restart replaced the key."""
     env.store.value = None
     call(env)
-    pending = env.app.pending
-    good = code_at(pending, int(env.clock.t) // 30)
+    first = pending_key(env)
+    call(env)
+    assert pending_key(env) == first
+    restarted = App(owners=[OWNER], audience=AUD, store=env.store, iap=fake_iap, log=lambda r: None)
+    srv = make_server(restarted, ("127.0.0.1", 0))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    r = call(NS(port=srv.server_address[1]))
+    srv.shutdown()
+    srv.server_close()
+    assert first in r.body and pending_key(env) == first
+
+
+def test_pending_key_gives_no_access_without_a_good_code(env):
+    env.store.value = None
+    call(env)
+    r = call(env, "/enrol", "POST", body="code=abc")
+    assert r.status == 403 and "set-cookie" not in r.headers
+    assert env.store.value.startswith(PENDING)
+    assert call(env, "/verify", "POST", body="code=123456").status == 404
+
+
+def test_wrong_code_keeps_the_same_key_on_screen(env):
+    env.store.value = None
+    call(env)
+    first = pending_key(env)
+    r = call(env, "/enrol", "POST", body="code=abc")
+    assert first in r.body and "didn't work" in r.body
+
+
+def test_enrolment_tolerates_a_slow_phone_clock(env):
+    env.store.value = None
+    call(env)
+    good = code_at(pending_key(env), int(env.clock.t) // 30 - 3)
+    assert call(env, "/enrol", "POST", body=f"code={good}").status == 303
+
+
+def test_lockout_is_explained_during_enrolment(env):
+    env.store.value = None
+    call(env)
+    for _ in range(5):
+        r = call(env, "/enrol", "POST", body="code=abc")
+    assert "Wait five minutes" in r.body
+
+
+def test_enrolment_confirms_the_key_after_a_good_code(env):
+    env.store.value = None
+    call(env)
+    key = pending_key(env)
+    good = code_at(key, int(env.clock.t) // 30)
     r = call(env, "/enrol", "POST", body=f"code={good}")
-    assert r.status == 303 and env.store.value == pending and env.app.pending is None
+    assert r.status == 303 and env.store.value == key
+    assert "paused" in call(env, cookie=r.headers["set-cookie"].split(";")[0].split("=", 1)[1]).body
+
+
+def test_failed_store_write_during_enrolment_fails_closed(env):
+    env.store.value = None
+    call(env)
+    good = code_at(pending_key(env), int(env.clock.t) // 30)
+    env.store.put = lambda v: (_ for _ in ()).throw(RuntimeError("down"))
+    r = call(env, "/enrol", "POST", body=f"code={good}")
+    assert r.status == 503 and "set-cookie" not in r.headers
 
 
 def test_enrolment_is_closed_once_a_secret_exists(env):

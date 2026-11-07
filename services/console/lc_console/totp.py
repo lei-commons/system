@@ -18,6 +18,7 @@ import time
 STEP = 30
 DIGITS = 6
 WINDOW = 1            # one step either side, for clock drift
+ENROL_WINDOW = 4      # two minutes either way, so a slow phone clock can't block setup
 MAX_FAILURES = 5
 LOCKOUT_SECONDS = 300
 
@@ -52,7 +53,7 @@ class Verifier:
         with self._lock:
             return self._clock() < self._locked_until
 
-    def verify(self, secret: str, code: str) -> bool:
+    def verify(self, secret: str, code: str, window: int = WINDOW) -> bool:
         with self._lock:
             now = self._clock()
             if now < self._locked_until:
@@ -60,7 +61,7 @@ class Verifier:
             matched = None
             if isinstance(code, str) and len(code) == DIGITS and code.isascii() and code.isdigit():
                 current = int(now) // STEP
-                for step in range(current - WINDOW, current + WINDOW + 1):
+                for step in range(current - window, current + window + 1):
                     if hmac.compare_digest(code_at(secret, step), code):
                         matched = step
             if matched is None or matched <= self._last_step:  # wrong, or already used
