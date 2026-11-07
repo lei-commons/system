@@ -114,8 +114,9 @@ resource "google_billing_budget" "monthly" {
   dynamic "all_updates_rule" {
     for_each = var.budget_pubsub_enabled ? [1] : []
     content {
-      pubsub_topic                   = google_pubsub_topic.budget.id
-      disable_default_iam_recipients = false
+      pubsub_topic                     = google_pubsub_topic.budget.id
+      disable_default_iam_recipients   = false
+      monitoring_notification_channels = [google_monitoring_notification_channel.owner.id]
     }
   }
 

@@ -36,6 +36,15 @@ output "site_url" {
   value       = var.site_enabled ? google_cloud_run_v2_service.site[0].uri : ""
 }
 
+output "database_connection" {
+  description = "Cloud SQL connection name for the serving database."
+  value       = google_sql_database_instance.directory.connection_name
+}
+
+output "database_private_ip" {
+  value = google_sql_database_instance.directory.private_ip_address
+}
+
 output "artifact_registry" {
   value = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.images.repository_id}"
 }

@@ -15,6 +15,7 @@ locals {
     budget-guard = "Pauses the system when spend reaches the owner's cap; cannot resume"
     gateway      = "Runs the conduct gateway, the only route to the internet for jobs"
     site         = "Serves the private site and API from the latest snapshot; reads snapshots only"
+    loader       = "Loads each snapshot into the serving database"
     # Used only by the owner's workflows in the control repo. Never an agent identity.
     control-operator = "Writes the control state on the owner's command, from control@main only"
   }
@@ -39,7 +40,9 @@ locals {
     budget-guard = []
     gateway      = []
     # Read-only, for the system view: job runs, services and schedules.
-    site = ["roles/run.viewer", "roles/cloudscheduler.viewer"]
+    site = ["roles/run.viewer", "roles/cloudscheduler.viewer", "roles/cloudsql.client", "roles/cloudsql.instanceUser"]
+    # Connects to the serving database; the admin password comes from Secret Manager.
+    loader = ["roles/cloudsql.client"]
     # No project roles: it only touches the two buckets below.
     control-operator = []
   }
@@ -53,7 +56,7 @@ locals {
     }
     snapshots = {
       "roles/storage.objectUser"   = ["publisher"]
-      "roles/storage.objectViewer" = ["console", "site"]
+      "roles/storage.objectViewer" = ["console", "site", "loader"]
     }
     decision_log = {
       "roles/storage.objectCreator" = ["ingest", "crawler", "resolver", "maker", "checker", "publisher", "workflow", "console", "budget-guard", "control-operator"]

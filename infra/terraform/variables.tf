@@ -49,6 +49,12 @@ variable "budget_pubsub_enabled" {
   default     = true
 }
 
+variable "alert_email" {
+  description = "Where alerts go. Defaults to the owner's account."
+  type        = string
+  default     = ""
+}
+
 variable "site_enabled" {
   description = "Create the private site and API. Push the image first: the deploy-site workflow does this."
   type        = bool
