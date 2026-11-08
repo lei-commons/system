@@ -56,8 +56,8 @@ def test_build_and_benchmark_against_postgres():
         conn.execute("CREATE SCHEMA live")
         conn.execute(sql.SQL(TABLES).format(s=sql.Identifier("live")))
         for i in range(50):
-            conn.execute("INSERT INTO live.entities (directory_id, lei, legal_name, sources, country, names_text, registration_number) "
-                         "VALUES (%s, %s, %s, '{gb-coh}', 'GB', %s, %s)",
+            conn.execute("INSERT INTO live.entities (directory_id, lei, legal_name, sources, country, names_text, registration_number, "
+                         "filter_terms) VALUES (%s, %s, %s, '{gb-coh}', 'GB', %s, %s, '{c=gb,s=none,src=gb-coh}')",
                          [f"LECOZZ{i:014d}", f"LEI{i:017d}", f"ACME {i} LIMITED", f"ACME {i} LIMITED", f"SC{i:06d}"])
         for i in range(1, 50):
             conn.execute("INSERT INTO live.relationships VALUES (%s, %s, %s, %s, %s, 'IS_DIRECTLY_CONSOLIDATED_BY', 'ACTIVE')",

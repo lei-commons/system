@@ -17,7 +17,7 @@ from psycopg import sql
 
 LIVE = "live"
 # Bump when the schema or indexes change, so the next run reloads the same snapshot.
-LOAD_VERSION = 2
+LOAD_VERSION = 3
 ENTITY_COLUMNS = [  # (parquet column, table column, kind)
     ("directoryId", "directory_id", "text"), ("lei", "lei", "text"), ("legalName", "legal_name", "text"),
     ("legalForm", "legal_form", "text"), ("legalJurisdiction", "legal_jurisdiction", "text"),
@@ -40,9 +40,10 @@ CREATE TABLE {s}.entities (
   registration_authority text, registration_number text, legal_status text, incorporation_date text,
   dissolution_date text, record_mode text, registry_url text, other_names jsonb, legal_address jsonb,
   headquarters_address jsonb, industry_codes jsonb, labels jsonb, sources text[] NOT NULL, country text NOT NULL,
-  names_text text NOT NULL,
-  -- 'simple' keeps digits and doesn't stem, so "3M" and "APPLE 12" stay searchable
-  search tsvector GENERATED ALWAYS AS (to_tsvector('simple', names_text)) STORED
+  names_text text NOT NULL, filter_terms text[] NOT NULL,
+  -- 'simple' keeps digits and doesn't stem, so "3M" and "APPLE 12" stay searchable. The filter
+  -- terms ride in the same index, so "gmbh" in GB is one index lookup, not a scan of every GmbH.
+  search tsvector GENERATED ALWAYS AS (to_tsvector('simple', names_text) || array_to_tsvector(filter_terms)) STORED
 );
 CREATE TABLE {s}.relationships (
   relationship_id text PRIMARY KEY, start_node text, end_node text, start_id text, end_id text,
@@ -63,13 +64,26 @@ INDEXES = [
 ]
 
 
+FILTER_KINDS = {"country": "c", "status": "s", "source": "src"}
+
+
+def filter_term(kind: str, value: str) -> str:
+    """A filter as a search term. The '=' keeps it apart from words: the parser
+    splits on it, so no word in a name or a query can ever produce one."""
+    return f"{FILTER_KINDS[kind]}=" + re.sub(r"[^a-z0-9-]+", "_", (value or "none").strip().lower())
+
+
+def _filter_terms(country, status, sources):
+    return [filter_term("country", country), filter_term("status", status)] + [filter_term("source", s) for s in sources]
+
+
 def _names_text(name, other_names_json):
     others = json.loads(other_names_json) if other_names_json else []
     return " | ".join([name or ""] + [o for o in others if isinstance(o, str)])
 
 
 def _copy_entities(cur, schema, files):
-    cols = [c for _, c, _ in ENTITY_COLUMNS] + ["country", "names_text"]
+    cols = [c for _, c, _ in ENTITY_COLUMNS] + ["country", "names_text", "filter_terms"]
     copy = sql.SQL("COPY {}.entities ({}) FROM STDIN").format(sql.Identifier(schema), sql.SQL(", ").join(map(sql.Identifier, cols)))
     count = 0
     with cur.copy(copy) as out:
@@ -85,7 +99,10 @@ def _copy_entities(cur, schema, files):
                         if kind == "list":
                             value = [v for v in (value or "").split(",") if v]
                         row.append(value)
-                    row += [country, _names_text(data["legalName"][i], data["otherNames"][i] if "otherNames" in data else None)]
+                    sources = row[-1]  # sources is the last entity column
+                    status = data["legalStatus"][i] if "legalStatus" in data else None
+                    row += [country, _names_text(data["legalName"][i], data["otherNames"][i] if "otherNames" in data else None),
+                            _filter_terms(country, status, sources)]
                     out.write_row(row)
                     count += 1
     return count

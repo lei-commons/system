@@ -226,20 +226,23 @@ def test_a_new_load_version_reloads_the_same_snapshot(loaded):
         conn.rollback()
 
 
-def test_common_words_come_from_postgres_statistics(d):
-    assert "many" in d.common
-    assert d.search("many")["total"] == 150  # the scan path gives the same answer as the index
+def test_filters_are_index_terms_that_no_word_can_produce(d):
+    from lc_directory.load import filter_term
+
+    assert filter_term("country", "gb") == "c=gb" and filter_term("status", "In Liquidation") == "s=in_liquidation"
+    assert filter_term("source", "gb-coh") == "src=gb-coh" and filter_term("status", None) == "s=none"
+    assert d.search("c=gb")["total"] == 0 and d.search("src gleif")["total"] == 0  # words never match filter terms
+    assert d.search("many", country="gb")["total"] == 150 and d.search("many", status="Active", source="gb-coh")["total"] == 0
 
 
-def test_a_slow_scan_falls_back_to_the_index(d, monkeypatch):
-    calls = []
-    original = d._rows
+def test_word_search_uses_the_word_index_with_filters_inside_it(loaded):
+    from lc_directory.pg import text_match
 
-    def rows(query, params, settings=()):
-        calls.append(bool(settings))
-        if settings:
-            raise psycopg.errors.QueryCanceled("simulated")
-        return original(query, params)
-
-    monkeypatch.setattr(d, "_rows", rows)
-    assert d.search("many")["total"] == 150 and calls[:2] == [True, False]
+    match, params = text_match("many", country="GB", source="gb-coh")
+    with psycopg.connect(DSN) as conn:
+        conn.execute("SET enable_seqscan = off")
+        rows = conn.execute(f"EXPLAIN SELECT directory_id FROM live.entities WHERE search @@ {match}", params).fetchall()
+        hits = conn.execute(f"SELECT count(*) FROM live.entities WHERE search @@ {match}", params).fetchone()[0]
+    p = "\n".join(r[0] for r in rows)
+    assert "Bitmap Index Scan" in p and "Filter" not in p, p
+    assert hits == 150
