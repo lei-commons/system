@@ -37,6 +37,10 @@ def run(*, bucket, connect, readers, gate=lambda: require_running(COMPONENT), lo
         return "no-snapshot"
     latest = json.loads(pointer.download_as_bytes())
     with connect() as conn:
+        # One load at a time. Postgres releases this lock by itself if the loader dies.
+        if not conn.execute("SELECT pg_try_advisory_lock(hashtext('lc-load-db'))").fetchone()[0]:
+            log({"event": "busy", "reason": "another load is running"})
+            return "busy"
         if already_loaded(conn, latest["snapshotRoot"]):
             log({"event": "already-loaded", "date": latest["date"]})
             return "already-loaded"
@@ -68,7 +72,7 @@ def main() -> int:
 
     outcome = run(bucket=storage.Client().bucket(os.environ["LC_SNAPSHOT_BUCKET"]), connect=connect,
                   readers=[os.environ["LC_SITE_DB_USER"]])
-    return 0 if outcome in ("loaded", "already-loaded", "halted", "no-snapshot") else 1
+    return 0 if outcome in ("loaded", "already-loaded", "halted", "no-snapshot", "busy") else 1
 
 
 if __name__ == "__main__":

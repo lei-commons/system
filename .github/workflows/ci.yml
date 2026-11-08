@@ -57,7 +57,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e "packages/lc_core[test]"
+      - run: pip install -e "packages/lc_core[test,gcp]"  # gcp: the lease tests need the storage client
       - run: pytest -q packages/lc_core
       - run: pytest -q scripts/tests
       - run: pip install -e packages/lc_ingest
