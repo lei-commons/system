@@ -29,6 +29,11 @@ from .events import GENESIS, DecisionLog, Event, utcnow, verify
 SCALARS = (int, float, str, bool)
 
 
+def _n(value) -> str:
+    """A count with thousands separators: 167,618."""
+    return f"{value:,}" if isinstance(value, int) and not isinstance(value, bool) else str(value)
+
+
 def _refs(record: dict, skip=("event", "reason")) -> dict:
     """Scalar fields only: counts, keys, hashes. Nested values are left out."""
     return {k: v for k, v in sorted(record.items()) if k not in skip and isinstance(v, SCALARS) and v is not None}
@@ -39,8 +44,8 @@ def _event(actor: str, record: dict) -> Event | None:
     kind = record.get("event")
     subject = " ".join(str(record[k]) for k in ("source", "publish") if record.get(k)) or actor.split(":", 1)[-1]
     if kind == "done":
-        reason = (f"{record.get('changes', 0)} changes ({record.get('new_records', 0)} new, "
-                  f"{record.get('existing_changed', 0)} changed); {record.get('total', 0)} records stored")
+        reason = (f"{_n(record.get('changes', 0))} changes ({_n(record.get('new_records', 0))} new, "
+                  f"{_n(record.get('existing_changed', 0))} changed); {_n(record.get('total', 0))} records stored")
         return Event(actor, "ingested", subject, "done", reason, refs=_refs(record))
     if kind == "held":
         return Event(actor, "ingested", subject, "held", record.get("reason") or "the volume guard held the update",
@@ -48,10 +53,10 @@ def _event(actor: str, record: dict) -> Event | None:
     if kind == "already-done":
         return Event(actor, "checked", subject, "skipped", "already ingested", refs=_refs(record))
     if kind == "built":
-        reason = f"{record.get('records', 0)} records, {record.get('relationships', 0)} relationships"
+        reason = f"{_n(record.get('records', 0))} records, {_n(record.get('relationships', 0))} relationships"
         return Event(actor, "built", f"snapshot {record.get('date', '')}".strip(), "done", reason, refs=_refs(record))
     if kind == "loaded":
-        reason = f"{record.get('records', 0)} records loaded in {record.get('seconds', 0)} s"
+        reason = f"{_n(record.get('records', 0))} records loaded in {record.get('seconds', 0)} s"
         return Event(actor, "loaded", f"snapshot {record.get('date', '')}".strip(), "done", reason, refs=_refs(record))
     if kind == "already-loaded":
         return Event(actor, "checked", f"snapshot {record.get('date', '')}".strip(), "skipped", "already loaded",
@@ -63,26 +68,26 @@ def _event(actor: str, record: dict) -> Event | None:
         return Event(actor, "checked", subject, "skipped", f"{reasons[kind]}: {detail}" if detail else reasons[kind],
                      refs=_refs(record))
     if kind == "reconciled":
-        reason = (f"{record.get('absent', 0)} of {record.get('total', 0)} records were in no part of the month's file "
+        reason = (f"{_n(record.get('absent', 0))} of {_n(record.get('total', 0))} records were in no part of the month's file "
                   "and are labelled absent from the source")
         return Event(actor, "reconciled", subject, "done", reason, refs=_refs(record))
     if kind == "reconcile-skipped":
         return Event(actor, "reconciled", subject, "skipped", record.get("reason") or "skipped", refs=_refs(record))
     if kind == "exported":
-        reason = (f"{record.get('changes', 0)} new change files, {record.get('baseline', 0)} baseline shards; "
-                  f"{record.get('total_changes', 0)} change files in the ledger")
+        reason = (f"{_n(record.get('changes', 0))} new change files, {_n(record.get('baseline', 0))} baseline shards; "
+                  f"{_n(record.get('total_changes', 0))} change files in the ledger")
         return Event(actor, "exported", f"ledger {subject}", "done", reason, refs=_refs(record))
     if kind == "rebuilt":
         ok = not record.get("mismatchedShards")
-        reason = (f"all {record.get('shards', 0)} shards rebuild from the ledger ({record.get('records', 0)} records)" if ok
-                  else f"{record['mismatchedShards']} shards don't rebuild from the ledger")
+        reason = (f"all {_n(record.get('shards', 0))} shards rebuild from the ledger ({_n(record.get('records', 0))} records)" if ok
+                  else f"{_n(record['mismatchedShards'])} shards don't rebuild from the ledger")
         return Event(actor, "verified", f"ledger {subject}", "done" if ok else "failed", reason, refs=_refs(record))
     if kind == "rebuild-skipped":
         return Event(actor, "verified", f"ledger {subject}", "skipped", record.get("reason") or "skipped", refs=_refs(record))
     if kind == "log-sealed":
         if not record.get("days"):
             return None
-        reason = f"{record['days']} day(s) sealed; {record.get('day')} has {record.get('events', 0)} events"
+        reason = f"{_n(record['days'])} day(s) sealed; {record.get('day')} has {record.get('events', 0)} events"
         return Event(actor, "sealed", "decision log", "done", reason, refs=_refs(record))
     if kind == "log-unsealed":
         return Event(actor, "sealed", "decision log", "failed", f"stopped with {record.get('error', 'an error')}",
