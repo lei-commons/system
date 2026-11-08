@@ -17,7 +17,7 @@ from psycopg import sql
 
 LIVE = "live"
 # Bump when the schema or indexes change, so the next run reloads the same snapshot.
-LOAD_VERSION = 3
+LOAD_VERSION = 4
 ENTITY_COLUMNS = [  # (parquet column, table column, kind)
     ("directoryId", "directory_id", "text"), ("lei", "lei", "text"), ("legalName", "legal_name", "text"),
     ("legalForm", "legal_form", "text"), ("legalJurisdiction", "legal_jurisdiction", "text"),
@@ -69,8 +69,16 @@ FILTER_KINDS = {"country": "c", "status": "s", "source": "src"}
 
 def filter_term(kind: str, value: str) -> str:
     """A filter as a search term. The '=' keeps it apart from words: the parser
-    splits on it, so no word in a name or a query can ever produce one."""
-    return f"{FILTER_KINDS[kind]}=" + re.sub(r"[^a-z0-9-]+", "_", (value or "none").strip().lower())
+    splits on it, so no word in a name or a query can ever produce one.
+
+    Status and source keep their case. Registers spell the same status
+    differently ("Active" at Companies House, "ACTIVE" at GLEIF), and the site
+    filters on the exact value. A case-folded term would match both, and on
+    most records a term narrows nothing (load test 6, 2026-11-08)."""
+    value = (value or "none").strip()
+    if kind == "country":
+        value = value.lower()
+    return f"{FILTER_KINDS[kind]}=" + re.sub(r"[^A-Za-z0-9-]+", "_", value)
 
 
 def _filter_terms(country, status, sources):
