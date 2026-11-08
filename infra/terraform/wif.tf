@@ -5,10 +5,13 @@ locals {
   owner_condition = var.github_org_id != "" ? "assertion.repository_owner_id == '${var.github_org_id}'" : "assertion.repository_owner == '${var.github_org}'"
 
   # "<repo>@<ref>" => service account. Only these combinations can act on GCP.
+  # The ledger repositories' sync workflows read the store and commit as the maker App.
   wif_bindings = {
-    "system@refs/heads/main"   = "deployer"
-    "releases@refs/heads/main" = "publisher"
-    "control@refs/heads/main"  = "control-operator"
+    "system@refs/heads/main"       = "deployer"
+    "releases@refs/heads/main"     = "publisher"
+    "control@refs/heads/main"      = "control-operator"
+    "ledger-gleif@refs/heads/main" = "maker"
+    "ledger-gb@refs/heads/main"    = "maker"
   }
 }
 
@@ -46,4 +49,14 @@ resource "google_service_account_iam_member" "wif" {
   service_account_id = google_service_account.sa[each.value].name
   role               = "roles/iam.workloadIdentityUser"
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repo_ref/${var.github_org}/${each.key}"
+}
+
+# The GitHub App keys are created by bootstrap/github-apps.sh, outside Terraform.
+# Each agent identity may read only its own App's key.
+resource "google_secret_manager_secret_iam_member" "app_key" {
+  for_each = toset(var.app_key_readers)
+
+  secret_id = "projects/${var.project_id}/secrets/github-app-${each.value}"
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.sa[each.value].email}"
 }

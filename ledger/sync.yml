@@ -1,0 +1,110 @@
+# The canonical copy of each ledger repository's sync workflow. Install it with
+# ledger/install.sh, which copies it to .github/workflows/sync.yml in
+# ledger-gleif and ledger-gb.
+#
+# After the daily cycle, it exports the store's new change files into this
+# repository, rebuilds every shard from the ledger and compares it with the
+# store, then commits as the lei-commons-maker App. The App's key comes from
+# Secret Manager, and the installation token is limited to this one repository.
+# Every run records its decisions in the decision log.
+name: sync
+
+on:
+  schedule:
+    - cron: "30 4 * * *" # after the 02:00 UTC daily cycle
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      DATA_BUCKET: ${{ vars.LC_DATA_BUCKET }}
+      DECISIONS_BUCKET: ${{ vars.LC_DECISIONS_BUCKET }}
+      # "<store prefix>:<directory>" pairs, for example "gleif:. gleif-rr:relationships"
+      LEDGERS: ${{ vars.LC_LEDGERS }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_MAKER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the exporter from the system repository
+        run: |
+          pip install --quiet "pyjwt[crypto]>=2.8" \
+            "lc-core[gcp] @ git+https://github.com/lei-commons/system@main#subdirectory=packages/lc_core" \
+            "lc-ingest @ git+https://github.com/lei-commons/system@main#subdirectory=packages/lc_ingest"
+      - name: A token for this repository only, as the maker App
+        run: |
+          gcloud secrets versions access latest --secret github-app-maker > "$RUNNER_TEMP/maker.pem"
+          python - <<'EOF'
+          import json, os, time, urllib.request
+          import jwt
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          api = "https://api.github.com"
+          app = json.load(urllib.request.urlopen(f"{api}/apps/lei-commons-maker"))
+          key = open(os.path.join(os.environ["RUNNER_TEMP"], "maker.pem")).read()
+          now = int(time.time())
+          token = jwt.encode({"iat": now - 60, "exp": now + 540, "iss": str(app["id"])}, key, algorithm="RS256")
+
+          def call(method, path, body=None):
+              req = urllib.request.Request(api + path, method=method, data=json.dumps(body).encode() if body else None,
+                                           headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"})
+              try:
+                  return json.load(urllib.request.urlopen(req))
+              except urllib.error.HTTPError as e:
+                  return {"status": e.code}
+
+          # The App must never be installed on control (constitution Article 1; docs/github-apps.md).
+          if call("GET", f"/repos/{repo.split('/')[0]}/control/installation").get("status") != 404:
+              raise SystemExit("the maker App can reach the control repository: refusing to run")
+          install = call("GET", f"/repos/{repo}/installation")
+          if "id" not in install:
+              raise SystemExit(f"the maker App isn't installed on {repo}")
+          access = call("POST", f"/app/installations/{install['id']}/access_tokens",
+                        {"repositories": [repo.split("/")[1]], "permissions": {"contents": "write"}})
+          print(f"::add-mask::{access['token']}")
+          with open(os.environ["GITHUB_ENV"], "a") as env:
+              env.write(f"MAKER_TOKEN={access['token']}\nMAKER_ID={app['id']}\n")
+          EOF
+          rm -f "$RUNNER_TEMP/maker.pem"
+      - name: Export and rebuild
+        id: export
+        run: |
+          changed=false
+          for pair in $LEDGERS; do
+            prefix="${pair%%:*}"; dir="${pair#*:}"
+            status=0
+            python -m lc_ingest.export export --bucket "$DATA_BUCKET" --prefix "$prefix" --dir "$dir" \
+              --decisions-bucket "$DECISIONS_BUCKET" || status=$?
+            if [ "$status" = 3 ]; then
+              echo "::notice::$prefix is mid-write; the next run exports it"
+              continue
+            fi
+            [ "$status" = 0 ] || exit "$status"
+            python -m lc_ingest.export verify --bucket "$DATA_BUCKET" --prefix "$prefix" --dir "$dir" \
+              --decisions-bucket "$DECISIONS_BUCKET"
+          done
+          if [ -n "$(git status --porcelain)" ]; then changed=true; fi
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+      - name: Commit as the maker App
+        if: steps.export.outputs.changed == 'true'
+        run: |
+          git config user.name "lei-commons-maker[bot]"
+          git config user.email "${MAKER_ID}+lei-commons-maker[bot]@users.noreply.github.com"
+          git add -A
+          git commit --quiet -m "Ledger update $(date -u +%Y-%m-%d)" -m "Exported from the store and rebuilt shard by shard before committing."
+          git push "https://x-access-token:${MAKER_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main

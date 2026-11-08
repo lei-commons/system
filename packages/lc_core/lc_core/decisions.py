@@ -62,6 +62,17 @@ def _event(actor: str, record: dict) -> Event | None:
         detail = record.get("reason")
         return Event(actor, "checked", subject, "skipped", f"{reasons[kind]}: {detail}" if detail else reasons[kind],
                      refs=_refs(record))
+    if kind == "exported":
+        reason = (f"{record.get('changes', 0)} new change files, {record.get('baseline', 0)} baseline shards; "
+                  f"{record.get('total_changes', 0)} change files in the ledger")
+        return Event(actor, "exported", f"ledger {subject}", "done", reason, refs=_refs(record))
+    if kind == "rebuilt":
+        ok = not record.get("mismatchedShards")
+        reason = (f"all {record.get('shards', 0)} shards rebuild from the ledger ({record.get('records', 0)} records)" if ok
+                  else f"{record['mismatchedShards']} shards don't rebuild from the ledger")
+        return Event(actor, "verified", f"ledger {subject}", "done" if ok else "failed", reason, refs=_refs(record))
+    if kind == "rebuild-skipped":
+        return Event(actor, "verified", f"ledger {subject}", "skipped", record.get("reason") or "skipped", refs=_refs(record))
     if kind == "log-sealed":
         if not record.get("days"):
             return None
