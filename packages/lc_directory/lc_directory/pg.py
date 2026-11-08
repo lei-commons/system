@@ -12,9 +12,9 @@ query reads a bounded number of rows, whatever it matches:
   from those rows, in one pass. So a word that matches millions of records
   costs the same as one that matches a thousand. Counts above the cap are
   reported as capped.
-  The country filter is a term in the same word index, so a common word in a
-  narrow country ("gmbh" in GB) is one index lookup that returns only real
-  matches. Status and source are checked on the matched rows (see text_match). Word searches always use the index: reading the
+  Filters are terms in the same word index, so a common word with a narrow
+  filter ("gmbh" in GB) is one index lookup that returns only real matches.
+  Values on most records are checked on rows instead (see text_match). Word searches always use the index: reading the
   table in order is fast only when matches happen to be stored early.
 - Suggestions walk the name index in order and stop after a few rows.
 - Relationship lists read one page from an index that is already in display order.
@@ -55,28 +55,52 @@ SUMMARY = ("directory_id AS \"directoryId\", legal_name AS \"legalName\", countr
 NAME_KEY = 'lower(legal_name) COLLATE "C"'  # matches the name index exactly; see lc_directory.load.INDEXES
 
 
-def text_match(q: str, country: str = "", status: str = "", source: str = ""):
+BROAD = 0.5  # a filter value on at least this share of records is checked on rows, not looked up
+
+
+def broad_values(stats: dict, records: int) -> set:
+    """(kind, value) pairs covering at least BROAD of records, from the stats each load stores."""
+    if not records:
+        return set()
+    broad = {("status", r["value"]) for r in stats.get("byStatus", []) if r["value"] and r["records"] >= BROAD * records}
+    sources = {}
+    for r in stats.get("bySources", []):
+        for source in (r["value"] or "").split(","):
+            sources[source] = sources.get(source, 0) + r["records"]
+    return broad | {("source", s) for s, n in sources.items() if s and n >= BROAD * records}
+
+
+def text_match(q: str, country: str = "", status: str = "", source: str = "", broad=frozenset()):
     """A word search as (tsquery, its params, row conditions, their params).
 
-    Country goes into the index lookup: rows are stored grouped by country, so a
-    narrow country filter checked row by row could read millions of rows. Status
-    and source are checked on the rows the words matched: their common values
-    ("Active", "gleif") cover most records, and in the index they would add a list
-    of millions of entries to every search (load test, 2026-11-08).
+    A filter can narrow a search in two ways, and each is slow where the other
+    is fast (load tests, 2026-11-08):
+    - As a term in the index lookup, it intersects with the words' matches
+      inside the index. This is fast for a narrow value. For a value on most
+      records ("ACTIVE", "gleif"), it adds a list of millions of entries to
+      every search.
+    - As a check on the rows the words matched, it costs nothing extra for a
+      broad value. For a narrow one, it may read millions of rows to find a
+      few.
+    So a value in ``broad`` (see broad_values) is only checked on rows. Any
+    other value is also looked up in the index. Country is always looked up,
+    because rows are stored grouped by country. The row check is always
+    applied, because index terms are case-folded and the filter is exact.
     """
     from .load import filter_term
 
     parts, params = ["websearch_to_tsquery('simple', %s)"], [q]
-    if country.strip():
-        parts.append("quote_literal(%s)::tsquery")
-        params.append(filter_term("country", country.strip()[:2]))
     rows, row_params = "", []
-    if status.strip():
-        rows += " AND legal_status = %s"
-        row_params.append(status.strip()[:60])
-    if source.strip():
-        rows += " AND %s = ANY(sources)"
-        row_params.append(source.strip()[:40])
+    for kind, value, check in (("country", country.strip().upper()[:2], "country = %s"),
+                               ("status", status.strip()[:60], "legal_status = %s"),
+                               ("source", source.strip()[:40], "%s = ANY(sources)")):
+        if not value:
+            continue
+        if kind == "country" or (kind, value) not in broad:
+            parts.append("quote_literal(%s)::tsquery")
+            params.append(filter_term(kind, value))
+        rows += f" AND {check}"
+        row_params.append(value)
     return "(" + " && ".join(parts) + ")", params, rows, row_params
 
 
@@ -112,6 +136,7 @@ class Directory:
         self.meta = {"date": meta["date"], "snapshotRoot": meta["snapshot_root"]} if meta else {}
         self.count = meta["records"] if meta else 0
         self.relationship_count = meta["relationships"] if meta else 0
+        self.broad = broad_values(self.stats() if meta else {}, self.count)
 
     def _rows(self, query, params, settings=()):
         """``settings`` are constant SET LOCAL statements, applied to this query only."""
@@ -149,7 +174,7 @@ class Directory:
                               f"OR registration_number = %s){extra} LIMIT {COUNT_CAP + 1}", [q.upper()] * 3 + filter_params)
         else:
             # The matches, at most COUNT_CAP + 1 of them, each with its rank...
-            match, match_params, row_filter, row_params = text_match(q, country, status, source)
+            match, match_params, row_filter, row_params = text_match(q, country, status, source, self.broad)
             rows = self._rows(f"SELECT {SUMMARY}, ts_rank(search, {match}) AS rank FROM live.entities "
                               f"WHERE search @@ {match}{row_filter} LIMIT {COUNT_CAP + 1}", match_params * 2 + row_params,
                               settings=SEARCH_SETTINGS)
