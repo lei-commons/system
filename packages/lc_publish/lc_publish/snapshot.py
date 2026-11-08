@@ -96,7 +96,7 @@ def _write_relationships(read, lei_to_id: dict, out: Path, shards: int) -> dict:
             "root": root(leaves), "sha256": _sha256(path)}
 
 
-def build_sharded(readers: dict, out: Path, date: str, shards: int = 256, relationships=None) -> dict:
+def build_sharded(readers: dict, out: Path, date: str, shards: int = 256, relationships=None, decision_log=None) -> dict:
     """Write one Parquet file per country and return the manifest, a shard at a time.
 
     ``readers`` maps a source ID to ``read(n)``, which returns that source's
@@ -152,6 +152,8 @@ def build_sharded(readers: dict, out: Path, date: str, shards: int = 256, relati
         "snapshotRoot": root([bytes.fromhex(f["root"].split(":", 1)[1]) for f in files]),
         "sources": [{k: s[k] for k in ("id", "name", "licence", "attribution")} for s in SOURCES],
     }
+    if decision_log:  # the seal of the decision log up to yesterday, anchored with the manifest
+        manifest["decisionLog"] = decision_log
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     notice = ["lei-commons snapshot " + date, "",
               "An independent open directory. Not affiliated with GLEIF, and does not issue LEIs.", ""]

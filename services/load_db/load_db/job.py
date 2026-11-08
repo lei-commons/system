@@ -14,6 +14,7 @@ import tempfile
 import time
 
 from lc_core.control import SystemHalted, require_running
+from lc_core.decisions import Recorder
 
 COMPONENT = "job:load-db"
 
@@ -70,8 +71,16 @@ def main() -> int:
         return psycopg.connect(host=os.environ["LC_DB_HOST"], dbname=os.environ.get("LC_DB_NAME", "lei_commons"),
                                user=os.environ.get("LC_DB_ADMIN", "lc_admin"), password=password, sslmode="require")
 
-    outcome = run(bucket=storage.Client().bucket(os.environ["LC_SNAPSHOT_BUCKET"]), connect=connect,
-                  readers=[os.environ["LC_SITE_DB_USER"]])
+    client = storage.Client()
+    record = Recorder(COMPONENT, log)  # every decision goes to the decision log too
+    try:
+        outcome = run(bucket=client.bucket(os.environ["LC_SNAPSHOT_BUCKET"]), connect=connect,
+                      readers=[os.environ["LC_SITE_DB_USER"]], log=record)
+    except Exception as exc:
+        record({"event": "failed", "error": type(exc).__name__})
+        raise
+    finally:  # the log bucket is <project>-decision-log
+        record.write(client.bucket(os.environ.get("LC_DECISION_LOG_BUCKET", f"{project}-decision-log")))
     return 0 if outcome in ("loaded", "already-loaded", "halted", "no-snapshot", "busy") else 1
 
 

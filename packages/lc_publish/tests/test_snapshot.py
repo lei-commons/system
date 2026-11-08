@@ -137,3 +137,18 @@ def test_relationships_change_the_snapshot_root(tmp_path):
     rel = {"REL1": {"directoryId": "REL1", "startNode": "A" * 20, "endNode": "B" * 20, "relationshipType": "X"}}
     withrel = build_sharded(readers, tmp_path / "b", "2026-11-07", shards=1, relationships=lambda n: dict(rel))
     assert without["snapshotRoot"] != withrel["snapshotRoot"]
+
+
+def test_the_decision_log_seal_is_in_the_manifest_not_the_data_root(tmp_path):
+    import json
+
+    from lc_publish.snapshot import build_sharded
+
+    s = sources()
+    readers = {sid: (lambda n, recs=recs: dict(recs) if n == 0 else {}) for sid, recs in s.items()}
+    seal = {"day": "2026-11-07", "head": "ab" * 32, "events": 3, "previousDay": "", "previousHead": "0" * 64}
+    plain = build_sharded(readers, tmp_path / "a", "2026-11-08", shards=1)
+    sealed = build_sharded(readers, tmp_path / "b", "2026-11-08", shards=1, decision_log=seal)
+    assert "decisionLog" not in plain and sealed["decisionLog"] == seal
+    assert sealed["snapshotRoot"] == plain["snapshotRoot"]  # the data's root covers data only
+    assert json.loads((tmp_path / "b" / "manifest.json").read_text())["decisionLog"]["head"] == "ab" * 32

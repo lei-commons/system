@@ -59,7 +59,7 @@ locals {
       "roles/storage.objectViewer" = ["console", "site", "loader"]
     }
     decision_log = {
-      "roles/storage.objectCreator" = ["ingest", "crawler", "resolver", "maker", "checker", "publisher", "workflow", "console", "budget-guard", "control-operator"]
+      "roles/storage.objectCreator" = ["ingest", "crawler", "resolver", "maker", "checker", "publisher", "workflow", "console", "budget-guard", "control-operator", "loader"]
       "roles/storage.objectViewer"  = ["publisher", "console", "site"]
     }
     frames = {
