@@ -1,0 +1,87 @@
+# Load test of the serving database at scale (default 30 million records).
+# Runs load_db.loadtest as a one-off override of the load-db job, the only thing
+# that can reach the database. It builds a synthetic copy in its own schema,
+# times every site query, and drops the copy. It never touches `live`, and it
+# takes the daily load's lock, so the two never overlap. Prints only timings,
+# counts and sizes, because this repo's logs are public.
+name: load-test
+
+on:
+  workflow_dispatch:
+    inputs:
+      records:
+        description: "Synthetic records to build"
+        default: "30000000"
+      seconds:
+        description: "Seconds of concurrent mixed load"
+        default: "120"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: load-test
+  cancel-in-progress: false
+
+jobs:
+  load-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    env:
+      REGION: ${{ vars.GCP_REGION }}
+      RECORDS: ${{ inputs.records }}
+      SECONDS_: ${{ inputs.seconds }}
+    steps:
+      - name: Check inputs
+        run: |
+          [[ "$RECORDS" =~ ^[0-9]{3,9}$ && "$SECONDS_" =~ ^[0-9]{1,4}$ ]] || { echo "::error::records and seconds must be whole numbers"; exit 1; }
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Start the test
+        id: start
+        run: |
+          execution=$(gcloud run jobs execute load-db --region "$REGION" --async \
+            --args=python,-m,load_db.loadtest \
+            --update-env-vars="LC_BENCH_RECORDS=$RECORDS,LC_BENCH_SECONDS=$SECONDS_" \
+            --task-timeout=18000s --format='value(metadata.name)')
+          echo "Execution: $execution"
+          echo "execution=$execution" >> "$GITHUB_OUTPUT"
+      - name: Wait for it to finish
+        env:
+          EXECUTION: ${{ steps.start.outputs.execution }}
+        run: |
+          while true; do
+            done_at=$(gcloud run jobs executions describe "$EXECUTION" --region "$REGION" --format='value(status.completionTime)')
+            [ -n "$done_at" ] && break
+            sleep 60
+          done
+          gcloud run jobs executions describe "$EXECUTION" --region "$REGION" \
+            --format='table(metadata.name,status.succeededCount,status.failedCount,status.startTime,status.completionTime)'
+      - name: Results
+        if: always() && steps.start.outputs.execution != ''
+        env:
+          EXECUTION: ${{ steps.start.outputs.execution }}
+        run: |
+          sleep 30  # logs arrive a little after the job ends
+          gcloud logging read \
+            "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"load-db\" AND labels.\"run.googleapis.com/execution_name\"=\"$EXECUTION\" AND jsonPayload.event:*" \
+            --order=asc --limit=200 --format=json > events.json
+          jq -c '.[].jsonPayload | select(.event != "loadtest-summary")' events.json
+          jq '.[].jsonPayload | select(.event == "loadtest-summary")' events.json | tee summary.json
+          jq -r '.queries as $q | ["cold","warm"][] as $phase | $q[$phase] | to_entries[] |
+                 "| \($phase) | \(.key) | \(.value.n) | \(.value.p50) | \(.value.p95) | \(.value.max) | \(.value.failures // {} | tostring) |"' \
+            summary.json > rows.md || true
+          {
+            echo "### Load test"
+            jq -r '"\(.records) records, \(.relationships) relationships, built in \(.build.seconds.fill) s; total \(.totalSeconds) s"' summary.json || true
+            echo
+            echo "| phase | query | n | p50 ms | p95 ms | max ms | failures |"
+            echo "|---|---|---|---|---|---|---|"
+            cat rows.md
+            echo
+            jq -r '.queries.concurrent | "Concurrent: \(.threads) threads, \(.perSecond)/s, p50 \(.p50) ms, p95 \(.p95) ms, max \(.max) ms, failures \(.failures // {} | tostring)"' summary.json || true
+          } >> "$GITHUB_STEP_SUMMARY"
