@@ -34,6 +34,9 @@ jobs:
       MAKER_APP_ID: ${{ vars.LC_MAKER_APP_ID }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Otherwise the job's read-only token stays in git's config and is sent instead of the maker's on push.
+          persist-credentials: false
       - uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
