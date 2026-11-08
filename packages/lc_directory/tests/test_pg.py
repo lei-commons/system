@@ -229,8 +229,11 @@ def test_a_new_load_version_reloads_the_same_snapshot(loaded):
 def test_filters_are_index_terms_that_no_word_can_produce(d):
     from lc_directory.load import filter_term
 
-    assert filter_term("country", "gb") == "c=gb" and filter_term("status", "In Liquidation") == "s=in_liquidation"
+    assert filter_term("country", "gb") == "c=gb" and filter_term("status", "In Liquidation") == "s=In_Liquidation"
     assert filter_term("source", "gb-coh") == "src=gb-coh" and filter_term("status", None) == "s=none"
+    assert filter_term("status", "ACTIVE") != filter_term("status", "Active") and filter_term("country", "GB") == "c=gb"
+    # by now the reload test has made the EXAMPLE record "Dissolved"
+    assert d.search("example", status="Dissolved")["total"] == 1 and d.search("example", status="DISSOLVED")["total"] == 0
     assert d.search("c=gb")["total"] == 0 and d.search("src gleif")["total"] == 0  # words never match filter terms
     assert d.search("many", country="gb")["total"] == 150 and d.search("many", status="Active", source="gb-coh")["total"] == 0
 
@@ -248,3 +251,10 @@ def test_a_filtered_word_search_is_one_index_lookup(loaded, d):
     assert "Bitmap Index Scan" in p and "Filter" not in p, p
     assert hits == 150
     assert d.search("many", country="GB", status="Active")["total"] == 0  # the MANY records have no status
+
+
+def test_status_terms_in_the_index_keep_their_case(loaded):
+    with psycopg.connect(DSN) as conn:
+        count = conn.execute("SELECT count(*) FROM live.entities WHERE search @@ quote_literal(%s)::tsquery", ["s=Dissolved"]).fetchone()[0]
+        folded = conn.execute("SELECT count(*) FROM live.entities WHERE search @@ quote_literal(%s)::tsquery", ["s=dissolved"]).fetchone()[0]
+    assert count >= 1 and folded == 0

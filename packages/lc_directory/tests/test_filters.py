@@ -15,7 +15,7 @@ def test_broad_values_cover_at_least_half_the_records():
 def test_narrow_values_are_looked_up_and_broad_ones_only_checked():
     broad = broad_values(STATS, 100)
     match, params, rows, row_params = text_match("gmbh", country="de", status="Active", source="gb-coh", broad=broad)
-    assert params == ["gmbh", "c=de", "s=active", "src=gb-coh"] and row_params == ["DE", "Active", "gb-coh"]
+    assert params == ["gmbh", "c=de", "s=Active", "src=gb-coh"] and row_params == ["DE", "Active", "gb-coh"]
     match, params, rows, row_params = text_match("gmbh", status="ACTIVE", source="gleif", broad=broad)
     assert params == ["gmbh"] and row_params == ["ACTIVE", "gleif"]
     assert "legal_status = %s" in rows and "= ANY(sources)" in rows
