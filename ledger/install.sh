@@ -42,6 +42,8 @@ EOF
   gh variable set LC_DECISIONS_BUCKET -R "$ORG/$repo" --body "$PROJECT-decision-log"
   gh variable set LC_LEDGERS -R "$ORG/$repo" --body "$ledgers"
   gh variable set GCP_MAKER_SA -R "$ORG/$repo" --body "lc-maker@$PROJECT.iam.gserviceaccount.com"
+  gh variable set LC_MAKER_APP_ID -R "$ORG/$repo" \
+    --body "$(gh api "orgs/$ORG/installations" --jq '.installations[] | select(.app_slug == "lei-commons-maker") | .app_id')"
   gh variable set GCP_WIF_PROVIDER -R "$ORG/$repo" \
     --body "$(gh variable get GCP_WIF_PROVIDER --org "$ORG")"
   echo "installed in $repo"

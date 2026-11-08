@@ -31,6 +31,7 @@ jobs:
       DECISIONS_BUCKET: ${{ vars.LC_DECISIONS_BUCKET }}
       # "<store prefix>:<directory>" pairs, for example "gleif:. gleif-rr:relationships"
       LEDGERS: ${{ vars.LC_LEDGERS }}
+      MAKER_APP_ID: ${{ vars.LC_MAKER_APP_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: google-github-actions/auth@v2
@@ -55,10 +56,10 @@ jobs:
 
           repo = os.environ["GITHUB_REPOSITORY"]
           api = "https://api.github.com"
-          app = json.load(urllib.request.urlopen(f"{api}/apps/lei-commons-maker"))
+          app_id = os.environ["MAKER_APP_ID"]  # the Apps are private, so their IDs aren't public: set by ledger/install.sh
           key = open(os.path.join(os.environ["RUNNER_TEMP"], "maker.pem")).read()
           now = int(time.time())
-          token = jwt.encode({"iat": now - 60, "exp": now + 540, "iss": str(app["id"])}, key, algorithm="RS256")
+          token = jwt.encode({"iat": now - 60, "exp": now + 540, "iss": app_id}, key, algorithm="RS256")
 
           def call(method, path, body=None):
               req = urllib.request.Request(api + path, method=method, data=json.dumps(body).encode() if body else None,
@@ -78,7 +79,7 @@ jobs:
                         {"repositories": [repo.split("/")[1]], "permissions": {"contents": "write"}})
           print(f"::add-mask::{access['token']}")
           with open(os.environ["GITHUB_ENV"], "a") as env:
-              env.write(f"MAKER_TOKEN={access['token']}\nMAKER_ID={app['id']}\n")
+              env.write(f"MAKER_TOKEN={access['token']}\nMAKER_ID={app_id}\n")
           EOF
           rm -f "$RUNNER_TEMP/maker.pem"
       - name: Export and rebuild
