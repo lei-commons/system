@@ -235,7 +235,7 @@ def test_filters_are_index_terms_that_no_word_can_produce(d):
     assert d.search("many", country="gb")["total"] == 150 and d.search("many", status="Active", source="gb-coh")["total"] == 0
 
 
-def test_a_filtered_word_search_is_one_index_lookup(loaded):
+def test_a_filtered_word_search_is_one_index_lookup(loaded, d):
     from lc_directory.pg import text_match
 
     match, params, row_filter, row_params = text_match("many", country="GB")
