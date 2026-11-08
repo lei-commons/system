@@ -12,11 +12,10 @@ query reads a bounded number of rows, whatever it matches:
   from those rows, in one pass. So a word that matches millions of records
   costs the same as one that matches a thousand. Counts above the cap are
   reported as capped.
-  A query whose every word is very common (in more than COMMON_FREQ of
-  records, by Postgres's own statistics) reads the table in order and stops at
-  the cap. The word index would first list every one of its millions of
-  matches. If that read is slow because a filter is rare, the search falls back
-  to the index.
+  Country, status and source filters are terms in the same word index, so a
+  common word with a rare filter ("gmbh" in GB) is one index lookup that
+  returns only real matches. Word searches always use the index: reading the
+  table in order is fast only when matches happen to be stored early.
 - Suggestions walk the name index in order and stop after a few rows.
 - Relationship lists read one page from an index that is already in display order.
 """
@@ -31,9 +30,8 @@ MAX_LIMIT = 100
 MAX_PAGE = 100
 COUNT_CAP = 1_000
 PREFIX_ROWS = 100
-COMMON_FREQ = 0.005
-SCAN_TIMEOUT_MS = 2000
-WORD = re.compile(r"[0-9a-z]+")
+# For a common word the index lists millions of rows; enough memory keeps that list exact.
+SEARCH_SETTINGS = ("SET LOCAL enable_seqscan = off", "SET LOCAL work_mem = '64MB'")
 FACET_LIMIT = 15
 GRAPH_LIMIT = 40
 GRAPH_PER_NODE = 60
@@ -55,6 +53,18 @@ DOWNWARD = {"IS_DIRECTLY_CONSOLIDATED_BY": "direct subsidiary", "IS_ULTIMATELY_C
 SUMMARY = ("directory_id AS \"directoryId\", legal_name AS \"legalName\", country, registration_number AS "
            "\"registrationNumber\", lei, legal_status AS \"legalStatus\", array_to_string(sources, ',') AS sources")
 NAME_KEY = 'lower(legal_name) COLLATE "C"'  # matches the name index exactly; see lc_directory.load.INDEXES
+
+
+def text_match(q: str, country: str = "", status: str = "", source: str = ""):
+    """The tsquery for a search and its parameters: the words, AND each filter as an index term."""
+    from .load import filter_term
+
+    parts, params = ["websearch_to_tsquery('simple', %s)"], [q]
+    for kind, value in (("country", country.strip()[:2]), ("status", status.strip()[:60]), ("source", source.strip()[:40])):
+        if value:
+            parts.append("quote_literal(%s)::tsquery")
+            params.append(filter_term(kind, value))
+    return "(" + " && ".join(parts) + ")", params
 
 
 def _facet(rows, key):
@@ -89,29 +99,11 @@ class Directory:
         self.meta = {"date": meta["date"], "snapshotRoot": meta["snapshot_root"]} if meta else {}
         self.count = meta["records"] if meta else 0
         self.relationship_count = meta["relationships"] if meta else 0
-        self.common = self._common_words()
-
-    def _common_words(self) -> set:
-        """Words in more than COMMON_FREQ of records, from the statistics ANALYZE keeps for the search column."""
-        try:
-            row = self._one("SELECT most_common_elems::text::text[] AS words, most_common_elem_freqs AS freqs FROM pg_stats "
-                            "WHERE schemaname = 'live' AND tablename = 'entities' AND attname = 'search'", [])
-        except Exception:  # statistics are an optimisation; search works without them
-            return set()
-        if not row or not row["words"]:
-            return set()
-        return {w for w, f in zip(row["words"], row["freqs"]) if f >= COMMON_FREQ}
-
-    def _all_common(self, q: str) -> bool:
-        if any(c in q for c in '"-') or " or " in f" {q.lower()} ":
-            return False  # phrases, exclusions and OR: leave them to the index
-        words = WORD.findall(q.lower())
-        return bool(words) and all(w in self.common for w in words)
 
     def _rows(self, query, params, settings=()):
         """``settings`` are constant SET LOCAL statements, applied to this query only."""
         if self._schema != "live":
-            query = query.replace("live.", f"{self._schema}.").replace("schemaname = 'live'", f"schemaname = '{self._schema}'")
+            query = query.replace("live.", f"{self._schema}.")
         with self._pool.connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
                 for setting in settings:
@@ -144,19 +136,9 @@ class Directory:
                               f"OR registration_number = %s){extra} LIMIT {COUNT_CAP + 1}", [q.upper()] * 3 + filter_params)
         else:
             # The matches, at most COUNT_CAP + 1 of them, each with its rank...
-            matches = (f"SELECT {SUMMARY}, ts_rank(search, websearch_to_tsquery('simple', %s)) AS rank FROM live.entities "
-                       f"WHERE search @@ websearch_to_tsquery('simple', %s){extra} LIMIT {COUNT_CAP + 1}")
-            rows = None
-            if self._all_common(q):
-                import psycopg
-
-                try:  # common words: read in order and stop at the cap
-                    rows = self._rows(matches, [q, q] + filter_params,
-                                      settings=("SET LOCAL enable_bitmapscan = off", f"SET LOCAL statement_timeout = {SCAN_TIMEOUT_MS}"))
-                except psycopg.errors.QueryCanceled:
-                    rows = None  # a rare filter: the index is faster after all
-            if rows is None:
-                rows = self._rows(matches, [q, q] + filter_params)
+            match, match_params = text_match(q, country, status, source)
+            rows = self._rows(f"SELECT {SUMMARY}, ts_rank(search, {match}) AS rank FROM live.entities "
+                              f"WHERE search @@ {match} LIMIT {COUNT_CAP + 1}", match_params * 2, settings=SEARCH_SETTINGS)
             # ...plus names that start with the query, so the exact company is there however common its words are.
             seen = {r["directoryId"] for r in rows}
             rows += [r for r in self._rows(f"SELECT {SUMMARY}, 1 AS rank FROM live.entities WHERE {NAME_KEY} LIKE %s{extra} "

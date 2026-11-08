@@ -79,7 +79,7 @@ def build(conn, schema: str, target: int, max_gb: float, log=log) -> dict:
         conn.commit()
         cols = ("lei, legal_name, legal_form, legal_jurisdiction, registration_authority, registration_number, legal_status, "
                 "incorporation_date, dissolution_date, record_mode, registry_url, other_names, legal_address, "
-                "headquarters_address, industry_codes, labels, sources, country, names_text")
+                "headquarters_address, industry_codes, labels, sources, country, names_text, filter_terms")
         loaded = 0
         for copy in range(copies):
             take = min(live_records, target - loaded)
@@ -94,7 +94,7 @@ def build(conn, schema: str, target: int, max_gb: float, log=log) -> dict:
                 f"INSERT INTO {{s}}.entities (directory_id, {cols}) SELECT {_mapped('directory_id', copy)}, {lei}, {name}, "
                 "legal_form, legal_jurisdiction, registration_authority, " + number + ", legal_status, incorporation_date, "
                 "dissolution_date, record_mode, registry_url, other_names, legal_address, headquarters_address, "
-                f"industry_codes, labels, sources, country, {names_text} FROM live.entities LIMIT %s").format(s=s), [take])
+                f"industry_codes, labels, sources, country, {names_text}, filter_terms FROM live.entities LIMIT %s").format(s=s), [take])
             loaded += cur.rowcount
             cur.execute(sql.SQL(
                 "INSERT INTO {s}.relationships SELECT " + ("relationship_id" if copy == 0 else f"relationship_id || ':{copy}'") +
@@ -185,25 +185,26 @@ def _scrub(node) -> dict:
     return out
 
 
-def plans(conn, schema: str, common: set) -> list:
-    """Scrubbed EXPLAIN ANALYZE of the common-word searches, by the index and by a scan.
-    The words are this module's constants, never data."""
-    from lc_directory.pg import COUNT_CAP, SUMMARY
+def plans(conn, schema: str) -> list:
+    """Scrubbed EXPLAIN ANALYZE of common-word searches, with and without filters, as the site
+    runs them and with the planner left to choose. The words are this module's constants, never data."""
+    from lc_directory.pg import COUNT_CAP, SEARCH_SETTINGS, SUMMARY, text_match
 
     out = []
     for word in COMMON_WORDS[:4]:
-        for label, extra, params in (("", "", []), ("+country", " AND country = %s", ["GB"]),
-                                     ("+status", " AND legal_status = %s", ["Active"])):
-            query = (f"SELECT {SUMMARY}, ts_rank(search, websearch_to_tsquery('simple', %s)) AS rank FROM {schema}.entities "
-                     f"WHERE search @@ websearch_to_tsquery('simple', %s){extra} LIMIT {COUNT_CAP + 1}")
-            for path, settings in (("index", []), ("scan", ["SET LOCAL enable_bitmapscan = off"])):
-                case = {"word": word + label, "path": path, "common": word.lower() in common}
+        for label, filters in (("", {}), ("+country", {"country": "GB"}), ("+status", {"status": "Active"}),
+                               ("+country+status", {"country": "DE", "status": "Active"})):
+            match, params = text_match(word, **filters)
+            query = (f"SELECT {SUMMARY}, ts_rank(search, {match}) AS rank FROM {schema}.entities "
+                     f"WHERE search @@ {match} LIMIT {COUNT_CAP + 1}")
+            for path, settings in (("site", list(SEARCH_SETTINGS)), ("planner", [])):
+                case = {"word": word + label, "path": path}
                 try:
                     with conn.cursor() as cur:
                         cur.execute("SET LOCAL statement_timeout = 15000")
                         for setting in settings:
                             cur.execute(setting)
-                        cur.execute("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + query, [word, word] + params)
+                        cur.execute("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + query, params * 2)
                         plan = cur.fetchone()[0][0]
                     case.update({"ms": round(plan["Execution Time"]), "plan": _scrub(plan["Plan"])})
                 except Exception as exc:
@@ -309,11 +310,8 @@ def main() -> int:
             samples = _samples(conn, schema, 40, random.Random(11))
             # The site's own settings: its 5-second statement timeout and a pool of eight.
             with ConnectionPool(conninfo + " options='-c statement_timeout=5000'", min_size=1, max_size=8, open=True) as pool:
-                directory = Directory(pool, schema=schema)
-                log({"event": "bench-common-words", "commonWords": len(directory.common),
-                     "constantsClassedCommon": sorted(w for w in COMMON_WORDS if w.lower() in directory.common)})
-                bench = benchmark(directory, samples, seconds)
-            for case in plans(conn, schema, directory.common):
+                bench = benchmark(Directory(pool, schema=schema), samples, seconds)
+            for case in plans(conn, schema):
                 log({"event": "bench-plan-detail", **case})
             log({"event": "loadtest-summary", "records": built["records"], "relationships": built["relationships"],
                  "build": built, "queries": bench, "totalSeconds": round(time.time() - started)})
