@@ -14,6 +14,7 @@ import sys
 
 from lc_core.allowlist import AllowList
 from lc_core.control import require_running
+from lc_core.decisions import Recorder, log_bucket_name
 from lc_core.lease import Busy, lease
 from lc_core.fetch import FetchError, Gateway
 from lc_ingest.companies_house import read_zip, to_record
@@ -49,13 +50,21 @@ def main() -> int:
 
     gateway = Gateway(os.environ["LC_GATEWAY_URL"], COMPONENT)
     allowlist = AllowList.load(os.environ["LC_FIELDS_CONFIG"])
+    bucket = os.environ["LC_DATA_BUCKET"]
+    client = storage.Client()
+    record = Recorder(COMPONENT, log)  # every decision goes to the decision log too
     try:
-        with lease(storage.Client().bucket(os.environ["LC_DATA_BUCKET"]), "ingest-gb"):
-            outcome = run(gateway, GcsStore(os.environ["LC_DATA_BUCKET"], "gb"), allowlist=allowlist)
+        with lease(client.bucket(bucket), "ingest-gb"):
+            outcome = run(gateway, GcsStore(bucket, "gb"), allowlist=allowlist, log=record)
     except Busy as exc:
-        log({"event": "busy", "reason": str(exc)})  # another run is doing this work
-        return 0
-    return 0 if outcome in ("done", "already-done", "halted") else 1
+        record({"event": "busy", "reason": str(exc)})  # another run is doing this work
+        outcome = "busy"
+    except Exception as exc:
+        record({"event": "failed", "error": type(exc).__name__})
+        raise
+    finally:
+        record.write(client.bucket(log_bucket_name(bucket)))
+    return 0 if outcome in ("done", "already-done", "halted", "busy") else 1
 
 
 if __name__ == "__main__":

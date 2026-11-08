@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 
 from lc_core.allowlist import AllowList
 from lc_core.control import require_running
+from lc_core.decisions import Recorder, log_bucket_name
 from lc_core.lease import Busy, lease
 from lc_core.fetch import Gateway
 from lc_ingest.gleif import to_record
@@ -89,14 +90,21 @@ def main() -> int:
     # An explicit path: a missing allow-list must stop the job, never fall back to nothing.
     allowlist = AllowList.load(os.environ["LC_FIELDS_CONFIG"])
     bucket = os.environ["LC_DATA_BUCKET"]
+    client = storage.Client()
+    record = Recorder(COMPONENT, log)  # every decision goes to the decision log too
     try:
-        with lease(storage.Client().bucket(bucket), "ingest-gleif"):
-            outcomes = [run(gateway, GcsStore(bucket, "gleif"), allowlist=allowlist),
-                        run_relationships(gateway, GcsStore(bucket, "gleif-rr"), allowlist=allowlist)]
+        with lease(client.bucket(bucket), "ingest-gleif"):
+            outcomes = [run(gateway, GcsStore(bucket, "gleif"), allowlist=allowlist, log=record),
+                        run_relationships(gateway, GcsStore(bucket, "gleif-rr"), allowlist=allowlist, log=record)]
     except Busy as exc:
-        log({"event": "busy", "reason": str(exc)})  # another run is doing this work
-        return 0
-    return 0 if all(o in ("done", "already-done", "halted") for o in outcomes) else 1
+        record({"event": "busy", "reason": str(exc)})  # another run is doing this work
+        outcomes = ["busy"]
+    except Exception as exc:
+        record({"event": "failed", "error": type(exc).__name__})
+        raise
+    finally:
+        record.write(client.bucket(log_bucket_name(bucket)))
+    return 0 if all(o in ("done", "already-done", "halted", "busy") for o in outcomes) else 1
 
 
 if __name__ == "__main__":
