@@ -96,3 +96,9 @@ variable "owner_key_sources" {
   type        = list(string)
   default     = ["gb-coh-api-key", "in-mca-credentials"]
 }
+
+variable "app_key_readers" {
+  description = "Agent identities that read their own GitHub App key (github-app-<name> in Secret Manager). Empty in a test project, where the keys don't exist."
+  type        = list(string)
+  default     = ["maker"]
+}

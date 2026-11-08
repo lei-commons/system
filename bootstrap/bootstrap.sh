@@ -201,7 +201,12 @@ if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
   read -r -p "Set these on github.com/${ORG} now with gh? [y/N] " ok
   if [[ "$ok" == "y" || "$ok" == "Y" ]]; then
     for k in "${!VARS[@]}"; do
-      gh variable set "$k" --org "$ORG" --visibility all --body "${VARS[$k]}"
+      # A rerun never overwrites: SYSTEM_STATE in particular stays as the owner set it.
+      if gh variable get "$k" --org "$ORG" >/dev/null 2>&1; then
+        echo "  kept $k (already set)"
+      else
+        gh variable set "$k" --org "$ORG" --visibility all --body "${VARS[$k]}"
+      fi
     done
     echo "Done."
   fi
