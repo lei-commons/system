@@ -21,6 +21,7 @@ GRAPH_LIMIT = 40
 GRAPH_PER_NODE = 60
 GRAPH_MAX_EDGES = 400
 ID_LIKE = re.compile(r"^[0-9A-Z]{20}$")
+SCHEMA = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 CAMEL = {"directory_id": "directoryId", "legal_name": "legalName", "legal_form": "legalForm",
          "legal_jurisdiction": "legalJurisdiction", "registration_authority": "registrationAuthority",
          "registration_number": "registrationNumber", "legal_status": "legalStatus",
@@ -42,18 +43,26 @@ def _like(text: str) -> str:
 
 
 class Directory:
-    """``pool`` is a psycopg ConnectionPool (or anything with a ``connection()`` context manager)."""
+    """``pool`` is a psycopg ConnectionPool (or anything with a ``connection()`` context manager).
 
-    def __init__(self, pool):
+    ``schema`` is ``live`` for the site; the load test points the same queries at its own schema.
+    """
+
+    def __init__(self, pool, schema: str = "live"):
+        if not SCHEMA.match(schema):
+            raise ValueError(f"not a schema name: {schema!r}")
         self._pool = pool
+        self._schema = schema
         meta = None
-        if self._one("SELECT 1 AS ok FROM information_schema.tables WHERE table_schema = 'live' AND table_name = 'meta'", []):
+        if self._one("SELECT 1 AS ok FROM information_schema.tables WHERE table_schema = %s AND table_name = 'meta'", [schema]):
             meta = self._one("SELECT date, snapshot_root, records, relationships FROM live.meta", [])
         self.meta = {"date": meta["date"], "snapshotRoot": meta["snapshot_root"]} if meta else {}
         self.count = meta["records"] if meta else 0
         self.relationship_count = meta["relationships"] if meta else 0
 
     def _rows(self, query, params):
+        if self._schema != "live":
+            query = query.replace("live.", f"{self._schema}.")
         with self._pool.connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute(query, params)

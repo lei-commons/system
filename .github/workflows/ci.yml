@@ -70,7 +70,8 @@ jobs:
       - run: pytest -q packages/lc_publish
       - run: pip install -e packages/lc_directory
       - run: pytest -q packages/lc_directory
-      - run: pip install -e services/load_db
+      - run: pip install -e "services/load_db[test]"
+      - run: pytest -q services/load_db
       - name: Loader image builds
         run: docker build -f services/load_db/Dockerfile -t load-db .
       - run: pip install -e services/site
