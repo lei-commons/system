@@ -28,6 +28,11 @@ class Reader:
         if url == f"{BASE}/services":
             return {"services": [{"name": f"projects/{P}/locations/{R}/services/conduct-gateway",
                                   "terminalCondition": {"state": "CONDITION_SUCCEEDED"}, "ingress": "INGRESS_TRAFFIC_INTERNAL_ONLY"}]}
+        if "workflowexecutions" in url:
+            return {"executions": [{"state": "ACTIVE", "startTime": "2026-11-10T02:00:00Z"},
+                                   {"state": "SUCCEEDED", "startTime": "2026-11-09T02:00:00Z", "endTime": "e"},
+                                   {"state": "SUCCEEDED", "startTime": "2026-11-08T02:00:00Z", "endTime": "e"},
+                                   {"state": "FAILED", "startTime": "2026-11-07T02:00:00Z", "endTime": "e"}]}
         return {"jobs": [{"name": "x/ingest-gleif-daily", "schedule": "0 2 * * *", "state": "ENABLED", "lastAttemptTime": "t"}]}
 
     def bucket_json(self, bucket, name):
@@ -108,3 +113,13 @@ def test_system_page_through_the_server(tmp_path):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_the_daily_cycle_history_and_its_clean_streak():
+    from lc_site.system import clean_streak
+
+    data = SystemView(Reader()).collect({})
+    assert [c["status"] for c in data["cycles"]] == [BUSY, OK, OK, BAD] and data["cleanStreak"] == 2
+    assert clean_streak([]) == 0
+    assert clean_streak([{"state": "SUCCEEDED", "startTime": "2026-11-09T02:00:00Z"},
+                         {"state": "FAILED", "startTime": "2026-11-09T05:00:00Z"}]) == 0  # a failed rerun that day counts

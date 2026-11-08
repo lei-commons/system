@@ -85,6 +85,12 @@ function page(d, updated) {
       h("section", { class: "card card-pad" }, h("h3", {}, "Jobs"),
         table(["Job", "Status", "Last run"], d.jobs.map((j) => h("tr", {}, h("td", { class: "mono" }, j.name), h("td", {}, pill(j.status)), h("td", {}, when(j.lastRun))))),
         unavailable(d.jobsError)),
+      h("section", { class: "card card-pad" }, h("h3", {}, "Daily cycle"),
+        h("p", { class: "ink2", style: { marginTop: 0 } }, d.cycles.length
+          ? `${d.cleanStreak} clean ${d.cleanStreak === 1 ? "day" : "days"} in a row. M2 needs 7.` : "No runs to show."),
+        table(["Started", "Finished", "Status"], d.cycles.slice(0, 7).map((c) => h("tr", {}, h("td", {}, when(c.started)),
+          h("td", {}, when(c.ended)), h("td", {}, pill(c.status))))),
+        unavailable(d.cyclesError)),
       h("section", { class: "card card-pad" }, h("h3", {}, "Data"),
         table(["Source", "Records", "Last processed"], Object.values(d.stores).map((s) =>
           h("tr", {}, h("td", {}, s.label), h("td", { class: "n" }, s.records ? fmt(s.records) : s.error || "none"), h("td", { class: "mono" }, s.last || "–"))))),

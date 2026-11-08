@@ -39,8 +39,8 @@ locals {
     # budget-guard has no project roles beyond logging; it writes only the control bucket.
     budget-guard = []
     gateway      = []
-    # Read-only, for the system view: job runs, services and schedules.
-    site = ["roles/run.viewer", "roles/cloudscheduler.viewer", "roles/cloudsql.client", "roles/cloudsql.instanceUser"]
+    # Read-only, for the system view: job runs, services, schedules and daily cycles.
+    site = ["roles/run.viewer", "roles/cloudscheduler.viewer", "roles/workflows.viewer", "roles/cloudsql.client", "roles/cloudsql.instanceUser"]
     # Connects to the serving database; the admin password comes from Secret Manager.
     loader = ["roles/cloudsql.client"]
     # No project roles: it only touches the two buckets below.

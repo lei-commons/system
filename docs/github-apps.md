@@ -15,6 +15,6 @@ The agents act on GitHub only through these Apps (constitution Article 5). Maker
 | `lei-commons-guardian` | checks, statuses: write; contents, pull requests: read | every repository except `control` |
 | `lei-commons-release` | contents: write | `releases` only |
 
-Never install any of them on `control`. Its private keys are in Secret Manager as `github-app-<name>`, created by `bootstrap/github-apps.sh`; nothing else holds them.
+Never install any of them on `control`. Its private keys are in Secret Manager as `github-app-lei-commons-<name>`, created by `bootstrap/github-apps.sh`; nothing else holds them.
 
 The fifth App in the design, `lei-commons-control`, waits until GitHub's permission for organisation variables can be confirmed. Until then the `control` repository uses its own token.
