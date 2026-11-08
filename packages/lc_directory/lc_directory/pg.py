@@ -12,6 +12,11 @@ query reads a bounded number of rows, whatever it matches:
   from those rows, in one pass. So a word that matches millions of records
   costs the same as one that matches a thousand. Counts above the cap are
   reported as capped.
+  A query whose every word is very common (in more than COMMON_FREQ of
+  records, by Postgres's own statistics) reads the table in order and stops at
+  the cap. The word index would first list every one of its millions of
+  matches. If that read is slow because a filter is rare, the search falls back
+  to the index.
 - Suggestions walk the name index in order and stop after a few rows.
 - Relationship lists read one page from an index that is already in display order.
 """
@@ -26,6 +31,9 @@ MAX_LIMIT = 100
 MAX_PAGE = 100
 COUNT_CAP = 1_000
 PREFIX_ROWS = 100
+COMMON_FREQ = 0.005
+SCAN_TIMEOUT_MS = 2000
+WORD = re.compile(r"[0-9a-z]+")
 FACET_LIMIT = 15
 GRAPH_LIMIT = 40
 GRAPH_PER_NODE = 60
@@ -81,12 +89,33 @@ class Directory:
         self.meta = {"date": meta["date"], "snapshotRoot": meta["snapshot_root"]} if meta else {}
         self.count = meta["records"] if meta else 0
         self.relationship_count = meta["relationships"] if meta else 0
+        self.common = self._common_words()
 
-    def _rows(self, query, params):
+    def _common_words(self) -> set:
+        """Words in more than COMMON_FREQ of records, from the statistics ANALYZE keeps for the search column."""
+        try:
+            row = self._one("SELECT most_common_elems::text::text[] AS words, most_common_elem_freqs AS freqs FROM pg_stats "
+                            "WHERE schemaname = 'live' AND tablename = 'entities' AND attname = 'search'", [])
+        except Exception:  # statistics are an optimisation; search works without them
+            return set()
+        if not row or not row["words"]:
+            return set()
+        return {w for w, f in zip(row["words"], row["freqs"]) if f >= COMMON_FREQ}
+
+    def _all_common(self, q: str) -> bool:
+        if any(c in q for c in '"-') or " or " in f" {q.lower()} ":
+            return False  # phrases, exclusions and OR: leave them to the index
+        words = WORD.findall(q.lower())
+        return bool(words) and all(w in self.common for w in words)
+
+    def _rows(self, query, params, settings=()):
+        """``settings`` are constant SET LOCAL statements, applied to this query only."""
         if self._schema != "live":
-            query = query.replace("live.", f"{self._schema}.")
+            query = query.replace("live.", f"{self._schema}.").replace("schemaname = 'live'", f"schemaname = '{self._schema}'")
         with self._pool.connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
+                for setting in settings:
+                    cur.execute(setting)
                 cur.execute(query, params)
                 return cur.fetchall()
 
@@ -115,9 +144,19 @@ class Directory:
                               f"OR registration_number = %s){extra} LIMIT {COUNT_CAP + 1}", [q.upper()] * 3 + filter_params)
         else:
             # The matches, at most COUNT_CAP + 1 of them, each with its rank...
-            rows = self._rows(f"SELECT {SUMMARY}, ts_rank(search, websearch_to_tsquery('simple', %s)) AS rank "
-                              f"FROM live.entities WHERE search @@ websearch_to_tsquery('simple', %s){extra} LIMIT {COUNT_CAP + 1}",
-                              [q, q] + filter_params)
+            matches = (f"SELECT {SUMMARY}, ts_rank(search, websearch_to_tsquery('simple', %s)) AS rank FROM live.entities "
+                       f"WHERE search @@ websearch_to_tsquery('simple', %s){extra} LIMIT {COUNT_CAP + 1}")
+            rows = None
+            if self._all_common(q):
+                import psycopg
+
+                try:  # common words: read in order and stop at the cap
+                    rows = self._rows(matches, [q, q] + filter_params,
+                                      settings=("SET LOCAL enable_bitmapscan = off", f"SET LOCAL statement_timeout = {SCAN_TIMEOUT_MS}"))
+                except psycopg.errors.QueryCanceled:
+                    rows = None  # a rare filter: the index is faster after all
+            if rows is None:
+                rows = self._rows(matches, [q, q] + filter_params)
             # ...plus names that start with the query, so the exact company is there however common its words are.
             seen = {r["directoryId"] for r in rows}
             rows += [r for r in self._rows(f"SELECT {SUMMARY}, 1 AS rank FROM live.entities WHERE {NAME_KEY} LIKE %s{extra} "

@@ -173,6 +173,46 @@ def cases(directory, samples: dict) -> list:
     return out
 
 
+PLAN_KEYS = ("Node Type", "Index Name", "Actual Total Time", "Actual Rows", "Actual Loops", "Shared Hit Blocks",
+             "Shared Read Blocks", "Exact Heap Blocks", "Lossy Heap Blocks", "Rows Removed by Filter")
+
+
+def _scrub(node) -> dict:
+    """A plan node without its conditions or output columns: they could hold query text."""
+    out = {k: node[k] for k in PLAN_KEYS if k in node}
+    if node.get("Plans"):
+        out["Plans"] = [_scrub(child) for child in node["Plans"]]
+    return out
+
+
+def plans(conn, schema: str, common: set) -> list:
+    """Scrubbed EXPLAIN ANALYZE of the common-word searches, by the index and by a scan.
+    The words are this module's constants, never data."""
+    from lc_directory.pg import COUNT_CAP, SUMMARY
+
+    out = []
+    for word in COMMON_WORDS[:4]:
+        for label, extra, params in (("", "", []), ("+country", " AND country = %s", ["GB"]),
+                                     ("+status", " AND legal_status = %s", ["Active"])):
+            query = (f"SELECT {SUMMARY}, ts_rank(search, websearch_to_tsquery('simple', %s)) AS rank FROM {schema}.entities "
+                     f"WHERE search @@ websearch_to_tsquery('simple', %s){extra} LIMIT {COUNT_CAP + 1}")
+            for path, settings in (("index", []), ("scan", ["SET LOCAL enable_bitmapscan = off"])):
+                case = {"word": word + label, "path": path, "common": word.lower() in common}
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("SET LOCAL statement_timeout = 15000")
+                        for setting in settings:
+                            cur.execute(setting)
+                        cur.execute("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + query, [word, word] + params)
+                        plan = cur.fetchone()[0][0]
+                    case.update({"ms": round(plan["Execution Time"]), "plan": _scrub(plan["Plan"])})
+                except Exception as exc:
+                    case["error"] = type(exc).__name__
+                conn.rollback()
+                out.append(case)
+    return out
+
+
 def _timed(fn):
     import psycopg
 
@@ -269,7 +309,12 @@ def main() -> int:
             samples = _samples(conn, schema, 40, random.Random(11))
             # The site's own settings: its 5-second statement timeout and a pool of eight.
             with ConnectionPool(conninfo + " options='-c statement_timeout=5000'", min_size=1, max_size=8, open=True) as pool:
-                bench = benchmark(Directory(pool, schema=schema), samples, seconds)
+                directory = Directory(pool, schema=schema)
+                log({"event": "bench-common-words", "commonWords": len(directory.common),
+                     "constantsClassedCommon": sorted(w for w in COMMON_WORDS if w.lower() in directory.common)})
+                bench = benchmark(directory, samples, seconds)
+            for case in plans(conn, schema, directory.common):
+                log({"event": "bench-plan-detail", **case})
             log({"event": "loadtest-summary", "records": built["records"], "relationships": built["relationships"],
                  "build": built, "queries": bench, "totalSeconds": round(time.time() - started)})
         finally:
