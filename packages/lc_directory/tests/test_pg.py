@@ -186,3 +186,41 @@ def test_failed_load_leaves_the_live_directory_serving(loaded, tmp_path):
         conn.rollback()
     after = Directory(Pool())
     assert after.meta["date"] == before and after.count == 152
+
+
+def plan(sql_text):
+    with psycopg.connect(DSN) as conn:
+        conn.execute("SET enable_seqscan = off")  # the tables are tiny here; ask what the plan would be at scale
+        return "\n".join(r[0] for r in conn.execute("EXPLAIN " + sql_text))
+
+
+def test_suggest_walks_the_name_index_without_sorting(loaded):
+    p = plan("SELECT directory_id FROM live.entities WHERE lower(legal_name) COLLATE \"C\" LIKE 'many%' "
+             "ORDER BY lower(legal_name) COLLATE \"C\" LIMIT 8")
+    assert "Index" in p and "Sort" not in p, p
+
+
+def test_relationship_pages_come_from_an_ordered_index(loaded):
+    for side in ("start_id", "end_id"):
+        p = plan(f"SELECT * FROM live.relationships WHERE {side} = 'X' ORDER BY relationship_type, relationship_id LIMIT 41")
+        assert "Index" in p and "Sort" not in p, p
+
+
+def test_capped_search_reports_its_cap_and_keeps_facets_within_it(d, monkeypatch):
+    import lc_directory.pg as pg
+
+    monkeypatch.setattr(pg, "COUNT_CAP", 5)
+    found = d.search("many")
+    assert found["cap"] == 5 and found["totalCapped"] and found["total"] == 5
+    assert sum(f["records"] for f in found["facets"]["country"]) == 5
+
+
+def test_a_new_load_version_reloads_the_same_snapshot(loaded):
+    from lc_directory.load import LOAD_VERSION, already_loaded
+
+    with psycopg.connect(DSN) as conn:
+        root = conn.execute("SELECT snapshot_root FROM live.meta").fetchone()[0]
+        assert already_loaded(conn, root)
+        conn.execute("UPDATE live.meta SET load_version = %s", [LOAD_VERSION - 1])
+        assert not already_loaded(conn, root)
+        conn.rollback()

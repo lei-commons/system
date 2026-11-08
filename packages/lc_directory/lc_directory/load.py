@@ -16,6 +16,8 @@ import pyarrow.parquet as pq
 from psycopg import sql
 
 LIVE = "live"
+# Bump when the schema or indexes change, so the next run reloads the same snapshot.
+LOAD_VERSION = 2
 ENTITY_COLUMNS = [  # (parquet column, table column, kind)
     ("directoryId", "directory_id", "text"), ("lei", "lei", "text"), ("legalName", "legal_name", "text"),
     ("legalForm", "legal_form", "text"), ("legalJurisdiction", "legal_jurisdiction", "text"),
@@ -47,15 +49,17 @@ CREATE TABLE {s}.relationships (
   relationship_type text, relationship_status text, percentage text, period_start text, period_end text
 );
 CREATE TABLE {s}.meta (date text, snapshot_root text, records bigint, relationships bigint, stats jsonb,
-  loaded_at timestamptz DEFAULT now());
+  loaded_at timestamptz DEFAULT now(), load_version int);
 """
 INDEXES = [
     "CREATE INDEX ON {s}.entities USING gin (search)",
-    "CREATE INDEX ON {s}.entities (lower(legal_name) text_pattern_ops)",
+    # Byte order, so a prefix search walks the index in order and stops after a few rows.
+    'CREATE INDEX ON {s}.entities ((lower(legal_name) COLLATE "C"))',
     "CREATE INDEX ON {s}.entities (lei)",
     "CREATE INDEX ON {s}.entities (registration_number)",
-    "CREATE INDEX ON {s}.relationships (start_id)",
-    "CREATE INDEX ON {s}.relationships (end_id)",
+    # In display order, so the first page of a group with 100,000 members reads only that page.
+    "CREATE INDEX ON {s}.relationships (start_id, relationship_type, relationship_id)",
+    "CREATE INDEX ON {s}.relationships (end_id, relationship_type, relationship_id)",
 ]
 
 
@@ -113,14 +117,27 @@ def _stats(cur, schema):
             "byStatus": top("legal_status", 15), "relationshipTypes": rel}
 
 
+def vacuum(conn, schema: str):
+    """VACUUM ANALYZE, not just ANALYZE: it also sets the visibility map, so counts and
+    lookups can be answered from the indexes without reading the table."""
+    conn.commit()
+    conn.autocommit = True
+    try:
+        for table in ("entities", "relationships"):
+            conn.execute(sql.SQL("VACUUM (ANALYZE) {}.{}").format(sql.Identifier(schema), sql.Identifier(table)))
+    finally:
+        conn.autocommit = False
+
+
 def already_loaded(conn, snapshot_root: str) -> bool:
     with conn.cursor() as cur:
         cur.execute("SELECT 1 FROM information_schema.tables WHERE table_schema = %s AND table_name = 'meta'", [LIVE])
         if not cur.fetchone():
             return False
-        cur.execute(sql.SQL("SELECT snapshot_root FROM {}.meta").format(sql.Identifier(LIVE)))
+        # to_jsonb, so a meta table from before load_version existed reads as an older version
+        cur.execute(sql.SQL("SELECT snapshot_root, (to_jsonb(m) ->> 'load_version')::int FROM {}.meta m").format(sql.Identifier(LIVE)))
         row = cur.fetchone()
-        return bool(row) and row[0] == snapshot_root
+        return bool(row) and row[0] == snapshot_root and row[1] == LOAD_VERSION
 
 
 def load(conn, entity_files, relationship_files, meta: dict, readers=()) -> dict:
@@ -134,11 +151,13 @@ def load(conn, entity_files, relationship_files, meta: dict, readers=()) -> dict
         relationships = _copy_relationships(cur, schema, relationship_files)
         for statement in INDEXES:
             cur.execute(sql.SQL(statement).format(s=s))
-        cur.execute(sql.SQL("ANALYZE {}.entities").format(s))
-        cur.execute(sql.SQL("ANALYZE {}.relationships").format(s))
+    conn.commit()
+    vacuum(conn, schema)
+    with conn.cursor() as cur:
         stats = _stats(cur, schema)
-        cur.execute(sql.SQL("INSERT INTO {}.meta (date, snapshot_root, records, relationships, stats) VALUES (%s, %s, %s, %s, %s)")
-                    .format(s), [meta["date"], meta["snapshotRoot"], records, relationships, json.dumps(stats)])
+        cur.execute(sql.SQL("INSERT INTO {}.meta (date, snapshot_root, records, relationships, stats, load_version) "
+                            "VALUES (%s, %s, %s, %s, %s, %s)")
+                    .format(s), [meta["date"], meta["snapshotRoot"], records, relationships, json.dumps(stats), LOAD_VERSION])
         for reader in readers:
             role = sql.Identifier(reader)
             cur.execute(sql.SQL("GRANT USAGE ON SCHEMA {} TO {}").format(s, role))

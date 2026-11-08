@@ -53,7 +53,7 @@ def _mapped(column: str, copy: int) -> str:
 
 def build(conn, schema: str, target: int, max_gb: float, log=log) -> dict:
     """Create and fill the bench schema. Returns build timings and sizes."""
-    from lc_directory.load import INDEXES, TABLES
+    from lc_directory.load import INDEXES, TABLES, vacuum
     from psycopg import sql
 
     s = sql.Identifier(schema)
@@ -112,9 +112,8 @@ def build(conn, schema: str, target: int, max_gb: float, log=log) -> dict:
             timings[f"index {label}"] = round(time.time() - t)
             log({"event": "bench-index", "index": label, "seconds": timings[f"index {label}"]})
         t = time.time()
-        cur.execute(sql.SQL("ANALYZE {}.entities").format(s))
-        cur.execute(sql.SQL("ANALYZE {}.relationships").format(s))
-        timings["analyze"] = round(time.time() - t)
+        vacuum(conn, schema)
+        timings["vacuum analyze"] = round(time.time() - t)
         cur.execute(sql.SQL("SELECT count(*) FROM {}.relationships").format(s))
         relationships = cur.fetchone()[0]
         cur.execute(sql.SQL("INSERT INTO {}.meta (date, snapshot_root, records, relationships, stats) "

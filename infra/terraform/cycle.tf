@@ -144,7 +144,7 @@ resource "google_cloud_run_v2_job" "load_db" {
     template {
       service_account = google_service_account.sa["loader"].email
       max_retries     = 0
-      timeout         = "3600s"
+      timeout         = "7200s" # a 30M-record load takes about 40 minutes (load test, 2026-11-08)
 
       # All traffic through the sealed jobs network, like every job: Google APIs by
       # private DNS, the database by its own firewall rule, nothing else at all.
