@@ -76,5 +76,23 @@ class GcsStore:
         """Upload a gzipped JSON-lines file of changes."""
         self._blob(f"changes/{name}.jsonl.gz").upload_from_filename(path, content_type="application/gzip")
 
+    def keep_seen(self, name: str, ids) -> None:
+        """The directory IDs one publication file listed, one per line, gzipped."""
+        body = "".join(i + "\n" for i in sorted(ids)).encode("utf-8")
+        self._blob(f"seen/{name}.txt.gz").upload_from_string(gzip.compress(body), content_type="application/gzip")
+
+    def read_seen(self, name: str):
+        """The IDs kept by keep_seen, or None if there is no such list."""
+        blob = self._blob(f"seen/{name}.txt.gz")
+        if not blob.exists():
+            return None
+        return set(gzip.decompress(blob.download_as_bytes()).decode("utf-8").split())
+
+    def write_marker(self, name: str, body: dict) -> None:
+        self._blob(f"markers/{name}.json").upload_from_string(json.dumps(body, sort_keys=True), content_type="application/json")
+
+    def has_marker(self, name: str) -> bool:
+        return self._blob(f"markers/{name}.json").exists()
+
     def keep_source(self, name: str, path: str) -> None:
         self._blob(f"sources/{name}").upload_from_filename(path)

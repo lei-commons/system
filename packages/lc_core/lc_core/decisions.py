@@ -62,6 +62,12 @@ def _event(actor: str, record: dict) -> Event | None:
         detail = record.get("reason")
         return Event(actor, "checked", subject, "skipped", f"{reasons[kind]}: {detail}" if detail else reasons[kind],
                      refs=_refs(record))
+    if kind == "reconciled":
+        reason = (f"{record.get('absent', 0)} of {record.get('total', 0)} records were in no part of the month's file "
+                  "and are labelled absent from the source")
+        return Event(actor, "reconciled", subject, "done", reason, refs=_refs(record))
+    if kind == "reconcile-skipped":
+        return Event(actor, "reconciled", subject, "skipped", record.get("reason") or "skipped", refs=_refs(record))
     if kind == "exported":
         reason = (f"{record.get('changes', 0)} new change files, {record.get('baseline', 0)} baseline shards; "
                   f"{record.get('total_changes', 0)} change files in the ledger")
