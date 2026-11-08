@@ -1,0 +1,46 @@
+# Runs one of the daily cycle's jobs now, outside the cycle: for example load-db
+# after a change to the database's indexes. Every job is safe to rerun: it skips
+# work already done, takes its own lock, and stops unless the system is running.
+# Prints only the execution's state, because this repo's logs are public.
+name: run-job
+
+on:
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "Job to run"
+        type: choice
+        options: [load-db, build-snapshot, ingest-gleif, ingest-gb]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: run-job-${{ inputs.job }}
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      REGION: ${{ vars.GCP_REGION }}
+      JOB: ${{ inputs.job }}
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Run
+        run: gcloud run jobs execute "$JOB" --region "$REGION" --wait --format='value(metadata.name)'
+      - name: Outcome
+        if: always()
+        run: |
+          gcloud run jobs executions list --job "$JOB" --region "$REGION" --limit 1 \
+            --format='table(metadata.name,status.startTime,status.completionTime,status.succeededCount,status.failedCount)'
+          execution=$(gcloud run jobs executions list --job "$JOB" --region "$REGION" --limit 1 --format='value(metadata.name)')
+          sleep 20
+          gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$JOB\" AND labels.\"run.googleapis.com/execution_name\"=\"$execution\" AND jsonPayload.event:*" \
+            --order=asc --limit=50 --format='value(jsonPayload.event,jsonPayload.seconds,jsonPayload.records,jsonPayload.relationships)'

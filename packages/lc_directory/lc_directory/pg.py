@@ -3,8 +3,17 @@ site's in-memory snapshot, so the site works against either.
 
 Every query takes parameters, never formatted strings, every result is capped,
 and every connection has a statement timeout, so one heavy query can't hang
-the site. Match counts are exact up to COUNT_CAP and reported as capped above
-it, so a common word across tens of millions of records stays fast.
+the site.
+
+Built to stay fast at tens of millions of records (see load_db.loadtest). Each
+query reads a bounded number of rows, whatever it matches:
+- A search reads at most COUNT_CAP matching rows, plus the names that start
+  with the query from the name index. It ranks, counts and builds its filters
+  from those rows, in one pass. So a word that matches millions of records
+  costs the same as one that matches a thousand. Counts above the cap are
+  reported as capped.
+- Suggestions walk the name index in order and stop after a few rows.
+- Relationship lists read one page from an index that is already in display order.
 """
 
 from __future__ import annotations
@@ -15,7 +24,8 @@ from psycopg.rows import dict_row
 
 MAX_LIMIT = 100
 MAX_PAGE = 100
-COUNT_CAP = 10_000
+COUNT_CAP = 1_000
+PREFIX_ROWS = 100
 FACET_LIMIT = 15
 GRAPH_LIMIT = 40
 GRAPH_PER_NODE = 60
@@ -36,6 +46,18 @@ DOWNWARD = {"IS_DIRECTLY_CONSOLIDATED_BY": "direct subsidiary", "IS_ULTIMATELY_C
             "IS_INTERNATIONAL_BRANCH_OF": "branch"}
 SUMMARY = ("directory_id AS \"directoryId\", legal_name AS \"legalName\", country, registration_number AS "
            "\"registrationNumber\", lei, legal_status AS \"legalStatus\", array_to_string(sources, ',') AS sources")
+NAME_KEY = 'lower(legal_name) COLLATE "C"'  # matches the name index exactly; see lc_directory.load.INDEXES
+
+
+def _facet(rows, key):
+    counts = {}
+    for row in rows[:COUNT_CAP]:
+        values = (row[key] or "").split(",") if key == "sources" else [row[key]]
+        for value in values:
+            if value:
+                counts[value] = counts.get(value, 0) + 1
+    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:FACET_LIMIT]
+    return [{"value": v, "records": n} for v, n in ranked]
 
 
 def _like(text: str) -> str:
@@ -75,46 +97,46 @@ class Directory:
     def search(self, q: str, country: str = "", status: str = "", source: str = "", limit: int = 25, page: int = 1):
         q = (q or "").strip()[:200]
         if not q:
-            return {"results": [], "total": 0, "totalCapped": False, "facets": {}}
+            return {"results": [], "total": 0, "totalCapped": False, "cap": COUNT_CAP, "facets": {}}
         limit = max(1, min(int(limit), MAX_LIMIT))
         page = max(1, min(int(page), MAX_PAGE))
-        where, params = [], []
-        if ID_LIKE.match(q.upper()) or (q.isalnum() and len(q) >= 6 and any(c.isdigit() for c in q)):
-            where.append("(directory_id = %s OR lei = %s OR registration_number = %s)")
-            params += [q.upper(), q.upper(), q.upper()]
-            order, order_params = "legal_name", []
-        else:
-            where.append("search @@ websearch_to_tsquery('simple', %s)")
-            params.append(q)
-            order = ("(upper(legal_name) = upper(%s)) DESC, starts_with(upper(legal_name), upper(%s)) DESC, "
-                     "ts_rank(search, websearch_to_tsquery('simple', %s)) DESC, legal_name")
-            order_params = [q, q, q]
+        filters, filter_params = [], []
         for column, value in (("country", country.strip().upper()[:2]), ("legal_status", status.strip()[:60])):
             if value:
-                where.append(f"{column} = %s")
-                params.append(value)
+                filters.append(f"{column} = %s")
+                filter_params.append(value)
         if source:
-            where.append("%s = ANY(sources)")
-            params.append(source.strip()[:40])
-        cond = " AND ".join(where)
-        matched = f"SELECT * FROM live.entities WHERE {cond}"
-        total = self._one(f"SELECT count(*) AS n FROM (SELECT 1 FROM live.entities WHERE {cond} LIMIT {COUNT_CAP + 1}) x", params)["n"]
-        results = self._rows(f"SELECT {SUMMARY} FROM ({matched}) m ORDER BY {order} LIMIT %s OFFSET %s",
-                             params + order_params + [limit, (page - 1) * limit])
-        sample = f"SELECT country, legal_status, sources FROM live.entities WHERE {cond} LIMIT {COUNT_CAP}"
-        facets = {}
-        for name, expr in (("country", "country"), ("status", "legal_status"), ("source", "unnest(sources)")):
-            rows = self._rows(f"SELECT value, count(*) AS records FROM (SELECT {expr} AS value FROM ({sample}) s) v "
-                              f"GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT {FACET_LIMIT}", params)
-            facets[name] = rows
-        return {"results": results, "total": min(total, COUNT_CAP), "totalCapped": total > COUNT_CAP, "facets": facets}
+            filters.append("%s = ANY(sources)")
+            filter_params.append(source.strip()[:40])
+        extra = "".join(f" AND {f}" for f in filters)
+
+        if ID_LIKE.match(q.upper()) or (q.isalnum() and len(q) >= 6 and any(c.isdigit() for c in q)):
+            rows = self._rows(f"SELECT {SUMMARY}, 0 AS rank FROM live.entities WHERE (directory_id = %s OR lei = %s "
+                              f"OR registration_number = %s){extra} LIMIT {COUNT_CAP + 1}", [q.upper()] * 3 + filter_params)
+        else:
+            # The matches, at most COUNT_CAP + 1 of them, each with its rank...
+            rows = self._rows(f"SELECT {SUMMARY}, ts_rank(search, websearch_to_tsquery('simple', %s)) AS rank "
+                              f"FROM live.entities WHERE search @@ websearch_to_tsquery('simple', %s){extra} LIMIT {COUNT_CAP + 1}",
+                              [q, q] + filter_params)
+            # ...plus names that start with the query, so the exact company is there however common its words are.
+            seen = {r["directoryId"] for r in rows}
+            rows += [r for r in self._rows(f"SELECT {SUMMARY}, 1 AS rank FROM live.entities WHERE {NAME_KEY} LIKE %s{extra} "
+                                           f"ORDER BY {NAME_KEY} LIMIT {PREFIX_ROWS}", [_like(q.lower()) + "%"] + filter_params)
+                     if r["directoryId"] not in seen]
+        capped = len(rows) > COUNT_CAP
+        upper = q.upper()
+        rows.sort(key=lambda r: (r["legalName"].upper() != upper, not r["legalName"].upper().startswith(upper),
+                                 -float(r.pop("rank") or 0), r["legalName"]))
+        facets = {name: _facet(rows, key) for name, key in (("country", "country"), ("status", "legalStatus"), ("source", "sources"))}
+        return {"results": rows[(page - 1) * limit: page * limit], "total": min(len(rows), COUNT_CAP), "totalCapped": capped,
+                "cap": COUNT_CAP, "facets": facets}
 
     def suggest(self, q: str, limit: int = 8):
         q = (q or "").strip()[:100]
         if len(q) < 2:
             return []
         return self._rows("SELECT directory_id AS \"directoryId\", legal_name AS \"legalName\", country FROM live.entities "
-                          "WHERE lower(legal_name) LIKE %s ORDER BY length(legal_name), legal_name LIMIT %s",
+                          f"WHERE {NAME_KEY} LIKE %s ORDER BY {NAME_KEY} LIMIT %s",
                           [_like(q.lower()) + "%", max(1, min(int(limit), 20))])
 
     def entity(self, directory_id: str):
@@ -126,10 +148,12 @@ class Directory:
 
     def relationships(self, directory_id: str):
         directory_id = directory_id.strip().upper()
+        # One page from the (id, type, relationship) index first, then names for just that page.
         base = ("SELECT r.relationship_type AS \"relationshipType\", r.relationship_status AS \"relationshipStatus\", "
                 "r.percentage, r.{other}_node AS \"otherLei\", r.{other}_id AS \"otherId\", e.legal_name AS \"otherName\", "
-                "e.country AS \"otherCountry\" FROM live.relationships r LEFT JOIN live.entities e ON e.directory_id = r.{other}_id "
-                "WHERE r.{this}_id = %s ORDER BY r.relationship_type, e.legal_name LIMIT %s")
+                "e.country AS \"otherCountry\" FROM (SELECT * FROM live.relationships WHERE {this}_id = %s "
+                "ORDER BY relationship_type, relationship_id LIMIT %s) r "
+                "LEFT JOIN live.entities e ON e.directory_id = r.{other}_id ORDER BY r.relationship_type, e.legal_name")
         up = self._rows(base.format(other="end", this="start"), [directory_id, GRAPH_LIMIT + 1])
         down = self._rows(base.format(other="start", this="end"), [directory_id, GRAPH_LIMIT + 1])
         down_total = self._one("SELECT count(*) AS n FROM live.relationships WHERE end_id = %s", [directory_id])["n"]

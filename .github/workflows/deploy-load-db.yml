@@ -37,7 +37,7 @@ jobs:
       - name: Roll out, if the job exists
         run: |
           if gcloud run jobs describe load-db --region "${{ vars.GCP_REGION }}" >/dev/null 2>&1; then
-            gcloud run jobs update load-db --region "${{ vars.GCP_REGION }}" --image "$IMAGE:$GITHUB_SHA"
+            gcloud run jobs update load-db --region "${{ vars.GCP_REGION }}" --image "$IMAGE:$GITHUB_SHA" --task-timeout 7200s
           else
             echo "::notice::load-db doesn't exist yet; the image is pushed"
           fi
