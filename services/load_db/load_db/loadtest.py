@@ -53,7 +53,7 @@ def _mapped(column: str, copy: int) -> str:
 
 def build(conn, schema: str, target: int, max_gb: float, log=log) -> dict:
     """Create and fill the bench schema. Returns build timings and sizes."""
-    from lc_directory.load import INDEXES, TABLES, vacuum
+    from lc_directory.load import INDEXES, TABLES, _stats, vacuum
     from psycopg import sql
 
     s = sql.Identifier(schema)
@@ -116,8 +116,11 @@ def build(conn, schema: str, target: int, max_gb: float, log=log) -> dict:
         timings["vacuum analyze"] = round(time.time() - t)
         cur.execute(sql.SQL("SELECT count(*) FROM {}.relationships").format(s))
         relationships = cur.fetchone()[0]
+        t = time.time()
+        stats = _stats(cur, schema)  # the site chooses how to filter from these, as it does on live
+        timings["stats"] = round(time.time() - t)
         cur.execute(sql.SQL("INSERT INTO {}.meta (date, snapshot_root, records, relationships, stats) "
-                            "VALUES ('bench', 'bench', %s, %s, '{{}}')").format(s), [loaded, relationships])
+                            "VALUES ('bench', 'bench', %s, %s, %s)").format(s), [loaded, relationships, json.dumps(stats)])
         conn.commit()
         sizes = {}
         for table in ("entities", "relationships"):
@@ -160,7 +163,8 @@ def cases(directory, samples: dict) -> list:
     out += [("search: common word", lambda q=q: d.search(q)) for q in COMMON_WORDS]
     out += [("search: common word, page 40", lambda q=q: d.search(q, page=40)) for q in COMMON_WORDS]
     out += [("search: common word + country", lambda q=q: d.search(q, country="GB")) for q in COMMON_WORDS]
-    out += [("search: common word + status", lambda q=q: d.search(q, status="Active")) for q in COMMON_WORDS]
+    out += [("search: common word + narrow status", lambda q=q: d.search(q, status="Active")) for q in COMMON_WORDS]
+    out += [("search: common word + broad status", lambda q=q: d.search(q, status="ACTIVE")) for q in COMMON_WORDS]
     out += [("search: ID or number", lambda q=q: d.search(q)) for q in s["ids"][:10] + s["numbers"][:10]]
     out += [("suggest", lambda q=q: d.suggest(q)) for q in s["prefixes"]]
     out += [("entity", lambda q=q: d.entity(q)) for q in s["ids"]]
@@ -185,16 +189,17 @@ def _scrub(node) -> dict:
     return out
 
 
-def plans(conn, schema: str) -> list:
+def plans(conn, schema: str, broad=frozenset()) -> list:
     """Scrubbed EXPLAIN ANALYZE of common-word searches, with and without filters, as the site
     runs them and with the planner left to choose. The words are this module's constants, never data."""
     from lc_directory.pg import COUNT_CAP, SEARCH_SETTINGS, SUMMARY, text_match
 
     out = []
     for word in COMMON_WORDS[:4]:
-        for label, filters in (("", {}), ("+country", {"country": "GB"}), ("+status", {"status": "Active"}),
-                               ("+country+status", {"country": "DE", "status": "Active"})):
-            match, params, row_filter, row_params = text_match(word, **filters)
+        for label, filters in (("", {}), ("+country", {"country": "GB"}), ("+Active", {"status": "Active"}),
+                               ("+ACTIVE", {"status": "ACTIVE"}), ("+DE+ACTIVE", {"country": "DE", "status": "ACTIVE"}),
+                               ("+gleif", {"source": "gleif"})):
+            match, params, row_filter, row_params = text_match(word, broad=broad, **filters)
             query = (f"SELECT {SUMMARY}, ts_rank(search, {match}) AS rank FROM {schema}.entities "
                      f"WHERE search @@ {match}{row_filter} LIMIT {COUNT_CAP + 1}")
             for path, settings in (("site", list(SEARCH_SETTINGS)), ("planner", [])):
@@ -310,8 +315,10 @@ def main() -> int:
             samples = _samples(conn, schema, 40, random.Random(11))
             # The site's own settings: its 5-second statement timeout and a pool of eight.
             with ConnectionPool(conninfo + " options='-c statement_timeout=5000'", min_size=1, max_size=8, open=True) as pool:
-                bench = benchmark(Directory(pool, schema=schema), samples, seconds)
-            for case in plans(conn, schema):
+                directory = Directory(pool, schema=schema)
+                log({"event": "bench-broad-filters", "broad": sorted(f"{k}={v}" for k, v in directory.broad)})
+                bench = benchmark(directory, samples, seconds)
+            for case in plans(conn, schema, directory.broad):
                 log({"event": "bench-plan-detail", **case})
             log({"event": "loadtest-summary", "records": built["records"], "relationships": built["relationships"],
                  "build": built, "queries": bench, "totalSeconds": round(time.time() - started)})

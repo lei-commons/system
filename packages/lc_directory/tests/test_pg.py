@@ -235,11 +235,11 @@ def test_filters_are_index_terms_that_no_word_can_produce(d):
     assert d.search("many", country="gb")["total"] == 150 and d.search("many", status="Active", source="gb-coh")["total"] == 0
 
 
-def test_country_is_part_of_the_index_lookup_and_status_is_checked_on_rows(loaded):
+def test_a_filtered_word_search_is_one_index_lookup(loaded):
     from lc_directory.pg import text_match
 
     match, params, row_filter, row_params = text_match("many", country="GB")
-    assert row_filter == "" and len(params) == 2  # the country is part of the index lookup
+    assert params == ["many", "c=gb"] and row_params == ["GB"]  # looked up in the index, and checked exactly
     with psycopg.connect(DSN) as conn:
         conn.execute("SET enable_seqscan = off")
         rows = conn.execute(f"EXPLAIN SELECT directory_id FROM live.entities WHERE search @@ {match}", params).fetchall()
@@ -247,5 +247,4 @@ def test_country_is_part_of_the_index_lookup_and_status_is_checked_on_rows(loade
     p = "\n".join(r[0] for r in rows)
     assert "Bitmap Index Scan" in p and "Filter" not in p, p
     assert hits == 150
-    _, _, row_filter, row_params = text_match("many", status="Active", source="gleif")
-    assert "legal_status" in row_filter and row_params == ["Active", "gleif"]
+    assert d.search("many", country="GB", status="Active")["total"] == 0  # the MANY records have no status
