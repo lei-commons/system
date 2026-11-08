@@ -52,11 +52,11 @@ resource "google_service_account_iam_member" "wif" {
 }
 
 # The GitHub App keys are created by bootstrap/github-apps.sh, outside Terraform.
-# Each agent identity may read only its own App's key.
+# Each agent identity may read only its own App's key, github-app-lei-commons-<name>.
 resource "google_secret_manager_secret_iam_member" "app_key" {
   for_each = toset(var.app_key_readers)
 
-  secret_id = "projects/${var.project_id}/secrets/github-app-${each.value}"
+  secret_id = "projects/${var.project_id}/secrets/github-app-lei-commons-${each.value}"
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.sa[each.value].email}"
 }

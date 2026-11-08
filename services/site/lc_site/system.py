@@ -85,6 +85,9 @@ class SystemView:
         services, services_error = _try(lambda: r.api(f"{base}/services").get("services", []), [])
         schedules, schedules_error = _try(
             lambda: r.api(f"https://cloudscheduler.googleapis.com/v1/projects/{r.project}/locations/{r.region}/jobs").get("jobs", []), [])
+        cycles, cycles_error = _try(lambda: r.api(
+            f"https://workflowexecutions.googleapis.com/v1/projects/{r.project}/locations/{r.region}/workflows/daily-cycle"
+            "/executions?pageSize=14").get("executions", []), [])
         control, control_error = _try(lambda: r.bucket_json("control", "state.json"))
         stores = {}
         for prefix, label in SOURCE_STORES.items():
@@ -119,12 +122,33 @@ class SystemView:
                            "status": BAD if (s.get("status") or {}).get("code") else (OK if s.get("lastAttemptTime") else IDLE)}
                           for s in schedules],
             "schedulesError": schedules_error,
+            "cycles": [{"started": c.get("startTime"), "ended": c.get("endTime"), "state": c.get("state"),
+                        "status": {"SUCCEEDED": OK, "FAILED": BAD, "CANCELLED": BAD, "ACTIVE": BUSY}.get(c.get("state"), UNKNOWN)}
+                       for c in cycles],
+            "cleanStreak": clean_streak(cycles),
+            "cyclesError": cycles_error,
             "stores": stores,
             "decisions": decisions,
             "decisionsError": decisions_error,
             "agents": [{"role": role, "status": IDLE, "note": "not running: agents are off until the owner switches them on"}
                        for role in AGENT_ROLES],
         }
+
+
+def clean_streak(executions: list) -> int:
+    """Days in a row, newest first, whose daily cycle succeeded. A run still going doesn't break it."""
+    days = {}
+    for e in executions:
+        day = (e.get("startTime") or "")[:10]
+        if day and e.get("state") != "ACTIVE":
+            days.setdefault(day, []).append(e.get("state"))
+    streak = 0
+    for day in sorted(days, reverse=True):
+        if all(state == "SUCCEEDED" for state in days[day]):
+            streak += 1
+        else:
+            break
+    return streak
 
 
 COLOURS = {OK: "#d7f5dd", BAD: "#fbd5d5", BUSY: "#d6e4ff", IDLE: "#eeeeee", UNKNOWN: "#f5f0d0"}

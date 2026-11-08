@@ -48,7 +48,7 @@ jobs:
             "lc-ingest @ git+https://github.com/lei-commons/system@main#subdirectory=packages/lc_ingest"
       - name: A token for this repository only, as the maker App
         run: |
-          gcloud secrets versions access latest --secret github-app-maker > "$RUNNER_TEMP/maker.pem"
+          gcloud secrets versions access latest --secret github-app-lei-commons-maker > "$RUNNER_TEMP/maker.pem"
           python - <<'EOF'
           import json, os, time, urllib.request
           import jwt
