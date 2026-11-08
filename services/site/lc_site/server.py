@@ -50,6 +50,7 @@ class Handler(BaseHTTPRequestHandler):
     snapshot = None
     system = None
     decisions = None
+    downloads = None
     files: dict = {}
     iap = staticmethod(verify_iap)
 
@@ -86,6 +87,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if path in ("/", "/index.html"):
             return self._send(200, (STATIC / "index.html").read_bytes())
+        if path.startswith("/download/"):
+            return self._download(path[len("/download/"):])
         if path.startswith("/static/"):
             file = self.files.get(path)
             if file is None:
@@ -95,7 +98,34 @@ class Handler(BaseHTTPRequestHandler):
             return self._plain(404, "Not found.")
         return self._api(path, url.query)
 
+    def _download(self, rest):
+        from .downloads import CHUNK, content_type
+
+        if self.downloads is None:
+            return self._plain(503, "Downloads aren't configured.")
+        date, _, name = rest.partition("/")
+        blob = self.downloads.blob(date, name)
+        if blob is None:
+            return self._plain(404, "Not found.")
+        self.close_connection = True
+        self.send_response(200)
+        for k, v in HEADERS.items():
+            self.send_header(k, v)
+        self.send_header("Content-Type", content_type(name))
+        self.send_header("Content-Disposition", f'attachment; filename="lei-commons-{date}-{name}"')
+        self.send_header("Transfer-Encoding", "chunked")  # Cloud Run allows large responses only when chunked
+        self.send_header("Connection", "close")
+        self.end_headers()
+        with blob.open("rb") as f:
+            for block in iter(lambda: f.read(CHUNK), b""):
+                self.wfile.write(f"{len(block):x}\r\n".encode() + block + b"\r\n")
+        self.wfile.write(b"0\r\n\r\n")
+
     def _api(self, path, query):
+        if path == "/api/v1/snapshots":
+            if self.downloads is None:
+                return self._json(503, {"error": "downloads aren't configured"})
+            return self._json(200, self.downloads.snapshots())
         if path == "/api/v1/log" or path.startswith("/api/v1/log/"):
             if self.decisions is None:
                 return self._json(503, {"error": "the decision log isn't configured"})
@@ -171,9 +201,10 @@ def load_latest(bucket_name: str):
     return snap
 
 
-def make_server(snapshot, owners, audience, address, iap=verify_iap, system=None, decisions=None):
+def make_server(snapshot, owners, audience, address, iap=verify_iap, system=None, decisions=None, downloads=None):
     attrs = {"snapshot": snapshot, "owners": {o.strip().lower() for o in owners if o.strip()}, "audience": audience,
-             "iap": staticmethod(iap), "system": system, "decisions": decisions, "files": static_files()}
+             "iap": staticmethod(iap), "system": system, "decisions": decisions, "downloads": downloads,
+             "files": static_files()}
     return ThreadingHTTPServer(address, type("Bound", (Handler,), attrs))
 
 
@@ -183,13 +214,16 @@ def main() -> int:
     except KeyError as exc:
         print(f"refusing to start: {exc} is not set", file=sys.stderr)
         return 1
-    system = decisions = None
+    system = decisions = downloads = None
     try:
         from google.cloud import storage
 
         from .decision_log import DecisionLogReader
+        from .downloads import SnapshotFiles
 
-        decisions = DecisionLogReader(storage.Client().bucket(f"{os.environ['GCP_PROJECT_ID']}-decision-log"))
+        client = storage.Client()
+        decisions = DecisionLogReader(client.bucket(f"{os.environ['GCP_PROJECT_ID']}-decision-log"))
+        downloads = SnapshotFiles(client.bucket(bucket))
     except Exception as exc:  # the rest of the site works without it
         print(json.dumps({"event": "decision-log-unavailable", "error": type(exc).__name__}), flush=True)
     try:
@@ -201,7 +235,7 @@ def main() -> int:
     except Exception as exc:  # the rest of the site works without it
         print(json.dumps({"event": "system-view-unavailable", "error": type(exc).__name__}), flush=True)
     make_server(choose_directory(bucket), owners, audience, ("0.0.0.0", int(os.environ.get("PORT", "8080"))),
-                system=system, decisions=decisions).serve_forever()
+                system=system, decisions=decisions, downloads=downloads).serve_forever()
     return 0
 
 
