@@ -95,7 +95,7 @@ resource "google_cloud_run_v2_job" "build_snapshot" {
     template {
       service_account = google_service_account.sa["publisher"].email
       max_retries     = 0
-      timeout         = "3600s"
+      timeout         = "7200s" # the whole UK register roughly doubles the directory (2026-11-08)
 
       vpc_access {
         egress = "ALL_TRAFFIC"

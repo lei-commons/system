@@ -55,11 +55,14 @@ class _Partitions:
 
 
 def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: str, allowlist: AllowList, log,
-               kind: str = "entity") -> str:
+               kind: str = "entity", seen: bool = False) -> str:
     """Return the outcome: halted, denied, already-done, held or done.
 
     ``find(gateway, manifest)`` returns (key, url, filename). ``key`` identifies
-    the publication, so the same one is never processed twice.
+    the publication, so the same one is never processed twice. With ``seen``,
+    the directory IDs in the file are kept under the key once the run is
+    done, so a later step can tell which stored records a whole publication
+    no longer lists.
     """
     try:
         gate()
@@ -109,6 +112,8 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
                     return decode_records(f.read())
             return store.read_shard(n)
 
+        seen_ids = set()
+
         def process(n, records, out):
             nonlocal changed_existing, new_records, changes_written
             current = load(n)
@@ -121,6 +126,8 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
                     moved[target].append(record)  # kept apart under its own ID, in another shard
                     continue
                 directory_id = record["directoryId"]
+                if seen:
+                    seen_ids.add(directory_id)
                 old = updated.get(directory_id) or current.get(directory_id, {"directoryId": directory_id})
                 found = diff(old, record, source_id, maker)
                 counts["records"] += 1
@@ -160,6 +167,8 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
         manifest["processed"] = (manifest["processed"] + [key])[-KEEP_PROCESSED:]
         manifest["lastKey"] = key
         store.write_manifest(manifest)
+        if seen:
+            store.keep_seen(key, seen_ids)
 
     log({"event": "done", "source": source, "publish": key, "bytes": size, "changes": changes_written,
          "records_changed": changed_existing + new_records, "existing_changed": changed_existing,
