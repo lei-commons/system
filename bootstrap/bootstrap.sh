@@ -215,5 +215,5 @@ else
 fi
 
 echo
-echo "Bootstrap complete. The system is PAUSED."
-echo "Next: follow docs/day-zero.md, then set SYSTEM_STATE=running when ready."
+echo "Bootstrap complete. A first run leaves the system PAUSED; a rerun keeps the control state and variables as they were."
+echo "After a first run: follow docs/day-zero.md, then set SYSTEM_STATE=running when ready."
