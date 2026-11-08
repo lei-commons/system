@@ -194,9 +194,9 @@ def plans(conn, schema: str) -> list:
     for word in COMMON_WORDS[:4]:
         for label, filters in (("", {}), ("+country", {"country": "GB"}), ("+status", {"status": "Active"}),
                                ("+country+status", {"country": "DE", "status": "Active"})):
-            match, params = text_match(word, **filters)
+            match, params, row_filter, row_params = text_match(word, **filters)
             query = (f"SELECT {SUMMARY}, ts_rank(search, {match}) AS rank FROM {schema}.entities "
-                     f"WHERE search @@ {match} LIMIT {COUNT_CAP + 1}")
+                     f"WHERE search @@ {match}{row_filter} LIMIT {COUNT_CAP + 1}")
             for path, settings in (("site", list(SEARCH_SETTINGS)), ("planner", [])):
                 case = {"word": word + label, "path": path}
                 try:
@@ -204,7 +204,7 @@ def plans(conn, schema: str) -> list:
                         cur.execute("SET LOCAL statement_timeout = 15000")
                         for setting in settings:
                             cur.execute(setting)
-                        cur.execute("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + query, params * 2)
+                        cur.execute("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + query, params * 2 + row_params)
                         plan = cur.fetchone()[0][0]
                     case.update({"ms": round(plan["Execution Time"]), "plan": _scrub(plan["Plan"])})
                 except Exception as exc:

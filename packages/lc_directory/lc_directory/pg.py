@@ -12,9 +12,9 @@ query reads a bounded number of rows, whatever it matches:
   from those rows, in one pass. So a word that matches millions of records
   costs the same as one that matches a thousand. Counts above the cap are
   reported as capped.
-  Country, status and source filters are terms in the same word index, so a
-  common word with a rare filter ("gmbh" in GB) is one index lookup that
-  returns only real matches. Word searches always use the index: reading the
+  The country filter is a term in the same word index, so a common word in a
+  narrow country ("gmbh" in GB) is one index lookup that returns only real
+  matches. Status and source are checked on the matched rows (see text_match). Word searches always use the index: reading the
   table in order is fast only when matches happen to be stored early.
 - Suggestions walk the name index in order and stop after a few rows.
 - Relationship lists read one page from an index that is already in display order.
@@ -56,15 +56,28 @@ NAME_KEY = 'lower(legal_name) COLLATE "C"'  # matches the name index exactly; se
 
 
 def text_match(q: str, country: str = "", status: str = "", source: str = ""):
-    """The tsquery for a search and its parameters: the words, AND each filter as an index term."""
+    """A word search as (tsquery, its params, row conditions, their params).
+
+    Country goes into the index lookup: rows are stored grouped by country, so a
+    narrow country filter checked row by row could read millions of rows. Status
+    and source are checked on the rows the words matched: their common values
+    ("Active", "gleif") cover most records, and in the index they would add a list
+    of millions of entries to every search (load test, 2026-11-08).
+    """
     from .load import filter_term
 
     parts, params = ["websearch_to_tsquery('simple', %s)"], [q]
-    for kind, value in (("country", country.strip()[:2]), ("status", status.strip()[:60]), ("source", source.strip()[:40])):
-        if value:
-            parts.append("quote_literal(%s)::tsquery")
-            params.append(filter_term(kind, value))
-    return "(" + " && ".join(parts) + ")", params
+    if country.strip():
+        parts.append("quote_literal(%s)::tsquery")
+        params.append(filter_term("country", country.strip()[:2]))
+    rows, row_params = "", []
+    if status.strip():
+        rows += " AND legal_status = %s"
+        row_params.append(status.strip()[:60])
+    if source.strip():
+        rows += " AND %s = ANY(sources)"
+        row_params.append(source.strip()[:40])
+    return "(" + " && ".join(parts) + ")", params, rows, row_params
 
 
 def _facet(rows, key):
@@ -136,9 +149,10 @@ class Directory:
                               f"OR registration_number = %s){extra} LIMIT {COUNT_CAP + 1}", [q.upper()] * 3 + filter_params)
         else:
             # The matches, at most COUNT_CAP + 1 of them, each with its rank...
-            match, match_params = text_match(q, country, status, source)
+            match, match_params, row_filter, row_params = text_match(q, country, status, source)
             rows = self._rows(f"SELECT {SUMMARY}, ts_rank(search, {match}) AS rank FROM live.entities "
-                              f"WHERE search @@ {match} LIMIT {COUNT_CAP + 1}", match_params * 2, settings=SEARCH_SETTINGS)
+                              f"WHERE search @@ {match}{row_filter} LIMIT {COUNT_CAP + 1}", match_params * 2 + row_params,
+                              settings=SEARCH_SETTINGS)
             # ...plus names that start with the query, so the exact company is there however common its words are.
             seen = {r["directoryId"] for r in rows}
             rows += [r for r in self._rows(f"SELECT {SUMMARY}, 1 AS rank FROM live.entities WHERE {NAME_KEY} LIKE %s{extra} "
