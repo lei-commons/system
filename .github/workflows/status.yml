@@ -1,0 +1,34 @@
+# Health at a glance, for checking without the owner: states and times only.
+# The system repo's logs are public, so this never prints counts or data.
+name: status
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    env:
+      REGION: ${{ vars.GCP_REGION }}
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Daily cycle, last five runs
+        run: gcloud workflows executions list daily-cycle --location "$REGION" --limit 5 --format='table(name.basename(),state,startTime,endTime)' || true
+      - name: Jobs, last execution of each
+        run: |
+          for job in ingest-gleif ingest-gb build-snapshot load-db egress-check; do
+            gcloud run jobs executions list --job "$job" --region "$REGION" --limit 1 \
+              --format="table[no-heading](\"$job\",metadata.name,status.completionTime,status.conditions[0].type,status.conditions[0].status)" || true
+          done
+      - name: Schedules
+        run: gcloud scheduler jobs list --location "$REGION" --format='table(name.basename(),schedule,state,lastAttemptTime,status.code)' || true
+      - name: Services
+        run: gcloud run services list --region "$REGION" --format='table(metadata.name,status.conditions[0].status,status.latestReadyRevisionName)' || true

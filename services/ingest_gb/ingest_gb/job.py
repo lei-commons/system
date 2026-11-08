@@ -14,6 +14,7 @@ import sys
 
 from lc_core.allowlist import AllowList
 from lc_core.control import require_running
+from lc_core.lease import Busy, lease
 from lc_core.fetch import FetchError, Gateway
 from lc_ingest.companies_house import read_zip, to_record
 from lc_ingest.runner import run_ingest
@@ -44,9 +45,16 @@ def run(gateway, store, gate=lambda: require_running(COMPONENT), allowlist=None,
 
 
 def main() -> int:
+    from google.cloud import storage
+
     gateway = Gateway(os.environ["LC_GATEWAY_URL"], COMPONENT)
     allowlist = AllowList.load(os.environ["LC_FIELDS_CONFIG"])
-    outcome = run(gateway, GcsStore(os.environ["LC_DATA_BUCKET"], "gb"), allowlist=allowlist)
+    try:
+        with lease(storage.Client().bucket(os.environ["LC_DATA_BUCKET"]), "ingest-gb"):
+            outcome = run(gateway, GcsStore(os.environ["LC_DATA_BUCKET"], "gb"), allowlist=allowlist)
+    except Busy as exc:
+        log({"event": "busy", "reason": str(exc)})  # another run is doing this work
+        return 0
     return 0 if outcome in ("done", "already-done", "halted") else 1
 
 

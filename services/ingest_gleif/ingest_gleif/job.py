@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 
 from lc_core.allowlist import AllowList
 from lc_core.control import require_running
+from lc_core.lease import Busy, lease
 from lc_core.fetch import Gateway
 from lc_ingest.gleif import to_record
 from lc_ingest.gleif_csv import read_zip
@@ -82,12 +83,19 @@ def run_relationships(gateway, store, gate=lambda: require_running(COMPONENT), a
 
 
 def main() -> int:
+    from google.cloud import storage
+
     gateway = Gateway(os.environ["LC_GATEWAY_URL"], COMPONENT)
     # An explicit path: a missing allow-list must stop the job, never fall back to nothing.
     allowlist = AllowList.load(os.environ["LC_FIELDS_CONFIG"])
     bucket = os.environ["LC_DATA_BUCKET"]
-    outcomes = [run(gateway, GcsStore(bucket, "gleif"), allowlist=allowlist),
-                run_relationships(gateway, GcsStore(bucket, "gleif-rr"), allowlist=allowlist)]
+    try:
+        with lease(storage.Client().bucket(bucket), "ingest-gleif"):
+            outcomes = [run(gateway, GcsStore(bucket, "gleif"), allowlist=allowlist),
+                        run_relationships(gateway, GcsStore(bucket, "gleif-rr"), allowlist=allowlist)]
+    except Busy as exc:
+        log({"event": "busy", "reason": str(exc)})  # another run is doing this work
+        return 0
     return 0 if all(o in ("done", "already-done", "halted") for o in outcomes) else 1
 
 

@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from lc_core.control import SystemHalted, require_running
+from lc_core.lease import Busy, lease
 
 from .__main__ import shard_reader
 from .snapshot import SOURCES, build_sharded
@@ -38,9 +39,13 @@ def main() -> int:
     date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     work = Path(tempfile.mkdtemp(prefix="snapshot-"))
     try:
-        manifest = build_sharded({s["id"]: shard_reader(data, s["prefix"]) for s in SOURCES}, work, date,
-                                 relationships=shard_reader(data, "gleif-rr"))
-        latest = upload(client.bucket(os.environ["LC_SNAPSHOT_BUCKET"]), work)
+        with lease(data, "build-snapshot"):
+            manifest = build_sharded({s["id"]: shard_reader(data, s["prefix"]) for s in SOURCES}, work, date,
+                                     relationships=shard_reader(data, "gleif-rr"))
+            latest = upload(client.bucket(os.environ["LC_SNAPSHOT_BUCKET"]), work)
+    except Busy as exc:
+        log({"event": "busy", "reason": str(exc)})  # another run is building it
+        return 0
     finally:
         shutil.rmtree(work, ignore_errors=True)  # the disk is memory on Cloud Run
     log({"event": "built", **{k: manifest[k] for k in ("date", "records", "recordsPerSource", "inMoreThanOneSource",
