@@ -224,3 +224,22 @@ def test_a_new_load_version_reloads_the_same_snapshot(loaded):
         conn.execute("UPDATE live.meta SET load_version = %s", [LOAD_VERSION - 1])
         assert not already_loaded(conn, root)
         conn.rollback()
+
+
+def test_common_words_come_from_postgres_statistics(d):
+    assert "many" in d.common
+    assert d.search("many")["total"] == 150  # the scan path gives the same answer as the index
+
+
+def test_a_slow_scan_falls_back_to_the_index(d, monkeypatch):
+    calls = []
+    original = d._rows
+
+    def rows(query, params, settings=()):
+        calls.append(bool(settings))
+        if settings:
+            raise psycopg.errors.QueryCanceled("simulated")
+        return original(query, params)
+
+    monkeypatch.setattr(d, "_rows", rows)
+    assert d.search("many")["total"] == 150 and calls[:2] == [True, False]
