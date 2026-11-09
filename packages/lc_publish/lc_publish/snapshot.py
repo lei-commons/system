@@ -27,6 +27,9 @@ SOURCES = [
      "attribution": "Source: Receita Federal do Brasil, Cadastro Nacional da Pessoa Jurídica (open data)."},
     {"id": "us-ny-dos", "prefix": "us-ny", "name": "New York Department of State, active corporations (data.ny.gov)",
      "licence": "to-be-verified", "attribution": "Source: New York State Department of State, via data.ny.gov."},
+    {"id": "sg-acra", "prefix": "sg", "name": "ACRA Information on Corporate Entities (data.gov.sg)",
+     "licence": "SG-Open-Data-1.0", "attribution": "Contains information from ACRA Information on Corporate Entities accessed "
+     "from data.gov.sg, made available under the Singapore Open Data Licence version 1.0."},
     {"id": "gleif", "prefix": "gleif", "name": "GLEIF LEI golden copy", "licence": "CC0-1.0", "attribution": ""},
 ]
 SCALARS = ["directoryId", "lei", "legalName", "legalForm", "legalJurisdiction", "registrationAuthority",

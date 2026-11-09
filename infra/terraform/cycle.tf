@@ -5,7 +5,7 @@
 # running, so a paused system makes the cycle a quick no-op.
 
 locals {
-  cycle_steps = ["ingest-gleif", "ingest-gb", "build-snapshot", "load-db"]
+  cycle_steps = ["ingest-gleif", "ingest-gb", "ingest-br", "ingest-ny", "ingest-sg", "build-snapshot", "load-db"]
 }
 
 resource "google_workflows_workflow" "daily_cycle" {

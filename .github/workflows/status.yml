@@ -24,13 +24,13 @@ jobs:
         run: gcloud workflows executions list daily-cycle --location "$REGION" --limit 5 --format='table(name.basename(),state,startTime,endTime)' || true
       - name: Jobs, last execution of each
         run: |
-          for job in ingest-gleif ingest-gb ingest-br ingest-ny build-snapshot load-db egress-check; do
+          for job in ingest-gleif ingest-gb ingest-br ingest-ny ingest-sg build-snapshot load-db egress-check; do
             gcloud run jobs executions list --job "$job" --region "$REGION" --limit 1 \
               --format="table[no-heading](\"$job\",metadata.name,status.completionTime,status.conditions[0].type,status.conditions[0].status)" || true
           done
       - name: What each job's last run recorded (event names and aggregate counts only)
         run: |
-          for job in ingest-gleif ingest-gb ingest-br ingest-ny build-snapshot load-db; do
+          for job in ingest-gleif ingest-gb ingest-br ingest-ny ingest-sg build-snapshot load-db; do
             execution=$(gcloud run jobs executions list --job "$job" --region "$REGION" --limit 1 --format='value(metadata.name)') || continue
             echo "== $job $execution"
             gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$job\" AND labels.\"run.googleapis.com/execution_name\"=\"$execution\" AND jsonPayload.event:*" \

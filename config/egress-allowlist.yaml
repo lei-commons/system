@@ -19,6 +19,10 @@ registry_hosts:
   - arquivos.receitafederal.gov.br
   - data.gov.sg
   - api-production.data.gov.sg
+  # Owner approved 2026-11-09 for the ACRA datasets: data.gov.sg starts a download at
+  # api-open and serves the file from a signed S3 link in its Singapore region.
+  - api-open.data.gov.sg
+  - s3.ap-southeast-1.amazonaws.com
   - index.commoncrawl.org
   - data.commoncrawl.org
 
