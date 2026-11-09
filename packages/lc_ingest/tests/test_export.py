@@ -125,3 +125,30 @@ def test_the_rebuild_is_skipped_when_the_store_moved_on(tmp_path):
     export(bucket, "gb", tmp_path / "ledger", log=lambda *_: None)
     write_store(bucket, {**day1, rec(7, "x")["directoryId"]: rec(7, "LATE")}, "day2", changes=[])
     assert rebuild_and_compare(bucket, "gb", tmp_path / "ledger", tmp_path / "work", log=lambda *_: None)["skipped"]
+
+
+def test_big_change_files_are_split_into_ordered_parts_that_still_rebuild(tmp_path, monkeypatch):
+    import lc_ingest.export as ex
+
+    monkeypatch.setattr(ex, "SPLIT_BYTES", 10)
+    monkeypatch.setattr(ex, "CHUNK_LINES", 7)
+    bucket = Bucket()
+    day1 = {r["directoryId"]: r for r in (rec(i, f"ACME {i}") for i in range(5))}
+    write_store(bucket, day1, "day1", changes=changes_between({}, day1))
+    export(bucket, "gb", tmp_path / "ledger", log=lambda *_: None)
+    day2 = dict(day1)
+    for i in range(5, 30):
+        day2[rec(i, "x")["directoryId"]] = rec(i, f"NEW {i}")
+    day2[rec(2, "x")["directoryId"]] = rec(2, "ACME 2 RENAMED")
+    write_store(bucket, day2, "day2", changes=changes_between(day1, day2))
+    export(bucket, "gb", tmp_path / "ledger", log=lambda *_: None)
+
+    state = json.loads((tmp_path / "ledger" / LEDGER).read_text())
+    parts = state["changes"][0]["parts"]
+    assert len(parts) > 2 and parts[0]["name"] == "day2.part001.jsonl.gz"
+    assert not (tmp_path / "ledger" / "changes" / "day2.jsonl.gz").exists()
+    assert rebuild_and_compare(bucket, "gb", tmp_path / "ledger", tmp_path / "work", log=lambda *_: None)["mismatchedShards"] == 0
+
+    (tmp_path / "ledger" / "changes" / parts[1]["name"]).write_bytes(gzip.compress(b""))
+    with pytest.raises(ValueError, match="doesn't match its hash"):
+        rebuild_and_compare(bucket, "gb", tmp_path / "ledger", tmp_path / "work2", log=lambda *_: None)

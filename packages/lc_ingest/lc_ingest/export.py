@@ -35,6 +35,10 @@ from .ledger import apply
 from .store import SHARDS, decode_records, shard_of
 
 LEDGER = "LEDGER.json"
+# GitHub refuses files over 100 MB. A change file bigger than this is split into
+# ordered parts of CHUNK_LINES lines each: a first UK part load is 9 million lines.
+SPLIT_BYTES = 40 * 1024 * 1024
+CHUNK_LINES = 1_000_000
 
 
 class StoreBusy(Exception):
@@ -100,10 +104,16 @@ def export(bucket, prefix: str, ledger_dir: Path, log=_print) -> dict:
     for blob in fresh:
         name = blob.name.rsplit("/", 1)[-1]
         target = ledger_dir / "changes" / name
-        if target.exists():
+        if target.exists() or (ledger_dir / "changes" / _part_name(name, 1)).exists():
             raise RuntimeError(f"{name} is already in the ledger with different contents")
         blob.download_to_filename(str(target))
-        state["changes"].append({"name": name, "created": _iso(blob.time_created), "sha256": _sha256(target)})
+        entry = {"name": name, "created": _iso(blob.time_created)}
+        if target.stat().st_size > SPLIT_BYTES:
+            entry["parts"] = [{"name": p.name, "sha256": _sha256(p)} for p in _split(target)]
+            target.unlink()
+        else:
+            entry["sha256"] = _sha256(target)
+        state["changes"].append(entry)
         added["changes"] += 1
     state["upTo"] = {"storeManifest": manifest, "storeWrittenAt": _iso(written_at)}
     state_path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n")
@@ -112,14 +122,43 @@ def export(bucket, prefix: str, ledger_dir: Path, log=_print) -> dict:
     return added
 
 
+def _part_name(name: str, n: int) -> str:
+    stem = name[: -len(".jsonl.gz")] if name.endswith(".jsonl.gz") else name
+    return f"{stem}.part{n:03d}.jsonl.gz"
+
+
+def _split(path: Path) -> list:
+    """Split a gzipped change file into ordered gzipped parts of CHUNK_LINES lines."""
+    parts, out, lines = [], None, 0
+    with gzip.open(path, "rt", encoding="utf-8") as f:
+        for line in f:
+            if out is None or lines >= CHUNK_LINES:
+                if out:
+                    out.close()
+                parts.append(path.parent / _part_name(path.name, len(parts) + 1))
+                out, lines = gzip.open(parts[-1], "wt", encoding="utf-8"), 0
+            out.write(line)
+            lines += 1
+    if out:
+        out.close()
+    return parts
+
+
+def _files(entry: dict) -> list:
+    """(name, sha256) of an entry's files, in order: one file, or its parts."""
+    if "parts" in entry:
+        return [(p["name"], p["sha256"]) for p in entry["parts"]]
+    return [(entry["name"], entry["sha256"])]
+
+
 def _split_changes(ledger_dir: Path, state: dict, work: Path) -> None:
     """Every change, appended to its shard's file in ledger order, so each shard replays alone."""
     outs = {}
     try:
-        for entry in state["changes"]:
-            path = ledger_dir / "changes" / entry["name"]
-            if _sha256(path) != entry["sha256"]:
-                raise ValueError(f"{entry['name']} doesn't match its hash in {LEDGER}")
+        for name, digest in (f for entry in state["changes"] for f in _files(entry)):
+            path = ledger_dir / "changes" / name
+            if _sha256(path) != digest:
+                raise ValueError(f"{name} doesn't match its hash in {LEDGER}")
             with gzip.open(path, "rt", encoding="utf-8") as f:
                 for line in f:
                     if line.strip():
