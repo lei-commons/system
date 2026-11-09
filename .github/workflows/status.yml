@@ -35,7 +35,10 @@ jobs:
             echo "== $job $execution"
             gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$job\" AND labels.\"run.googleapis.com/execution_name\"=\"$execution\" AND jsonPayload.event:*" \
               --order=asc --limit=50 --format=json \
-              | jq -c '.[].jsonPayload | {event, source, publish, date, records, total, changes, new_records, existing_changed, relationships, seconds, days, day, events, absent, count, companies, natural_persons_dropped, next} | with_entries(select(.value != null))' || true
+              | jq -c '.[].jsonPayload | {event, source, publish, date, records, total, changes, new_records, existing_changed, relationships, seconds, days, day, events, absent, count, companies, natural_persons_dropped, next, error} | with_entries(select(.value != null))' || true
+            # The end of a traceback, if the run crashed: exception types and code lines, never records.
+            gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$job\" AND labels.\"run.googleapis.com/execution_name\"=\"$execution\" AND textPayload:*" \
+              --order=desc --limit=8 --format='value(textPayload)' | tac | cut -c1-200 || true
           done
       - name: Schedules
         run: gcloud scheduler jobs list --location "$REGION" --format='table(name.basename(),schedule,state,lastAttemptTime,status.code)' || true
