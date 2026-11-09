@@ -68,6 +68,10 @@ jobs:
       - run: pytest -q services/ingest_gb
       - run: pip install -e services/ingest_br
       - run: pytest -q services/ingest_br
+      - run: pip install -e services/ingest_ny
+      - run: pytest -q services/ingest_ny
+      - run: pip install -e services/ingest_sg
+      - run: pytest -q services/ingest_sg
       - run: pip install -e packages/lc_publish
       - run: pytest -q packages/lc_publish
       - run: pip install -e packages/lc_directory
@@ -100,6 +104,10 @@ jobs:
         run: docker build -f services/ingest_gb/Dockerfile -t ingest-gb .
       - name: Brazil ingestion image builds
         run: docker build -f services/ingest_br/Dockerfile -t ingest-br .
+      - name: New York and Singapore ingestion images build
+        run: |
+          docker build -f services/ingest_ny/Dockerfile -t ingest-ny .
+          docker build -f services/ingest_sg/Dockerfile -t ingest-sg .
       - name: Site image builds and contains the app
         run: |
           docker build -f services/site/Dockerfile -t lei-commons-site .

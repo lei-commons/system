@@ -55,7 +55,7 @@ class _Partitions:
 
 
 def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: str, allowlist: AllowList, log,
-               kind: str = "entity", seen: bool = False, prepare=None) -> str:
+               kind: str = "entity", seen: bool = False, prepare=None, fetch=None) -> str:
     """Return the outcome: halted, denied, already-done, held or done.
 
     ``find(gateway, manifest)`` returns (key, url, filename). ``key`` identifies
@@ -68,6 +68,10 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
     mapped records with the shard's stored records, just before they are
     compared, and returns the records to keep. Brazil uses it to join head
     offices to their company.
+
+    ``fetch(gateway, url, file)``, if given, writes the publication into the
+    open file instead of one download of ``url``. Singapore uses it to join 27
+    files into one.
     """
     try:
         gate()
@@ -93,7 +97,7 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
         download = os.path.join(work, filename)
         with open(download, "wb") as f:
             try:
-                size = gateway.download(url, f)
+                size = (fetch or (lambda g, u, out: g.download(u, out)))(gateway, url, f)
             except Denied as exc:
                 log({"event": "denied", "rule": exc.rule, "reason": exc.reason})
                 return "denied"

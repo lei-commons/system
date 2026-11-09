@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lc-ingest-sg"
+version = "0.1.0"
+description = "Singapore ACRA ingestion job"
+requires-python = ">=3.11"
+license = {text = "Apache-2.0"}
+dependencies = ["google-cloud-storage>=2.16"]  # also needs lc-core and lc-ingest
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+include = ["ingest_sg*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

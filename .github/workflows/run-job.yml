@@ -10,7 +10,7 @@ on:
       job:
         description: "Job to run"
         type: choice
-        options: [load-db, build-snapshot, ingest-gleif, ingest-gb, ingest-br, ingest-ny]
+        options: [load-db, build-snapshot, ingest-gleif, ingest-gb, ingest-br, ingest-ny, ingest-sg]
 
 permissions:
   contents: read
