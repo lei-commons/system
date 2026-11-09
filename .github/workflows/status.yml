@@ -1,5 +1,5 @@
-# Health at a glance, for checking without the owner: states and times only.
-# The system repo's logs are public, so this never prints counts or data.
+# Health at a glance, for checking without the owner.
+# The system repo's logs are public, so this prints states, times and aggregate counts, never records.
 name: status
 
 on:
@@ -27,6 +27,15 @@ jobs:
           for job in ingest-gleif ingest-gb build-snapshot load-db egress-check; do
             gcloud run jobs executions list --job "$job" --region "$REGION" --limit 1 \
               --format="table[no-heading](\"$job\",metadata.name,status.completionTime,status.conditions[0].type,status.conditions[0].status)" || true
+          done
+      - name: What each job's last run recorded (event names and aggregate counts only)
+        run: |
+          for job in ingest-gleif ingest-gb build-snapshot load-db; do
+            execution=$(gcloud run jobs executions list --job "$job" --region "$REGION" --limit 1 --format='value(metadata.name)') || continue
+            echo "== $job $execution"
+            gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$job\" AND labels.\"run.googleapis.com/execution_name\"=\"$execution\" AND jsonPayload.event:*" \
+              --order=asc --limit=50 --format=json \
+              | jq -c '.[].jsonPayload | {event, source, publish, date, records, total, changes, new_records, existing_changed, relationships, seconds, days, day, events, absent, count} | with_entries(select(.value != null))' || true
           done
       - name: Schedules
         run: gcloud scheduler jobs list --location "$REGION" --format='table(name.basename(),schedule,state,lastAttemptTime,status.code)' || true
