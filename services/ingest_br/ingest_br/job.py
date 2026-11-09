@@ -21,6 +21,7 @@ import os
 import sys
 import tempfile
 import time
+import zipfile
 from collections import Counter
 from datetime import date, timedelta
 
@@ -36,6 +37,7 @@ from lc_ingest.store import SHARDS, GcsStore
 COMPONENT = "job:ingest-br"
 SHARE = "https://arquivos.receitafederal.gov.br/public.php/dav/files/gn672Ad4CF8N6TK/Dados/Cadastros/CNPJ"
 FILES = 10
+DOWNLOAD_ATTEMPTS = 3
 BUDGET_SECONDS = int(os.environ.get("LC_BR_BUDGET_SECONDS", str(100 * 60)))
 
 
@@ -139,8 +141,16 @@ def run(gateway, store, lookup_for, today=None, gate=lambda: require_running(COM
             name = f"Estabelecimentos{k}.zip"
             return key, f"{SHARE}/{month}/{name}", f"{month}-{name}"
 
-        outcome = run_ingest(gateway=gateway, store=store, gate=lambda: None, find=find, read=rows, mapper=to_record,
-                             source="br-rfb", maker="ingestion@br", allowlist=allowlist, log=log, prepare=Join(lookup.read))
+        for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+            try:
+                outcome = run_ingest(gateway=gateway, store=store, gate=lambda: None, find=find, read=rows,
+                                     mapper=to_record, source="br-rfb", maker="ingestion@br", allowlist=allowlist,
+                                     log=log, prepare=Join(lookup.read))
+                break
+            except zipfile.BadZipFile:  # a cut-short download or an error page: nothing was stored, so fetch it again
+                log({"event": "bad-download", "source": "br", "publish": key, "attempt": attempt})
+                if attempt == DOWNLOAD_ATTEMPTS:
+                    raise
         if outcome not in ("done", "already-done"):
             break
     return outcome
