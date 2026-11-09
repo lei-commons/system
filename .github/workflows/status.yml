@@ -25,7 +25,7 @@ jobs:
       - name: Jobs, last execution of each
         run: |
           for job in ingest-gleif ingest-gb ingest-br ingest-ny ingest-sg build-snapshot load-db egress-check; do
-            gcloud run jobs executions list --job "$job" --region "$REGION" --limit 1 \
+            gcloud run jobs executions list --job "$job" --region "$REGION" --limit 3 \
               --format="table[no-heading](\"$job\",metadata.name,status.completionTime,status.conditions[0].type,status.conditions[0].status)" || true
           done
       - name: What each job's last run recorded (event names and aggregate counts only)
