@@ -94,3 +94,49 @@ def test_unreachable_gateway_raises():
 def test_bad_gateway_url_refused(url):
     with pytest.raises(ValueError):
         Gateway(url, "job:t")
+
+
+def test_busy_answers_are_retried_then_succeed(gw):
+    waits = []
+    calls = {"n": 0}
+
+    gw._sleep, gw._waits = waits.append, (1, 2, 3)
+    FakeGateway.routes["https://a.test/busy"] = (429, {"Retry-After": "2"}, b"")
+    original = FakeGateway.do_GET
+
+    def do_get(self):
+        calls["n"] += 1
+        if calls["n"] == 3:
+            FakeGateway.routes["https://a.test/busy"] = (200, {}, b'{"ok": true}')
+        original(self)
+
+    FakeGateway.do_GET = do_get
+    try:
+        assert gw.get_json("https://a.test/busy") == {"ok": True}
+    finally:
+        FakeGateway.do_GET = original
+    assert waits == [2, 2]  # Retry-After wins over a shorter backoff
+
+
+def test_busy_answers_give_up_after_the_last_wait(gw):
+    waits = []
+    gw._sleep, gw._waits = waits.append, (1, 1)
+    FakeGateway.routes["https://a.test/down"] = (503, {}, b"")
+    with pytest.raises(FetchError, match="503"):
+        gw.get_json("https://a.test/down")
+    assert waits == [1, 1]
+
+
+def test_the_gateways_own_pacing_is_retried_but_other_denials_are_not(gw):
+    waits = []
+    gw._sleep, gw._waits = waits.append, (1,)
+    FakeGateway.routes["https://a.test/paced"] = (429, {"X-LC-Denied": "rate-limited", "Retry-After": "30"},
+                                                  b'{"reason": "queue full"}')
+    with pytest.raises(Denied):
+        gw.get_json("https://a.test/paced")
+    assert waits == [30]
+    waits.clear()
+    FakeGateway.routes["https://a.test/no"] = (403, {"X-LC-Denied": "not-allowed"}, b'{"reason": "no"}')
+    with pytest.raises(Denied):
+        gw.get_json("https://a.test/no")
+    assert waits == []

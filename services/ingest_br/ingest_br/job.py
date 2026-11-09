@@ -57,7 +57,9 @@ def latest_month(gateway, today: date) -> str:
             conn, resp = gateway.open(f"{SHARE}/{month}/Municipios.zip")
             conn.close()
             return month
-        except FetchError:
+        except FetchError as exc:
+            if "answered 404" not in str(exc):
+                raise  # anything but "not published yet" is a real error, reported as itself
             continue
     raise FetchError("no CNPJ release in the last three months")
 

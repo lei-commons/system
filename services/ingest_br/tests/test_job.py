@@ -129,3 +129,17 @@ def test_a_spent_budget_stops_between_files_and_the_next_run_carries_on():
     run(gw, store, lambda m: MemLookup(), today=date(2026, 11, 9), gate=lambda: None, allowlist=AllowList.load(),
         log=events.append)
     assert "2026-10 estab9" in store.manifest["processed"]
+
+
+def test_only_a_missing_month_is_skipped_other_errors_are_reported():
+    import pytest
+
+    from ingest_br.job import latest_month
+
+    class Busy(FakeGateway):
+        def open(self, target, method="GET", headers=None):
+            raise FetchError(f"{target} answered 503")
+
+    with pytest.raises(FetchError, match="503"):
+        latest_month(Busy(), date(2026, 11, 9))
+    assert latest_month(FakeGateway(), date(2026, 11, 9)) == "2026-10"
