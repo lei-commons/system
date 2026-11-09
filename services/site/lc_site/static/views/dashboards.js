@@ -1,9 +1,8 @@
 // Dashboards. Chart rules (dataviz skill): one axis, thin bars with a rounded
 // data end anchored to the baseline, a 2px gap between bars, hover tooltips,
 // a table view for every chart, and colour only where it carries identity.
-import { api, cssVar, errorBox, flag, fmt, h, REL, REL_TYPES, svg, tooltip } from "../lib.js";
+import { api, cssVar, errorBox, flag, fmt, h, REL, REL_TYPES, sourcesLabel, svg, tooltip } from "../lib.js";
 
-const SOURCE_NAMES = { "gb-coh": "Companies House", gleif: "GLEIF", "gb-coh,gleif": "Both", "gleif,gb-coh": "Both" };
 
 function barPath(x, y, w, hgt, r = 4) {
   if (w <= r) return `M${x},${y}h${w}v${hgt}h${-w}z`;
@@ -86,7 +85,7 @@ export async function render(root) {
           "Colours match the graph explorer."),
         chartCard("Entities by status", s.byStatus.slice(0, 12), { label: (r) => r.value || "Unknown", colour: single, total: s.records, labelWidth: 210 }),
         chartCard("Entities by source", s.bySources,
-          { label: (r) => SOURCE_NAMES[r.value] || r.value, colour: single, total: s.records, labelWidth: 150 },
+          { label: (r) => sourcesLabel(r.value), colour: single, total: s.records, labelWidth: 150 },
           "A company in both sources is one merged record."))));
   };
   draw();
