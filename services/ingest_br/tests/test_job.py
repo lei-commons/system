@@ -143,3 +143,24 @@ def test_only_a_missing_month_is_skipped_other_errors_are_reported():
     with pytest.raises(FetchError, match="503"):
         latest_month(Busy(), date(2026, 11, 9))
     assert latest_month(FakeGateway(), date(2026, 11, 9)) == "2026-10"
+
+
+def test_a_bad_download_is_fetched_again():
+    MemLookup.built, MemLookup.shards = 0, {}
+    store, events = MemStore(), []
+    gw = FakeGateway()
+    good = gw.files[f"{SHARE}/2026-10/Estabelecimentos1.zip"]
+    gw.files[f"{SHARE}/2026-10/Estabelecimentos1.zip"] = b"<html>busy</html>"
+    original = gw.download
+
+    def download(target, file):
+        n = original(target, file)
+        if target.endswith("Estabelecimentos1.zip"):
+            gw.files[target] = good  # the second attempt gets the real file
+        return n
+
+    gw.download = download
+    assert run(gw, store, lambda m: MemLookup(), today=date(2026, 11, 9), gate=lambda: None, allowlist=AllowList.load(),
+               log=events.append) == "done"
+    assert [e["attempt"] for e in events if e["event"] == "bad-download"] == [1]
+    assert "2026-10 estab1" in store.manifest["processed"]
