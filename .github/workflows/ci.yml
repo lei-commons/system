@@ -66,6 +66,8 @@ jobs:
       - run: pytest -q services/ingest_gleif
       - run: pip install -e services/ingest_gb
       - run: pytest -q services/ingest_gb
+      - run: pip install -e services/ingest_br
+      - run: pytest -q services/ingest_br
       - run: pip install -e packages/lc_publish
       - run: pytest -q packages/lc_publish
       - run: pip install -e packages/lc_directory
@@ -96,6 +98,8 @@ jobs:
           docker run --rm ingest-gleif python -c "import os; from lc_core.allowlist import AllowList; a = AllowList.load(os.environ['LC_FIELDS_CONFIG']); assert 'legalName' in a.allowed['entity']; print('allow-list loads')"
       - name: Companies House job image builds
         run: docker build -f services/ingest_gb/Dockerfile -t ingest-gb .
+      - name: Brazil ingestion image builds
+        run: docker build -f services/ingest_br/Dockerfile -t ingest-br .
       - name: Site image builds and contains the app
         run: |
           docker build -f services/site/Dockerfile -t lei-commons-site .

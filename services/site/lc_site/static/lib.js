@@ -74,9 +74,21 @@ export function statusPill(status) {
   return h("span", { class: `pill ${kind}` }, icon, " ", status || "unknown");
 }
 
+// One name per source, used everywhere a source is shown.
+export const SOURCE_NAMES = { gleif: "GLEIF", "gb-coh": "Companies House", "br-rfb": "Receita Federal (Brazil)",
+  "us-ny-dos": "New York Department of State", "sg-acra": "ACRA (Singapore)" };
+
+export function sourceName(id) {
+  return SOURCE_NAMES[id] || id;
+}
+
+// A combination such as "gb-coh,gleif" reads "Companies House + GLEIF".
+export function sourcesLabel(combo) {
+  return String(combo || "").split(",").filter(Boolean).map(sourceName).join(" + ");
+}
+
 export function sourceChips(sources) {
-  const names = { "gb-coh": "Companies House", gleif: "GLEIF" };
-  return (sources || []).map((s) => h("span", { class: "chip" }, names[s] || s));
+  return (sources || []).map((s) => h("span", { class: "chip" }, sourceName(s)));
 }
 
 let tip;

@@ -1,4 +1,4 @@
-import { api, debounce, flag, fmt, h, sourceChips, statusPill, errorBox } from "../lib.js";
+import { api, debounce, flag, fmt, h, sourceChips, statusPill, errorBox, SOURCE_NAMES } from "../lib.js";
 
 const PAGE = 25;
 
@@ -94,7 +94,7 @@ export async function render(root, _arg, params) {
     return;
   }
   const page = Number(params.get("page") || 1);
-  const sourceNames = { "gb-coh": "Companies House", gleif: "GLEIF" };
+  const sourceNames = SOURCE_NAMES;
   body.replaceChildren(
     h("div", { class: "toolbar" }, h("strong", { class: "num" }, `${fmt(found.total)}${found.totalCapped ? "+" : ""} matches`),
       found.totalCapped ? h("span", { class: "muted" }, `(counts and filters cover the first ${fmt(found.cap || 10000)})`) : null,

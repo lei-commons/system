@@ -55,7 +55,7 @@ class _Partitions:
 
 
 def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: str, allowlist: AllowList, log,
-               kind: str = "entity", seen: bool = False) -> str:
+               kind: str = "entity", seen: bool = False, prepare=None) -> str:
     """Return the outcome: halted, denied, already-done, held or done.
 
     ``find(gateway, manifest)`` returns (key, url, filename). ``key`` identifies
@@ -63,6 +63,11 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
     the directory IDs in the file are kept under the key once the run is
     done, so a later step can tell which stored records a whole publication
     no longer lists.
+
+    ``prepare(n, records, current, counts)``, if given, sees each shard's
+    mapped records with the shard's stored records, just before they are
+    compared, and returns the records to keep. Brazil uses it to join head
+    offices to their company.
     """
     try:
         gate()
@@ -117,6 +122,8 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
         def process(n, records, out):
             nonlocal changed_existing, new_records, changes_written
             current = load(n)
+            if prepare is not None:
+                records = prepare(n, records, current, counts)
             owners = {k: v["lei"] for k, v in current.items() if v.get("lei")}
             updated = {}
             for record in records:

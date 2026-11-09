@@ -1,6 +1,6 @@
 // Downloads: the daily snapshots, their files and the fingerprints to check them by.
 // Files stream from the private snapshots bucket through this site, behind the owner's login.
-import { api, errorBox, flag, fmt, h } from "../lib.js";
+import { api, errorBox, flag, fmt, h, sourceName } from "../lib.js";
 
 function size(bytes) {
   if (bytes === null || bytes === undefined) return "–";
@@ -50,7 +50,7 @@ export async function render(root, arg) {
         h("dl", { class: "facts" },
           fact("Records", fmt(snap.records)), fact("Relationships", fmt(snap.relationships)),
           fact("Files", `${fmt(snap.files.length)} · ${size(snap.bytes)}`),
-          ...Object.entries(snap.recordsPerSource || {}).map(([k, v]) => fact(k === "gb-coh" ? "From Companies House" : k === "gleif" ? "From GLEIF" : `From ${k}`, fmt(v))),
+          ...Object.entries(snap.recordsPerSource || {}).map(([k, v]) => fact(`From ${sourceName(k)}`, fmt(v))),
           fact("Snapshot root", snap.snapshotRoot, true),
           log ? fact(`Decision log through ${log.day}`, `${log.head} · ${fmt(log.events)} events that day`, true) : null),
         h("p", { class: "muted", style: { marginBottom: 0 } },

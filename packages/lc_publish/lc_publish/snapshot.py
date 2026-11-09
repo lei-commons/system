@@ -22,6 +22,11 @@ SCHEMA_VERSION = 1
 SOURCES = [
     {"id": "gb-coh", "prefix": "gb", "name": "Companies House basic company data", "licence": "OGL-UK-3.0",
      "attribution": "Contains public sector information licensed under the Open Government Licence v3.0."},
+    # Licences marked to-be-verified: the owner verifies them before anything goes public.
+    {"id": "br-rfb", "prefix": "br", "name": "Receita Federal do Brasil, dados abertos do CNPJ", "licence": "to-be-verified",
+     "attribution": "Source: Receita Federal do Brasil, Cadastro Nacional da Pessoa Jurídica (open data)."},
+    {"id": "us-ny-dos", "prefix": "us-ny", "name": "New York Department of State, active corporations (data.ny.gov)",
+     "licence": "to-be-verified", "attribution": "Source: New York State Department of State, via data.ny.gov."},
     {"id": "gleif", "prefix": "gleif", "name": "GLEIF LEI golden copy", "licence": "CC0-1.0", "attribution": ""},
 ]
 SCALARS = ["directoryId", "lei", "legalName", "legalForm", "legalJurisdiction", "registrationAuthority",
@@ -145,7 +150,7 @@ def build_sharded(readers: dict, out: Path, date: str, shards: int = 256, relati
         "date": date,
         "schemaVersion": SCHEMA_VERSION,
         "records": total,
-        "recordsPerSource": counts,
+        "recordsPerSource": {k: v for k, v in counts.items() if v},  # sources with records only
         "inMoreThanOneSource": shared,
         "relationships": next((f["records"] for f in files if f.get("kind") == "relationships"), 0),
         "files": files,

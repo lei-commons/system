@@ -10,7 +10,7 @@ on:
       job:
         description: "Job to run"
         type: choice
-        options: [load-db, build-snapshot, ingest-gleif, ingest-gb]
+        options: [load-db, build-snapshot, ingest-gleif, ingest-gb, ingest-br, ingest-ny]
 
 permissions:
   contents: read
@@ -23,7 +23,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 300
     env:
       REGION: ${{ vars.GCP_REGION }}
       JOB: ${{ inputs.job }}
