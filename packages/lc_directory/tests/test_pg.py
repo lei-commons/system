@@ -258,3 +258,20 @@ def test_status_terms_in_the_index_keep_their_case(loaded):
         count = conn.execute("SELECT count(*) FROM live.entities WHERE search @@ quote_literal(%s)::tsquery", ["s=Dissolved"]).fetchone()[0]
         folded = conn.execute("SELECT count(*) FROM live.entities WHERE search @@ quote_literal(%s)::tsquery", ["s=dissolved"]).fetchone()[0]
     assert count >= 1 and folded == 0
+
+
+def test_a_reload_shows_without_restarting_the_site(loaded):
+    from lc_directory.pg import Directory
+
+    now = [0.0]
+    d = Directory(Pool(), ttl=60, clock=lambda: now[0])
+    before = d.count
+    with psycopg.connect(DSN, autocommit=True) as conn:
+        conn.execute("UPDATE live.meta SET records = records + 1000")
+    try:
+        assert d.count == before  # cached within the minute
+        now[0] = 61
+        assert d.count == before + 1000
+    finally:
+        with psycopg.connect(DSN, autocommit=True) as conn:
+            conn.execute("UPDATE live.meta SET records = records - 1000")
