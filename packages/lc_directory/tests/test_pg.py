@@ -76,7 +76,8 @@ def ids(found):
 
 def test_load_counts_and_meta(loaded, d):
     counts, meta = loaded
-    assert counts == {"records": 152, "relationships": 2}
+    assert {k: counts[k] for k in ("records", "relationships")} == {"records": 152, "relationships": 2}
+    assert {"copy_entities_s", "indexes_s", "vacuum_s", "stats_s", "swap_s"} <= set(counts)  # phase timings
     assert d.count == 152 and d.relationship_count == 2 and d.meta["snapshotRoot"] == meta["snapshotRoot"]
 
 

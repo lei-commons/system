@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import re
 import secrets
+import time
 
 import pyarrow.parquet as pq
 from psycopg import sql
@@ -169,17 +170,30 @@ def load(conn, entity_files, relationship_files, meta: dict, readers=()) -> dict
     """Load a snapshot and swap it in. ``readers`` are database roles granted read access."""
     schema = f"load_{secrets.token_hex(4)}"
     s = sql.Identifier(schema)
+    timer, seconds = time.monotonic(), {}
+
+    def lap(name):  # how long each phase took, to know what to speed up as the directory grows
+        nonlocal timer
+        now = time.monotonic()
+        seconds[f"{name}_s"] = round(now - timer)
+        timer = now
+
     with conn.cursor() as cur:
         cur.execute(sql.SQL("CREATE SCHEMA {}").format(s))
         cur.execute(sql.SQL(TABLES).format(s=s))
-        records = _copy_entities(cur, schema, entity_files)
+        records = _copy_entities(cur, schema, entity_files)  # files may be fetched as they are read
+        lap("copy_entities")
         relationships = _copy_relationships(cur, schema, relationship_files)
+        lap("copy_relationships")
         for statement in INDEXES:
             cur.execute(sql.SQL(statement).format(s=s))
+        lap("indexes")
     conn.commit()
     vacuum(conn, schema)
+    lap("vacuum")
     with conn.cursor() as cur:
         stats = _stats(cur, schema)
+        lap("stats")
         cur.execute(sql.SQL("INSERT INTO {}.meta (date, snapshot_root, records, relationships, stats, load_version) "
                             "VALUES (%s, %s, %s, %s, %s, %s)")
                     .format(s), [meta["date"], meta["snapshotRoot"], records, relationships, json.dumps(stats), LOAD_VERSION])
@@ -203,4 +217,5 @@ def load(conn, entity_files, relationship_files, meta: dict, readers=()) -> dict
         for (stale,) in cur.fetchall():  # leftovers from loads that failed part-way
             cur.execute(sql.SQL("DROP SCHEMA {} CASCADE").format(sql.Identifier(stale)))
     conn.commit()
-    return {"records": records, "relationships": relationships}
+    lap("swap")
+    return {"records": records, "relationships": relationships, **seconds}
