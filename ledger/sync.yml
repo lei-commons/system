@@ -10,8 +10,10 @@
 name: sync
 
 on:
+  # Three tries a day: GitHub's schedule is best-effort and often hours late on the
+  # Free plan. A run with nothing new to export stops after its first check.
   schedule:
-    - cron: "30 4 * * *" # after the 02:00 UTC daily cycle
+    - cron: "37 4,9,14 * * *"
   workflow_dispatch:
 
 permissions:
@@ -42,15 +44,31 @@ jobs:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_MAKER_SA }}
       - uses: google-github-actions/setup-gcloud@v2
+      - name: Anything new since the last export?
+        id: check
+        run: |
+          changed=false
+          for pair in $LEDGERS; do
+            prefix="${pair%%:*}"; dir="${pair#*:}"
+            if [ ! -f "$dir/LEDGER.json" ]; then changed=true; continue; fi
+            store=$(gcloud storage cat "gs://$DATA_BUCKET/$prefix/manifest.json" | jq -S -c .)
+            ledger=$(jq -S -c .upTo.storeManifest "$dir/LEDGER.json")
+            [ "$store" = "$ledger" ] || changed=true
+          done
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+          [ "$changed" = true ] || echo "::notice::the ledger is up to date with the store"
       - uses: actions/setup-python@v5
+        if: steps.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
         with:
           python-version: "3.12"
       - name: Install the exporter from the system repository
+        if: steps.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
         run: |
           pip install --quiet "pyjwt[crypto]>=2.8" \
             "lc-core[gcp] @ git+https://github.com/lei-commons/system@main#subdirectory=packages/lc_core" \
             "lc-ingest @ git+https://github.com/lei-commons/system@main#subdirectory=packages/lc_ingest"
       - name: A token for this repository only, as the maker App
+        if: steps.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
         run: |
           gcloud secrets versions access latest --secret github-app-lei-commons-maker > "$RUNNER_TEMP/maker.pem"
           python - <<'EOF'
@@ -86,6 +104,7 @@ jobs:
           EOF
           rm -f "$RUNNER_TEMP/maker.pem"
       - name: Export and rebuild
+        if: steps.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
         id: export
         run: |
           changed=false
