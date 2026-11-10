@@ -159,7 +159,7 @@ resource "google_cloud_run_v2_job" "load_db" {
       containers {
         image = "${local.image_base}/load-db:latest"
         resources {
-          limits = { cpu = "2", memory = "4Gi" }
+          limits = { cpu = "2", memory = "8Gi" }
         }
         env {
           name  = "GCP_PROJECT_ID"

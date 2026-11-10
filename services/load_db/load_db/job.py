@@ -47,13 +47,17 @@ def run(*, bucket, connect, readers, gate=lambda: require_running(COMPONENT), lo
             return "already-loaded"
         started = time.time()
         with tempfile.TemporaryDirectory(prefix="load-") as work:
-            paths = {"files": [], "relationships": []}
-            for group in paths:
-                for name in latest.get(group, []):
+            # One file on disk at a time: the disk is memory on Cloud Run, and a
+            # 24-million-record snapshot is several GB (the 2026-11-10 load ran out of memory).
+            def fetched(names):
+                for name in names:
                     local = os.path.join(work, name)
                     bucket.blob(f"{latest['prefix']}/{name}").download_to_filename(local)
-                    paths[group].append(local)
-            counts = load(conn, paths["files"], paths["relationships"], latest, readers=readers)
+                    yield local
+                    os.remove(local)
+
+            counts = load(conn, fetched(latest.get("files", [])), fetched(latest.get("relationships", [])), latest,
+                          readers=readers)
     log({"event": "loaded", "date": latest["date"], "seconds": round(time.time() - started), **counts})
     return "loaded"
 
