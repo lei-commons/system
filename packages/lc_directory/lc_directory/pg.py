@@ -125,18 +125,54 @@ class Directory:
     ``schema`` is ``live`` for the site; the load test points the same queries at its own schema.
     """
 
-    def __init__(self, pool, schema: str = "live"):
+    def __init__(self, pool, schema: str = "live", ttl: float = 60.0, clock=None):
         if not SCHEMA.match(schema):
             raise ValueError(f"not a schema name: {schema!r}")
+        import time
+
         self._pool = pool
         self._schema = schema
+        self._ttl, self._clock, self._read_at = ttl, clock or time.monotonic, None
+        self._refresh()
+
+    def _refresh(self):
+        """Re-read the snapshot's figures, so a reload shows without restarting the site."""
         meta = None
-        if self._one("SELECT 1 AS ok FROM information_schema.tables WHERE table_schema = %s AND table_name = 'meta'", [schema]):
+        if self._one("SELECT 1 AS ok FROM information_schema.tables WHERE table_schema = %s AND table_name = 'meta'",
+                     [self._schema]):
             meta = self._one("SELECT date, snapshot_root, records, relationships FROM live.meta", [])
-        self.meta = {"date": meta["date"], "snapshotRoot": meta["snapshot_root"]} if meta else {}
-        self.count = meta["records"] if meta else 0
-        self.relationship_count = meta["relationships"] if meta else 0
-        self.broad = broad_values(self.stats() if meta else {}, self.count)
+        self._meta = {"date": meta["date"], "snapshotRoot": meta["snapshot_root"]} if meta else {}
+        self._count = meta["records"] if meta else 0
+        self._relationship_count = meta["relationships"] if meta else 0
+        self._read_at = self._clock()
+        self._broad = broad_values(self.stats() if meta else {}, self._count)
+
+    def _fresh(self):
+        if self._clock() - self._read_at >= self._ttl:
+            try:
+                self._refresh()
+            except Exception:  # keep serving the last figures if the database is briefly unavailable
+                self._read_at = self._clock()
+
+    @property
+    def meta(self):
+        self._fresh()
+        return self._meta
+
+    @property
+    def count(self):
+        self._fresh()
+        return self._count
+
+    @property
+    def relationship_count(self):
+        self._fresh()
+        return self._relationship_count
+
+    @property
+    def broad(self):
+        self._fresh()
+        return self._broad
 
     def _rows(self, query, params, settings=()):
         """``settings`` are constant SET LOCAL statements, applied to this query only."""
