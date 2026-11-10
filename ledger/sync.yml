@@ -125,13 +125,18 @@ jobs:
             python -m lc_ingest.export verify --bucket "$DATA_BUCKET" --prefix "$prefix" --dir "$dir" \
               --decisions-bucket "$DECISIONS_BUCKET" "${baseline[@]}"
           done
-          if [ -n "$(git status --porcelain)" ]; then changed=true; fi
+          # google-github-actions/auth writes its credentials file into the workspace: never commit it.
+          if [ -n "$(git status --porcelain -- . ':!gha-creds-*.json')" ]; then changed=true; fi
           echo "changed=$changed" >> "$GITHUB_OUTPUT"
       - name: Commit as the maker App
         if: steps.export.outputs.changed == 'true'
         run: |
           git config user.name "lei-commons-maker[bot]"
           git config user.email "${MAKER_ID}+lei-commons-maker[bot]@users.noreply.github.com"
-          git add -A
+          git add -A -- . ':!gha-creds-*.json'
+          git rm -q --cached --ignore-unmatch 'gha-creds-*.json'
+          if git diff --cached --name-only | grep -q '^gha-creds-'; then
+            echo "::error::a credentials file is staged; refusing to commit"; exit 1
+          fi
           git commit --quiet -m "Ledger update $(date -u +%Y-%m-%d)" -m "Exported from the store and rebuilt shard by shard before committing."
           git push "https://x-access-token:${MAKER_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main

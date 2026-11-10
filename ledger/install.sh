@@ -36,6 +36,9 @@ Each sync rebuilds every shard from this repository and compares it with the
 store before it commits (\`python -m lc_ingest.export verify\`). Private until the owner approves going public.
 EOF
   put_file "$repo" README.md "Describe the ledger" "$readme"
+  printf 'gha-creds-*.json\n' > "$readme.ignore"
+  put_file "$repo" .gitignore "Never commit the sign-in action's credentials file" "$readme.ignore"
+  rm -f "$readme.ignore"
   put_file "$repo" .github/workflows/sync.yml "Install the ledger sync workflow" "$HERE/sync.yml"
   rm -f "$readme"
   gh variable set LC_DATA_BUCKET -R "$ORG/$repo" --body "$PROJECT-data"
