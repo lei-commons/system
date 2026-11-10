@@ -152,3 +152,48 @@ def test_big_change_files_are_split_into_ordered_parts_that_still_rebuild(tmp_pa
     (tmp_path / "ledger" / "changes" / parts[1]["name"]).write_bytes(gzip.compress(b""))
     with pytest.raises(ValueError, match="doesn't match its hash"):
         rebuild_and_compare(bucket, "gb", tmp_path / "ledger", tmp_path / "work2", log=lambda *_: None)
+
+
+class Baselines:
+    """A create-only bucket, like ledger-baselines."""
+
+    name = "lei-commons-prod-ledger-baselines"
+
+    def __init__(self):
+        self.objects = {}
+
+    def blob(self, name):
+        store = self
+
+        class B:
+            def upload_from_filename(self, path, if_generation_match=None):
+                assert if_generation_match == 0 and name not in store.objects
+                with open(path, "rb") as f:
+                    store.objects[name] = f.read()
+
+            def download_to_filename(self, path):
+                with open(path, "wb") as f:
+                    f.write(store.objects[name])
+
+        return B()
+
+
+def test_a_big_baseline_lives_in_the_bucket_pinned_by_hash(tmp_path):
+    bucket, baselines = Bucket(), Baselines()
+    day1 = {r["directoryId"]: r for r in (rec(i, f"ACME {i}") for i in range(30))}
+    write_store(bucket, day1, "day1", changes=changes_between({}, day1))
+    export(bucket, "gb", tmp_path / "ledger", log=lambda *_: None, baselines=baselines, baseline_path="lei-commons/ledger-gb")
+    state = json.loads((tmp_path / "ledger" / LEDGER).read_text())
+    assert state["baseline"]["location"].startswith("gs://lei-commons-prod-ledger-baselines/lei-commons/ledger-gb/gb/")
+    assert not (tmp_path / "ledger" / "baseline").exists() and len(baselines.objects) == len(state["baseline"]["files"])
+
+    day2 = {**day1, rec(2, "x")["directoryId"]: rec(2, "ACME 2 RENAMED")}
+    write_store(bucket, day2, "day2", changes=changes_between(day1, day2))
+    export(bucket, "gb", tmp_path / "ledger", log=lambda *_: None, baselines=baselines)
+    assert rebuild_and_compare(bucket, "gb", tmp_path / "ledger", tmp_path / "w", log=lambda *_: None,
+                               baselines=baselines)["mismatchedShards"] == 0
+
+    first = sorted(baselines.objects)[0]
+    baselines.objects[first] = gzip.compress(b"")
+    with pytest.raises(ValueError, match="doesn't match its hash"):
+        rebuild_and_compare(bucket, "gb", tmp_path / "ledger", tmp_path / "w2", log=lambda *_: None, baselines=baselines)

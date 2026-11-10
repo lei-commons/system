@@ -19,8 +19,8 @@ put_file() { # repo path message file
   fi
 }
 
-install() { # repo ledgers description
-  local repo="$1" ledgers="$2" readme
+install() { # repo ledgers description [baseline bucket]
+  local repo="$1" ledgers="$2" baselines="${4:-}" readme
   readme="$(mktemp)"
   cat > "$readme" <<EOF
 # $repo
@@ -41,6 +41,9 @@ EOF
   gh variable set LC_DATA_BUCKET -R "$ORG/$repo" --body "$PROJECT-data"
   gh variable set LC_DECISIONS_BUCKET -R "$ORG/$repo" --body "$PROJECT-decision-log"
   gh variable set LC_LEDGERS -R "$ORG/$repo" --body "$ledgers"
+  if [ -n "$baselines" ]; then
+    gh variable set LC_BASELINE_BUCKET -R "$ORG/$repo" --body "$baselines"
+  fi
   gh variable set GCP_MAKER_SA -R "$ORG/$repo" --body "lc-maker@$PROJECT.iam.gserviceaccount.com"
   gh variable set LC_MAKER_APP_ID -R "$ORG/$repo" \
     --body "$(gh api "orgs/$ORG/installations" --jq '.installations[] | select(.app_slug == "lei-commons-maker") | .app_id')"
@@ -51,3 +54,7 @@ EOF
 
 install ledger-gleif "gleif:. gleif-rr:relationships" "GLEIF legal entities and their relationships"
 install ledger-gb "gb:." "the UK Companies House register"
+# Too big for a git repository: the baseline goes in the ledger-baselines bucket, pinned by hash.
+install ledger-br "br:." "Brazil's CNPJ register (Receita Federal), companies only" "$PROJECT-ledger-baselines"
+install ledger-us "us-ny:ny" "US state registers, starting with the New York Department of State" "$PROJECT-ledger-baselines"
+install ledger-sg "sg:." "Singapore's ACRA corporate entities" "$PROJECT-ledger-baselines"

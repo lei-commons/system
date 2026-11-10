@@ -62,6 +62,10 @@ locals {
       "roles/storage.objectCreator" = ["ingest", "crawler", "resolver", "maker", "checker", "publisher", "workflow", "console", "budget-guard", "control-operator", "loader"]
       "roles/storage.objectViewer"  = ["publisher", "console", "site"]
     }
+    ledger_baselines = {
+      "roles/storage.objectCreator" = ["maker"]
+      "roles/storage.objectViewer"  = ["maker", "checker"]
+    }
     frames = {
       "roles/storage.objectCreator" = ["publisher", "workflow"]
       "roles/storage.objectViewer"  = ["console"]
@@ -73,11 +77,12 @@ locals {
   }
 
   buckets = {
-    data         = google_storage_bucket.data.name
-    snapshots    = google_storage_bucket.snapshots.name
-    decision_log = google_storage_bucket.decision_log.name
-    frames       = google_storage_bucket.frames.name
-    control      = google_storage_bucket.control.name
+    data             = google_storage_bucket.data.name
+    snapshots        = google_storage_bucket.snapshots.name
+    decision_log     = google_storage_bucket.decision_log.name
+    ledger_baselines = google_storage_bucket.ledger_baselines.name
+    frames           = google_storage_bucket.frames.name
+    control          = google_storage_bucket.control.name
   }
 
   project_bindings = flatten([

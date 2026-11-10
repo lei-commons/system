@@ -3,7 +3,10 @@
 A ledger directory (the root of ``ledger-gb``, or ``relationships/`` in ``ledger-gleif``) holds:
 
 - ``baseline/NNN.jsonl.gz``: every record, in the store's 256 shards, as of one
-  moment, written once. The full state isn't committed again each day, so the
+  moment, written once. For a register too big for a git repository (Brazil,
+  New York, Singapore), the baseline goes in the private, versioned
+  ledger-baselines bucket instead. LEDGER.json records where, and pins each
+  shard's hash, so the git ledger still says exactly what the baseline was. The full state isn't committed again each day, so the
   git history doesn't grow by the whole directory every day.
 - ``changes/<name>.jsonl.gz``: each change file the store wrote after the
   baseline, in order: one line per changed field.
@@ -68,7 +71,7 @@ def _print(record: dict) -> None:
     print(json.dumps(record, sort_keys=True), flush=True)
 
 
-def export(bucket, prefix: str, ledger_dir: Path, log=_print) -> dict:
+def export(bucket, prefix: str, ledger_dir: Path, log=_print, baselines=None, baseline_path: str = "") -> dict:
     """Bring ``ledger_dir`` up to date with the store under ``prefix``. Returns what was added."""
     ledger_dir.mkdir(parents=True, exist_ok=True)
     state_path = ledger_dir / LEDGER
@@ -85,15 +88,23 @@ def export(bucket, prefix: str, ledger_dir: Path, log=_print) -> dict:
             raise StoreBusy(f"{len(late)} shards are newer than the manifest: an ingest is running")
         (ledger_dir / "baseline").mkdir(exist_ok=True)
         files = {}
+        path = f"{baseline_path.strip('/')}/{prefix}/{_iso(written_at)[:19].replace(':', '')}" if baselines else ""
         for blob in sorted(shards, key=lambda b: b.name):
             target = ledger_dir / "baseline" / blob.name.rsplit("/", 1)[-1]
             blob.download_to_filename(str(target))
             files[target.name] = _sha256(target)
+            if baselines is not None:  # into the baselines bucket, once; the git ledger keeps only the hash
+                baselines.blob(f"{path}/{target.name}").upload_from_filename(str(target), if_generation_match=0)
+                target.unlink()
+        if baselines is not None:
+            (ledger_dir / "baseline").rmdir()
         _, again = _manifest(bucket, prefix)
         if again != manifest:
             raise StoreBusy("the manifest changed while the baseline was read")
-        state = {"source": prefix, "baseline": {"storeManifest": manifest, "storeWrittenAt": _iso(written_at),
-                                                "files": files},
+        baseline = {"storeManifest": manifest, "storeWrittenAt": _iso(written_at), "files": files}
+        if baselines is not None:
+            baseline["location"] = f"gs://{baselines.name}/{path}"
+        state = {"source": prefix, "baseline": baseline,
                  "changes": [], "upTo": {"storeManifest": manifest, "storeWrittenAt": _iso(written_at)}}
         added["baseline"] = len(files)
 
@@ -171,7 +182,28 @@ def _split_changes(ledger_dir: Path, state: dict, work: Path) -> None:
             out.close()
 
 
-def rebuild_and_compare(bucket, prefix: str, ledger_dir: Path, work: Path, log=_print) -> dict:
+def _baseline_shard(state, ledger_dir: Path, work: Path, name: str, baselines):
+    """A baseline shard's bytes, from the repository or the baselines bucket, checked against its pinned hash."""
+    digest = state["baseline"]["files"].get(name)
+    if digest is None:
+        return None
+    location = state["baseline"].get("location")
+    if location:
+        if baselines is None:
+            raise ValueError(f"the baseline is in {location}: pass the baselines bucket")
+        path = work / f"baseline-{name}"
+        baselines.blob(f"{location.split('/', 3)[3]}/{name}").download_to_filename(str(path))
+    else:
+        path = ledger_dir / "baseline" / name
+    if _sha256(path) != digest:
+        raise ValueError(f"baseline/{name} doesn't match its hash in {LEDGER}")
+    data = path.read_bytes()
+    if location:
+        path.unlink()
+    return data
+
+
+def rebuild_and_compare(bucket, prefix: str, ledger_dir: Path, work: Path, log=_print, baselines=None) -> dict:
     """Replay the ledger shard by shard and compare each shard with the store's.
 
     The comparison is against the store as of ``upTo``. If the store has moved
@@ -182,15 +214,15 @@ def rebuild_and_compare(bucket, prefix: str, ledger_dir: Path, work: Path, log=_
     if manifest != state["upTo"]["storeManifest"]:
         log({"event": "rebuild-skipped", "source": prefix, "reason": "the store moved on since the export"})
         return {"checked": 0, "skipped": True}
-    for name, digest in state["baseline"]["files"].items():
-        if _sha256(ledger_dir / "baseline" / name) != digest:
-            raise ValueError(f"baseline/{name} doesn't match its hash in {LEDGER}")
     work.mkdir(parents=True, exist_ok=True)
+    if not state["baseline"].get("location"):  # in the repository: check every file before replaying
+        for name in state["baseline"]["files"]:
+            _baseline_shard(state, ledger_dir, work, name, baselines)
     _split_changes(ledger_dir, state, work)
     mismatched, records = [], 0
     for n in range(SHARDS):
-        base = ledger_dir / "baseline" / f"{n:03d}.jsonl.gz"
-        shard = decode_records(base.read_bytes()) if base.exists() else {}
+        data = _baseline_shard(state, ledger_dir, work, f"{n:03d}.jsonl.gz", baselines)
+        shard = decode_records(data) if data else {}
         changes_path = work / f"{n:03d}.jsonl"
         if changes_path.exists():
             by_record = {}
@@ -226,6 +258,8 @@ def main(argv=None) -> int:
     parser.add_argument("--work", type=Path, default=Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "ledger-work")
     parser.add_argument("--decisions-bucket", help="also record the decisions in this decision log bucket")
     parser.add_argument("--actor", default="app:lei-commons-maker")
+    parser.add_argument("--baseline-bucket", help="keep a new baseline in this bucket, not the repository")
+    parser.add_argument("--baseline-path", default=os.environ.get("GITHUB_REPOSITORY", "ledger"))
     args = parser.parse_args(argv)
     from google.cloud import storage
     from lc_core.decisions import Recorder
@@ -235,10 +269,11 @@ def main(argv=None) -> int:
     trigger = os.environ.get("GITHUB_EVENT_NAME", "")
     record = Recorder(args.actor, _print, run_id=os.environ.get("GITHUB_RUN_ID", ""), trigger=trigger)
     try:
+        baselines = client.bucket(args.baseline_bucket) if args.baseline_bucket else None
         if args.command == "export":
-            export(bucket, args.prefix, args.dir, log=record)
+            export(bucket, args.prefix, args.dir, log=record, baselines=baselines, baseline_path=args.baseline_path)
         else:
-            rebuild_and_compare(bucket, args.prefix, args.dir, args.work / args.prefix, log=record)
+            rebuild_and_compare(bucket, args.prefix, args.dir, args.work / args.prefix, log=record, baselines=baselines)
         return 0
     except StoreBusy as exc:
         record({"event": "busy", "source": args.prefix, "reason": str(exc)})

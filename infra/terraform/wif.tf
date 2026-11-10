@@ -12,6 +12,9 @@ locals {
     "control@refs/heads/main"      = "control-operator"
     "ledger-gleif@refs/heads/main" = "maker"
     "ledger-gb@refs/heads/main"    = "maker"
+    "ledger-br@refs/heads/main"    = "maker"
+    "ledger-us@refs/heads/main"    = "maker"
+    "ledger-sg@refs/heads/main"    = "maker"
   }
 }
 

@@ -103,3 +103,19 @@ removed {
     destroy = false
   }
 }
+
+# Full-copy ledger baselines too big for a git repository (Brazil, New York,
+# Singapore). Written once each; the git ledger pins every file's hash.
+# Versioned, so nothing is lost if an object is ever overwritten.
+resource "google_storage_bucket" "ledger_baselines" {
+  name                        = "${local.bucket_prefix}-ledger-baselines"
+  location                    = var.region
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+
+  versioning {
+    enabled = true
+  }
+
+  depends_on = [google_project_service.apis]
+}

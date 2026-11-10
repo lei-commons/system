@@ -34,6 +34,8 @@ jobs:
       # "<store prefix>:<directory>" pairs, for example "gleif:. gleif-rr:relationships"
       LEDGERS: ${{ vars.LC_LEDGERS }}
       MAKER_APP_ID: ${{ vars.LC_MAKER_APP_ID }}
+      # Set for registers too big for a git repository: their baseline lives in this bucket.
+      BASELINE_BUCKET: ${{ vars.LC_BASELINE_BUCKET }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -108,18 +110,20 @@ jobs:
         id: export
         run: |
           changed=false
+          baseline=()
+          [ -n "$BASELINE_BUCKET" ] && baseline=(--baseline-bucket "$BASELINE_BUCKET")
           for pair in $LEDGERS; do
             prefix="${pair%%:*}"; dir="${pair#*:}"
             status=0
             python -m lc_ingest.export export --bucket "$DATA_BUCKET" --prefix "$prefix" --dir "$dir" \
-              --decisions-bucket "$DECISIONS_BUCKET" || status=$?
+              --decisions-bucket "$DECISIONS_BUCKET" "${baseline[@]}" || status=$?
             if [ "$status" = 3 ]; then
               echo "::notice::$prefix is mid-write; the next run exports it"
               continue
             fi
             [ "$status" = 0 ] || exit "$status"
             python -m lc_ingest.export verify --bucket "$DATA_BUCKET" --prefix "$prefix" --dir "$dir" \
-              --decisions-bucket "$DECISIONS_BUCKET"
+              --decisions-bucket "$DECISIONS_BUCKET" "${baseline[@]}"
           done
           if [ -n "$(git status --porcelain)" ]; then changed=true; fi
           echo "changed=$changed" >> "$GITHUB_OUTPUT"
