@@ -6,7 +6,7 @@ name: deploy-console
 on:
   push:
     branches: [main]
-    paths: ["services/console/**", "packages/lc_core/**"]
+    paths: ["services/console/**", "packages/lc_core/**", "config/sources.yaml"]
   workflow_dispatch:
 
 permissions:
