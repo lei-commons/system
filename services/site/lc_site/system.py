@@ -8,13 +8,14 @@ never as a false "all good".
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 
 CACHE_SECONDS = 30
 DECISIONS_SHOWN = 20
-SOURCE_STORES = {"gleif": "GLEIF entities", "gleif-rr": "GLEIF relationships", "gb": "Companies House",
-                 "br": "Receita Federal (Brazil)", "us-ny": "New York Department of State", "sg": "ACRA (Singapore)"}
+FEED_SHOWN = 14
+AFTER_INGEST = ["build-snapshot", "load-db"]  # the cycle's last steps, after every source's ingestion
 AGENT_ROLES = ["engineering"]  # agents/roles; none runs until the owner switches agents on
 
 OK, BAD, BUSY, IDLE, UNKNOWN = "ok", "failed", "running", "idle", "unknown"
@@ -45,6 +46,10 @@ class GoogleReader:
     def bucket_names(self, bucket: str, prefix: str) -> list:
         return [b.name for b in self._storage.list_blobs(self.buckets[bucket], prefix=prefix)]
 
+    def bucket_text(self, bucket: str, name: str):
+        blob = self._storage.bucket(self.buckets[bucket]).blob(name)
+        return blob.download_as_text() if blob.exists() else None
+
 
 def _try(fn, default=None):
     try:
@@ -66,8 +71,14 @@ def _execution_status(job: dict) -> str:
 
 
 class SystemView:
-    def __init__(self, reader, clock=time.time):
+    """Everything the System page shows. Sources come from the registry (config/sources.yaml)."""
+
+    def __init__(self, reader, clock=time.time, sources=None):
+        from lc_core.sources import pipelines
+
         self._reader, self._clock = reader, clock
+        self._sources = sources if sources is not None else pipelines(os.environ.get("LC_SOURCES_CONFIG")
+                                                                         or _default_sources_path())
         self._cached, self._at = None, -1e9
         self._lock = threading.Lock()
 
@@ -78,6 +89,23 @@ class SystemView:
             data = dict(self._cached)
         data["snapshot"] = snapshot_meta or {}
         return data
+
+    def _feed(self, r) -> list:
+        """The newest decisions from the jobs' run objects, today's and yesterday's, newest first."""
+        from datetime import datetime, timedelta, timezone
+
+        today = datetime.fromtimestamp(self._clock(), timezone.utc).date()
+        names = []
+        for day in (today, today - timedelta(days=1)):
+            names += r.bucket_names("decision_log", f"runs/{day.isoformat()}/")
+        events = []
+        for name in sorted(names, reverse=True)[:FEED_SHOWN]:
+            text = r.bucket_text("decision_log", name) or ""
+            for line in text.splitlines():
+                if line.strip():
+                    e = json.loads(line)
+                    events.append({k: e.get(k) for k in ("ts", "actor", "action", "subject", "decision", "reason")})
+        return sorted(events, key=lambda e: e["ts"] or "", reverse=True)[:FEED_SHOWN]
 
     def _collect(self) -> dict:
         r = self._reader
@@ -90,12 +118,32 @@ class SystemView:
             f"https://workflowexecutions.googleapis.com/v1/projects/{r.project}/locations/{r.region}/workflows/daily-cycle"
             "/executions?pageSize=14").get("executions", []), [])
         control, control_error = _try(lambda: r.bucket_json("control", "state.json"))
-        stores = {}
-        for prefix, label in SOURCE_STORES.items():
-            manifest, error = _try(lambda p=prefix: r.bucket_json("data", f"{p}/manifest.json"))
-            stores[prefix] = {"label": label, "records": (manifest or {}).get("records"),
-                              "last": (manifest or {}).get("lastKey") or ((manifest or {}).get("processed") or [None])[-1],
-                              "error": error}
+
+        def store(prefix, label):
+            manifest, error = _try(lambda: r.bucket_json("data", f"{prefix}/manifest.json"))
+            return {"label": label, "records": (manifest or {}).get("records"),
+                    "last": (manifest or {}).get("lastKey") or ((manifest or {}).get("processed") or [None])[-1],
+                    "error": error}
+
+        job_rows = {j["name"].rsplit("/", 1)[1]: j for j in jobs}
+        stores, sources = {}, []
+        for src in self._sources:
+            entities = store(src["store"], src["label"])
+            stores[src["store"]] = entities
+            relationships = None
+            if src.get("relationships"):
+                relationships = store(src["relationships"], f"{src['label']} relationships")
+                stores[src["relationships"]] = relationships
+            row = job_rows.get(src["job"]) or {}
+            latest = row.get("latestCreatedExecution") or {}
+            sources.append({k: src.get(k) for k in ("id", "name", "country", "licence", "cadence", "label", "refresh",
+                                                     "job", "store", "records_as")}
+                           | {"records": entities["records"], "last": entities["last"], "error": entities["error"],
+                              "relationships": (relationships or {}).get("records"),
+                              "jobStatus": _execution_status(row) if row else UNKNOWN,
+                              "lastRun": latest.get("createTime"), "finished": latest.get("completionTime")})
+        steps = [src["job"] for src in self._sources] + AFTER_INGEST
+        feed, feed_error = _try(lambda: self._feed(r), [])
         names, decisions_error = _try(lambda: sorted(r.bucket_names("decision_log", "owner-control/")
                                                      + r.bucket_names("decision_log", "budget-guard/"))[-DECISIONS_SHOWN:], [])
         decisions = []
@@ -129,11 +177,44 @@ class SystemView:
             "cleanStreak": clean_streak(cycles),
             "cyclesError": cycles_error,
             "stores": stores,
+            "sources": sources,
+            "steps": steps,
+            "lastCycle": last_cycle(cycles, job_rows, steps),
+            "feed": feed,
+            "feedError": feed_error,
             "decisions": decisions,
             "decisionsError": decisions_error,
             "agents": [{"role": role, "status": IDLE, "note": "not running: agents are off until the owner switches them on"}
                        for role in AGENT_ROLES],
         }
+
+
+def _default_sources_path():
+    from pathlib import Path
+
+    here = Path(__file__).resolve()
+    for parent in here.parents:  # the repository in development; the image sets LC_SOURCES_CONFIG
+        candidate = parent / "config" / "sources.yaml"
+        if candidate.exists():
+            return candidate
+    return here.parent / "sources.yaml"
+
+
+def last_cycle(executions: list, job_rows: dict, steps: list):
+    """The newest daily cycle, with each step's run if that run started inside the cycle."""
+    if not executions:
+        return None
+    newest = executions[0]
+    start, end = newest.get("startTime") or "", newest.get("endTime") or "9999"
+    out = []
+    for name in steps:
+        latest = (job_rows.get(name) or {}).get("latestCreatedExecution") or {}
+        created = latest.get("createTime") or ""
+        inside = start <= created <= end
+        out.append({"job": name, "started": created if inside else None,
+                    "finished": latest.get("completionTime") if inside else None,
+                    "status": _execution_status(job_rows[name]) if inside and name in job_rows else UNKNOWN})
+    return {"started": newest.get("startTime"), "ended": newest.get("endTime"), "state": newest.get("state"), "steps": out}
 
 
 def clean_streak(executions: list) -> int:
