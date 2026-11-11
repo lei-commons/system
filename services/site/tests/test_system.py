@@ -46,7 +46,15 @@ class Reader:
             return {"ts": "t", "actor": "owner:p", "action": "pause", "decision": "done", "reason": "<b>test</b>"}
         return None
 
+    def bucket_text(self, bucket, name):
+        if name.startswith("runs/"):
+            return json.dumps({"ts": "2026-11-11T02:05:00Z", "actor": "job:ingest-gleif", "action": "ingested",
+                               "subject": "gleif 2026-11-11", "decision": "done", "reason": "19,069 changes"}) + "\n"
+        return None
+
     def bucket_names(self, bucket, prefix):
+        if prefix.startswith("runs/"):
+            return [f"{prefix}2026-11-11T020500-job-ingest-gleif-x.jsonl"]
         if "storage" in self.fail:
             raise PermissionError("no")
         return ["owner-control/1.json"] if prefix == "owner-control/" else []
@@ -123,3 +131,18 @@ def test_the_daily_cycle_history_and_its_clean_streak():
     assert clean_streak([]) == 0
     assert clean_streak([{"state": "SUCCEEDED", "startTime": "2026-11-09T02:00:00Z"},
                          {"state": "FAILED", "startTime": "2026-11-09T05:00:00Z"}]) == 0  # a failed rerun that day counts
+
+
+def test_sources_steps_and_the_cycle_timeline_come_from_the_registry():
+    sources = [{"id": "gleif", "name": "GLEIF", "country": "*", "licence": "CC0-1.0", "cadence": "daily", "status": "active",
+                "job": "ingest-gleif", "store": "gleif", "records_as": "gleif", "label": "GLEIF", "refresh": "daily",
+                "relationships": "gleif-rr"},
+               {"id": "xx-new", "name": "A new register", "country": "XX", "licence": "x", "cadence": "monthly",
+                "status": "active", "job": "ingest-xx", "store": "xx", "records_as": "xx-new", "label": "New", "refresh": "monthly",
+                "relationships": None}]
+    data = SystemView(Reader(), sources=sources).collect({})
+    assert [s["label"] for s in data["sources"]] == ["GLEIF", "New"]  # a new source appears without code changes
+    assert data["sources"][0]["records"] == 3355011 and data["sources"][1]["records"] is None
+    assert data["steps"] == ["ingest-gleif", "ingest-xx", "build-snapshot", "load-db"]
+    assert data["feed"][0]["actor"] == "job:ingest-gleif"
+    assert [s["job"] for s in data["lastCycle"]["steps"]] == data["steps"]

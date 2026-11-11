@@ -4,6 +4,12 @@
 #   owner-key     - needs a credential the owner creates and enters in the console
 #   web-discovery - no registry access; build from public web pages
 # status: active | awaiting-owner | disabled
+# pipeline: present once a source is built and running in the daily cycle. The site's
+#   System page and the status views are drawn from these entries, so adding a source
+#   here (with its job and store) is all they need.
+#   job: Cloud Run job; store: prefix in the data bucket; records_as: the id records carry;
+#   label: short name; refresh: how often the source publishes something new;
+#   relationships: an extra store of relationships, if any.
 
 version: 1
 
@@ -16,6 +22,7 @@ sources:
     licence: CC0-1.0
     cadence: daily
     status: active
+    pipeline: {job: ingest-gleif, store: gleif, records_as: gleif, label: GLEIF, refresh: new files daily, relationships: gleif-rr}
 
   - id: gb-coh
     name: UK Companies House
@@ -29,14 +36,31 @@ sources:
       access: owner-key    # streaming API for daily changes
       secret: sources/gb-coh/api-key
       status: awaiting-owner
+    pipeline: {job: ingest-gb, store: gb, records_as: gb-coh, label: Companies House, refresh: monthly register}
 
-  - {id: us-ny-dos, name: New York Department of State (open data), country: US, access: open, method: api, licence: public-domain, cadence: daily, status: active}
+  - id: us-ny-dos
+    name: New York Department of State (open data)
+    country: US
+    access: open
+    method: api
+    licence: to-be-verified
+    cadence: weekly
+    status: active
+    pipeline: {job: ingest-ny, store: us-ny, records_as: us-ny-dos, label: New York DOS, refresh: weekly}
   - {id: us-co-sos, name: Colorado Secretary of State (open data), country: US, access: open, method: api, licence: public-domain, cadence: daily, status: active}
   - {id: us-pa-dos, name: Pennsylvania Department of State, country: US, access: open, method: bulk, licence: public-domain, cadence: monthly, status: active}
   - {id: us-or-sos, name: Oregon Secretary of State (open data), country: US, access: open, method: api, licence: public-domain, cadence: daily, status: active}
   - {id: us-ct-sots, name: Connecticut Secretary of the State (open data), country: US, access: open, method: api, licence: public-domain, cadence: daily, status: active}
 
-  - {id: br-rfb-cnpj, name: Receita Federal CNPJ open data, country: BR, access: open, method: bulk, licence: to-be-verified, cadence: monthly, status: active}
+  - id: br-rfb-cnpj
+    name: Receita Federal CNPJ open data
+    country: BR
+    access: open
+    method: bulk
+    licence: to-be-verified
+    cadence: monthly
+    status: active
+    pipeline: {job: ingest-br, store: br, records_as: br-rfb, label: Receita Federal, refresh: monthly release}
 
   - id: in-mca
     name: India Ministry of Corporate Affairs
@@ -55,6 +79,7 @@ sources:
     licence: SG-Open-Data-1.0
     cadence: monthly
     status: active
+    pipeline: {job: ingest-sg, store: sg, records_as: sg-acra, label: ACRA Singapore, refresh: monthly}
 
   - id: web
     name: Public web discovery (entity websites, schema.org, Common Crawl)

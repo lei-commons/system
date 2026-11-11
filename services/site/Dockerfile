@@ -4,6 +4,7 @@ FROM python:3.12-slim
 
 RUN useradd --create-home --uid 10001 site
 WORKDIR /app
+COPY config/sources.yaml config/sources.yaml
 COPY packages/lc_core packages/lc_core
 COPY packages/lc_directory packages/lc_directory
 COPY services/site services/site
@@ -15,5 +16,5 @@ RUN python -c "import duckdb; c = duckdb.connect(); c.execute(\"SET extension_di
  && chmod -R a+rX /opt/duckdb-extensions
 
 USER site
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONUNBUFFERED=1 LC_SOURCES_CONFIG=/app/config/sources.yaml
 CMD ["python", "-m", "lc_site.server"]
