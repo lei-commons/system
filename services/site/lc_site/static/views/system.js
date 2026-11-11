@@ -166,7 +166,7 @@ function actions(d) {
       h("div", { class: "action-label" }, group),
       h("div", { class: "toolbar", style: { margin: 0 } }, ...items.map((a) => h("a", {
         class: `btn${a.tone === "danger" ? " danger" : a.tone === "primary" ? " primary" : ""}`,
-        href: `${d.console}/act?do=${encodeURIComponent(a.id)}`, target: "_blank", rel: "noopener",
+        href: `${d.console}/act?do=${encodeURIComponent(a.id)}&back=${encodeURIComponent(location.origin)}`, target: "_blank", rel: "noopener",
         title: a.help || "",
       }, a.label))))));
 }

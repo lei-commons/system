@@ -1,14 +1,24 @@
 """The console's HTTP front end.
 
-M1 is read-only: it shows the system state and has no commands. The owner's
-commands run from the `control` repository until the lei-commons-control App
-exists, so a bug here can't change anything.
+It shows the system state and performs the owner's actions (lc_core.actions):
+pause, resume, stop, restart, manual mode, pausing one job, and running a job
+now. The System page on the site links here; the site itself can't change
+anything.
+
+Every action needs both factors at the moment it is taken: the owner's IAP
+login and a fresh code from the authenticator, entered on the confirmation
+page. A code works once, so a form posted from anywhere else can't act; the
+Origin header is checked too. Every attempt, allowed or refused, is audited,
+and every applied action is recorded in the decision log. The control state is
+written only if it hasn't changed since it was read. Budget changes stay in the
+`control` repository.
 """
 
 from __future__ import annotations
 
 import html
 import json
+import re
 import os
 import sys
 import threading
@@ -16,6 +26,9 @@ from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs
 
+from datetime import datetime, timezone
+
+from lc_core.actions import Refused, apply, catalogue, known
 from lc_core.control import load_state
 
 from .auth import SESSION_SECONDS, Sessions, verify_iap
@@ -26,7 +39,8 @@ COOKIE = "__Host-lc-console"
 # A key waiting for its first good code. It is stored, not held in memory, so a
 # restart can't swap the key after the owner has added it to their app.
 PENDING = "pending:"
-MAX_FORM = 1024
+MAX_FORM = 4096
+MAX_REASON = 300
 HEADERS = {
     "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'self'; frame-ancestors 'none'",
     "Cache-Control": "no-store",
@@ -57,7 +71,8 @@ CODE_FORM = ("<form method=post action={action}><label>Code from your authentica
 
 
 class App:
-    def __init__(self, *, owners, audience, store, read_state=load_state, sessions=None, verifier=None, iap=verify_iap, log=None):
+    def __init__(self, *, owners, audience, store, read_state=load_state, sessions=None, verifier=None, iap=verify_iap, log=None,
+                 backend=None, sources=(), site_url="", clock=None):
         self.owners = {o.strip().lower() for o in owners if o.strip()}
         self.audience = audience
         self.store = store
@@ -67,6 +82,8 @@ class App:
         self.iap = iap
         self.log = log or (lambda record: print(json.dumps(record, sort_keys=True), flush=True))
         self.lock = threading.Lock()
+        self.backend, self.sources, self.site_url = backend, list(sources), site_url.rstrip("/")
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -113,14 +130,21 @@ class Handler(BaseHTTPRequestHandler):
         morsel = jar.get(COOKIE)
         return self.app.sessions.valid(morsel.value if morsel else None, email)
 
-    def _code(self):
+    def _form(self) -> dict:
         try:
             length = int(self.headers.get("Content-Length", ""))
         except ValueError:
-            return ""
+            return {}
         if not 0 < length <= MAX_FORM:
-            return ""
-        return parse_qs(self.rfile.read(length).decode("ascii", "replace")).get("code", [""])[0].strip()
+            return {}
+        return {k: v[0] for k, v in parse_qs(self.rfile.read(length).decode("utf-8", "replace")).items()}
+
+    def _code(self, form=None):
+        return (form if form is not None else self._form()).get("code", "").strip()
+
+    def _same_origin(self) -> bool:
+        origin = self.headers.get("Origin")
+        return origin is None or origin == f"https://{self.headers.get('Host', '')}"
 
     def do_GET(self):
         if self.path == "/health":
@@ -134,9 +158,13 @@ class Handler(BaseHTTPRequestHandler):
         secret, pending = loaded
         if secret is None:
             return self._enrol_page(email, pending)
+        path, _, query = self.path.partition("?")
+        if path == "/act":  # the confirmation asks for a fresh code itself, so no session is needed to see it
+            params = parse_qs(query)
+            return self._confirm_page(params.get("do", [""])[0], back=params.get("back", [""])[0])
         if not self._session_ok(email):
             return self._send(200, page("Second factor", CODE_FORM.format(action="/verify")))
-        if self.path != "/":
+        if path != "/":
             return self._send(404, page("Not found", ""))
         return self._send(200, self._status_page())
 
@@ -144,7 +172,8 @@ class Handler(BaseHTTPRequestHandler):
         email = self._owner()
         if email is None:
             return None
-        code = self._code()
+        form = self._form()
+        code = self._code(form)
         loaded = self._load()
         if loaded is None:
             return None
@@ -155,6 +184,8 @@ class Handler(BaseHTTPRequestHandler):
             if ok:
                 return self._send(303, b"", cookie=self.app.sessions.issue(email), location="/")
             return self._send(403, page("Second factor", f"<p>{self._failure()}</p>" + CODE_FORM.format(action="/verify")))
+        if self.path == "/act" and secret:
+            return self._act(email, secret, form)
         if self.path == "/enrol" and secret is None:
             ok = bool(pending) and self.app.verifier.verify(pending, code)
             self._audit(email, "enrolled", ok)
@@ -205,6 +236,89 @@ class Handler(BaseHTTPRequestHandler):
                 + CODE_FORM.format(action="/enrol"))
         return self._send(status, page("Set up your authenticator", body))
 
+    def _describe(self, action: str):
+        state = None
+        if self.app.backend is not None:
+            state, _ = self.app.backend.read_state()
+        for a in catalogue(self.app.sources, state):
+            if a["id"] == action:
+                return a
+        return None
+
+    def _confirm_page(self, action, status=200, note="", back=""):
+        if not known(self.app.sources, action) or self.app.backend is None:
+            return self._send(404, page("No such action", "<p>This action isn't one the console offers.</p>"))
+        a = self._describe(action)
+        if a is None:
+            return self._send(409, page("Not available now", "<p>That action doesn't apply to the system's current state.</p>"
+                                        + self._back(back)))
+        message = f"<p><strong>{html.escape(note)}</strong></p>" if note else ""
+        body = (f"{message}<p>{html.escape(a['group'])}: <strong>{html.escape(a['label'])}</strong></p>"
+                f"<p>{html.escape(a['help'])}</p>"
+                f"<form method=post action=/act><input type=hidden name=do value=\"{html.escape(action, quote=True)}\">"
+                f"<input type=hidden name=back value=\"{html.escape(_site(back) or '', quote=True)}\">"
+                "<p><label>Why (for the decision log) <input name=reason maxlength=300 required size=40></label></p>"
+                "<p><label>Code from your authenticator app "
+                "<input name=code inputmode=numeric autocomplete=one-time-code required></label></p>"
+                "<p>A code works once. If you have just signed in, use the next one.</p>"
+                f"<button>{html.escape(a['label'])}</button></form>{self._back(back)}")
+        return self._send(status, page("Confirm", body))
+
+    def _back(self, back=""):
+        site = _site(back) or self.app.site_url
+        return f'<p><a href="{html.escape(site, quote=True)}/#/system">Back to the System page</a></p>' if site else ""
+
+    def _act(self, email, secret, form):
+        action, reason = form.get("do", ""), " ".join(form.get("reason", "").split())[:MAX_REASON]
+        back_link = self._back(form.get("back", ""))
+        if not self._same_origin():
+            self._audit(email, f"action-refused:{action}", False)
+            return self._send(403, page("Not allowed", "<p>Actions must come from this console.</p>"))
+        if not known(self.app.sources, action) or self.app.backend is None:
+            return self._send(404, page("No such action", ""))
+        if not reason:
+            return self._confirm_page(action, status=400, note="Say why, for the decision log.", back=form.get("back", ""))
+        ok = self.app.verifier.verify(secret, self._code(form))
+        self._audit(email, f"action-code:{action}", ok)
+        if not ok:
+            return self._confirm_page(action, status=403, note=self._failure(), back=form.get("back", ""))
+        actor, now = f"owner:{email}", self.app.clock().strftime("%Y-%m-%dT%H:%M:%SZ")
+        event = {"ts": now, "actor": actor, "action": action, "subject": "control state", "trigger": "owner-console",
+                 "reason": reason, "decision": "done", "component": action.partition(":")[2]}
+        try:
+            if action.startswith("run:"):
+                job = action.split(":", 1)[1]
+                execution = self.app.backend.run_job(job)
+                event.update(subject=job, run_id=execution)
+                outcome = f"Started {job}" + (f" ({execution})" if execution else "") + "."
+            else:
+                current, generation = self.app.backend.read_state()
+                new = apply(action, current, actor, now)
+                self.app.backend.write_state(new, generation)
+                outcome = f"The system is {new['state']}" + (
+                    f"; paused jobs: {', '.join(new.get('paused_components') or []) or 'none'}." )
+        except Refused as exc:
+            event.update(decision="rejected", reason=f"{reason} (refused: {exc})")
+            self._record(event)
+            return self._send(409, page("Refused", f"<p>{html.escape(str(exc))}</p>{back_link}"))
+        except Exception as exc:
+            event.update(decision="failed", reason=f"{reason} ({type(exc).__name__})")
+            self._record(event)
+            self.app.log({"event": "action-failed", "action": action, "error": type(exc).__name__})
+            return self._send(502, page("Didn't work", f"<p>{html.escape(type(exc).__name__)}: "
+                                                       f"{html.escape(str(exc)[:200])}</p>{back_link}"))
+        self._record(event)
+        self._audit(email, f"action:{action}", True)
+        return self._send(200, page("Done", f"<p>{html.escape(outcome)}</p><p class=muted>Recorded in the decision log. "
+                                             "Jobs read the new state at their next check. The GitHub variable "
+                                             "SYSTEM_STATE is set only by the control repository's commands.</p>" + back_link))
+
+    def _record(self, event):
+        try:
+            self.app.backend.record(event)
+        except Exception as exc:  # the action stands; the failure to log it is itself logged
+            self.app.log({"event": "decision-unrecorded", "action": event["action"], "error": type(exc).__name__})
+
     def _status_page(self):
         try:
             st = self.app.read_state()
@@ -214,8 +328,16 @@ class Handler(BaseHTTPRequestHandler):
         rows = [("State", st.state), ("Paused components", ", ".join(st.paused_components) or "none"),
                 ("Monthly budget (USD)", "not set" if st.monthly_budget_usd is None else f"{st.monthly_budget_usd:g}")]
         table = "".join(f"<tr><th align=left>{html.escape(k)}<td>{html.escape(v)}" for k, v in rows)
-        return page("System status", f"<table>{table}</table><p>Commands run from the "
+        site = f'<a href="{html.escape(self.app.site_url)}/#/system">System page</a>' if self.app.site_url else "System page"
+        return page("System status", f"<table>{table}</table><p>Actions start from the {site}: each asks here for a fresh "
+                                     "code. Budget changes run from the "
                                      "<a href=https://github.com/lei-commons/control/actions>control repository</a>.</p>")
+
+
+def _site(url: str):
+    """The site's address, if ``url`` is one: https and a run.app host only, so the link can't lead elsewhere."""
+    m = re.fullmatch(r"https://[a-z0-9-]+(\.[a-z0-9-]+)*\.run\.app", (url or "").strip().rstrip("/"))
+    return m.group(0) if m else None
 
 
 def make_server(app: App, address) -> ThreadingHTTPServer:
@@ -224,8 +346,16 @@ def make_server(app: App, address) -> ThreadingHTTPServer:
 
 def main() -> int:
     try:
+        from lc_core.sources import pipelines
+
+        from .backend import GoogleBackend
+
+        project = os.environ["GCP_PROJECT_ID"]
         app = App(owners=os.environ["LC_CONSOLE_OWNERS"].split(","), audience=os.environ["LC_IAP_AUDIENCE"],
-                  store=SecretManagerStore(os.environ["GCP_PROJECT_ID"]))
+                  store=SecretManagerStore(project),
+                  backend=GoogleBackend(project, os.environ.get("GCP_REGION", "us-central1")),
+                  sources=pipelines(os.environ.get("LC_SOURCES_CONFIG", "/app/config/sources.yaml")),
+                  site_url=os.environ.get("LC_SITE_URL", ""))
     except KeyError as exc:
         print(f"refusing to start: {exc} is not set", file=sys.stderr)
         return 1

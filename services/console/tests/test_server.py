@@ -273,9 +273,89 @@ def test_other_methods_refused(env, method):
     assert call(env, method=method).status == 405
 
 
-def test_there_are_no_commands(env):
+def test_only_the_offered_actions_exist(env):
     cookie = login(env)
     assert call(env, "/pause", "POST", cookie=cookie, body="code=1").status == 404
+
+
+class Backend:
+    def __init__(self, state):
+        self.state, self.generation, self.runs, self.events = state, 7, [], []
+
+    def read_state(self):
+        return self.state, self.generation
+
+    def write_state(self, state, generation):
+        assert generation == self.generation
+        self.state, self.generation = state, generation + 1
+
+    def run_job(self, job):
+        self.runs.append(job)
+        return f"{job}-abc12"
+
+    def record(self, event):
+        self.events.append(event)
+
+
+SOURCES = [{"job": "ingest-gleif", "label": "GLEIF"}, {"job": "ingest-br", "label": "Receita Federal"}]
+
+
+@pytest.fixture
+def act(env):
+    env.app.backend = Backend({"state": "running", "paused_components": []})
+    env.app.sources, env.app.site_url = SOURCES, "https://site.test"
+    return env
+
+
+def test_the_confirmation_page_needs_iap_but_no_session(act):
+    r = call(act, "/act?do=pause")
+    assert r.status == 200 and "Code from your authenticator app" in r.body and "site.test/#/system" in r.body
+    assert call(act, "/act?do=pause", token="other").status == 403
+    assert call(act, "/act?do=drop-database").status == 404
+    assert call(act, "/act?do=resume").status == 409  # already running
+
+
+def test_an_action_needs_a_fresh_code_and_a_reason(act):
+    assert call(act, "/act", "POST", body=f"do=pause&reason=&code={code(act)}").status == 400
+    assert call(act, "/act", "POST", body="do=pause&reason=test&code=000000").status == 403
+    assert act.app.backend.state["state"] == "running" and act.app.backend.events == []
+    r = call(act, "/act", "POST", body=f"do=pause&reason=checking+the+cycle&code={code(act)}")
+    assert r.status == 200 and "The system is paused" in r.body
+    assert act.app.backend.state["state"] == "paused" and act.app.backend.state["updated_by"] == f"owner:{OWNER}"
+    event = act.app.backend.events[-1]
+    assert event["action"] == "pause" and event["decision"] == "done" and event["reason"] == "checking the cycle"
+    # The same code can't be used twice.
+    assert call(act, "/act", "POST", body=f"do=resume&reason=again&code={code(act)}").status == 403
+
+
+def test_running_a_job_and_pausing_one(act):
+    r = call(act, "/act", "POST", body=f"do=run%3Aingest-br&reason=new+release&code={code(act)}")
+    assert r.status == 200 and act.app.backend.runs == ["ingest-br"]
+    act.clock.t += 30
+    r = call(act, "/act", "POST", body=f"do=pause-component%3Ajob%3Apublish&reason=hold&code={code(act)}")
+    assert r.status == 200 and act.app.backend.state["paused_components"] == ["job:publish"]
+
+
+def test_a_refused_action_is_recorded_and_changes_nothing(act):
+    act.app.backend.state = {"state": "stopped", "paused_components": []}
+    r = call(act, "/act", "POST", body=f"do=run%3Aload-db&reason=x&code={code(act)}")
+    assert r.status == 200  # running a job doesn't depend on the state; the job itself checks it
+    act.clock.t += 30
+    r = call(act, "/act", "POST", body=f"do=pause-component%3Ajob%3Aload-db&reason=x&code={code(act)}")
+    assert r.status == 200
+    act.clock.t += 30
+    act.app.backend.state = {"state": "stopped", "paused_components": []}
+    r = call(act, "/act", "POST", body=f"do=manual&reason=x&code={code(act)}")
+    assert r.status == 409 and act.app.backend.state["state"] == "stopped"
+    assert act.app.backend.events[-1]["decision"] == "rejected"
+
+
+def test_a_post_from_another_site_is_refused(act):
+    c = http.client.HTTPConnection("127.0.0.1", act.port, timeout=5)
+    c.request("POST", "/act", body=f"do=pause&reason=x&code={code(act)}",
+              headers={"X-Goog-IAP-JWT-Assertion": "owner", "Content-Type": "application/x-www-form-urlencoded",
+                       "Origin": "https://evil.test"})
+    assert c.getresponse().status == 403 and act.app.backend.state["state"] == "running"
 
 
 def test_health_shows_nothing(env):
@@ -317,3 +397,10 @@ def test_missing_token_or_audience_refuses(token, aud):
 def test_login_accepts_the_same_clock_drift_as_setup(env):
     """The second enrolment bug: setup tolerated a slow phone, and login then refused it."""
     assert call(env, "/verify", "POST", body=f"code={code(env, -3)}").status == 303
+
+
+def test_the_way_back_only_goes_to_a_run_app_site(act):
+    r = call(act, "/act?do=pause&back=https%3A%2F%2Flei-commons-site-abc-uc.a.run.app")
+    assert 'href="https://lei-commons-site-abc-uc.a.run.app/#/system"' in r.body
+    r = call(act, "/act?do=pause&back=https%3A%2F%2Fevil.example%2F")
+    assert "evil.example" not in r.body and 'href="https://site.test/#/system"' in r.body

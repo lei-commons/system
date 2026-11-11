@@ -12,6 +12,8 @@ import os
 import threading
 import time
 
+from lc_core.actions import catalogue
+
 CACHE_SECONDS = 30
 DECISIONS_SHOWN = 20
 FEED_SHOWN = 14
@@ -164,7 +166,7 @@ class SystemView:
             "services": [{"name": s["name"].rsplit("/", 1)[1],
                           "status": OK if (s.get("terminalCondition") or {}).get("state") == "CONDITION_SUCCEEDED" else UNKNOWN,
                           "ingress": (s.get("ingress") or "").replace("INGRESS_TRAFFIC_", "").lower(),
-                          "iap": bool(s.get("iapEnabled"))} for s in services],
+                          "iap": bool(s.get("iapEnabled")), "uri": s.get("uri")} for s in services],
             "servicesError": services_error,
             "schedules": [{"name": s["name"].rsplit("/", 1)[1], "schedule": s.get("schedule"), "state": s.get("state"),
                            "lastAttempt": s.get("lastAttemptTime"),
@@ -178,6 +180,9 @@ class SystemView:
             "cyclesError": cycles_error,
             "stores": stores,
             "sources": sources,
+            # The owner console performs actions; this site only links to it.
+            "console": next((s.get("uri") for s in services if s["name"].rsplit("/", 1)[1] == "owner-console"), None),
+            "actions": catalogue(self._sources, control or {}) if control is not None else [],
             "steps": steps,
             "lastCycle": last_cycle(cycles, job_rows, steps),
             "feed": feed,
