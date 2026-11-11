@@ -17,6 +17,7 @@ from datetime import date
 
 from lc_core.allowlist import AllowList
 from lc_core.control import require_running
+from lc_core.approvals import require_approved
 from lc_core.decisions import Recorder, log_bucket_name
 from lc_core.fetch import Gateway
 from lc_core.lease import Busy, lease
@@ -25,6 +26,14 @@ from lc_ingest.runner import run_ingest
 from lc_ingest.store import GcsStore
 
 COMPONENT = "job:ingest-ny"
+SOURCE_ID = "us-ny-dos"  # its entry in config/sources.yaml
+
+
+def gate():
+    """Run only while the system is running and the owner has approved this source."""
+    require_running(COMPONENT)
+    require_approved(SOURCE_ID)
+
 DATASET = "https://data.ny.gov/resource/n9v6-gdp6.csv"
 LIMIT = 20_000_000  # above the whole dataset (4.3 million in November 2026), so one request returns it all
 
@@ -46,7 +55,7 @@ def find(today):
     return find
 
 
-def run(gateway, store, today=None, gate=lambda: require_running(COMPONENT), allowlist=None, log=log) -> str:
+def run(gateway, store, today=None, gate=gate, allowlist=None, log=log) -> str:
     return run_ingest(gateway=gateway, store=store, gate=gate, find=find(today or date.today()), read=read_csv,
                       mapper=ny_record, source="us-ny-dos", maker="ingestion@us-ny", allowlist=allowlist or AllowList.load(),
                       log=log)

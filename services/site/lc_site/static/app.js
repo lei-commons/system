@@ -1,4 +1,4 @@
-// The router: #/ search, #/entity/ID, #/graph/ID, #/dashboards, #/system, #/log/DAY, #/data/DATE.
+// The router: #/ search, #/entity/ID, #/graph/ID, #/dashboards, #/system, #/log/DAY, #/data/DATE, #/sources/FILTER.
 import { h, errorBox } from "./lib.js";
 
 const views = {
@@ -9,6 +9,7 @@ const views = {
   system: () => import("./views/system.js"),
   log: () => import("./views/log.js"),
   data: () => import("./views/data.js"),
+  sources: () => import("./views/sources.js"),
 };
 
 let cleanup = null;

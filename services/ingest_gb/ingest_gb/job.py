@@ -26,6 +26,7 @@ import tempfile
 
 from lc_core.allowlist import AllowList
 from lc_core.control import require_running
+from lc_core.approvals import require_approved
 from lc_core.decisions import Recorder, log_bucket_name
 from lc_core.lease import Busy, lease
 from lc_core.fetch import FetchError, Gateway
@@ -35,6 +36,14 @@ from lc_ingest.runner import run_ingest
 from lc_ingest.store import SHARDS, GcsStore, encode_records
 
 COMPONENT = "job:ingest-gb"
+SOURCE_ID = "gb-coh"  # its entry in config/sources.yaml
+
+
+def gate():
+    """Run only while the system is running and the owner has approved this source."""
+    require_running(COMPONENT)
+    require_approved(SOURCE_ID)
+
 SITE = "https://download.companieshouse.gov.uk/"
 PAGE = SITE + "en_output.html"
 PARTS = 7
@@ -69,7 +78,7 @@ def find(gateway, manifest=None):
     return part_key(latest, PARTS), "", ""  # every part is in: the runner reports already-done
 
 
-def run(gateway, store, gate=lambda: require_running(COMPONENT), allowlist=None, log=log) -> str:
+def run(gateway, store, gate=gate, allowlist=None, log=log) -> str:
     return run_ingest(gateway=gateway, store=store, gate=gate, find=find, read=read_zip, mapper=to_record,
                       source="gb-coh", maker="ingestion@gb", allowlist=allowlist or AllowList.load(), log=log,
                       seen=True)

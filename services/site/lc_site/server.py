@@ -165,6 +165,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, record) if record else self._json(404, {"error": "not found"})
         if path == "/api/v1/stats":
             return self._json(200, snap.stats())
+        if path == "/api/v1/sources":
+            if self.system is None:
+                return self._json(503, {"error": "the sources view isn't configured"})
+            return self._json(200, self.system.sources_page())
         if path == "/api/v1/system":
             if self.system is None:
                 return self._json(503, {"error": "the system view isn't configured"})

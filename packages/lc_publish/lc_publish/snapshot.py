@@ -61,6 +61,17 @@ def country_of(record: dict) -> str:
     return country.upper() if len(country) == 2 and country.isalpha() else "XX"
 
 
+# Registers spell the same status differently: GLEIF writes ACTIVE and INACTIVE,
+# Companies House and the others write Active. One spelling everywhere downstream,
+# so the database, search filters, facets and dashboards count them together
+# (owner request 2026-11-11).
+STATUS_SPELLINGS = {"ACTIVE": "Active", "INACTIVE": "Inactive"}
+
+
+def normalise_status(value):
+    return STATUS_SPELLINGS.get(value, value) if isinstance(value, str) else value
+
+
 def _row(record: dict) -> dict:
     row = {c: record.get(c) for c in SCALARS}
     for c in NESTED:
@@ -126,6 +137,8 @@ def build_sharded(readers: dict, out: Path, date: str, shards: int = 256, relati
             by_country = defaultdict(list)
             for directory_id in sorted(merged):
                 record = merged[directory_id]
+                if record.get("legalStatus") in STATUS_SPELLINGS:  # before its Merkle leaf, so the root covers what is published
+                    record["legalStatus"] = normalise_status(record["legalStatus"])
                 by_country[country_of(record)].append(record)
                 if record.get("lei"):
                     lei_to_id[record["lei"]] = directory_id

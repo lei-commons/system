@@ -12,7 +12,8 @@ import os
 import threading
 import time
 
-from lc_core.actions import catalogue
+from lc_core.actions import catalogue, source_catalogue
+from lc_core.approvals import effective as effective_approvals
 
 CACHE_SECONDS = 30
 DECISIONS_SHOWN = 20
@@ -91,6 +92,38 @@ class SystemView:
             data = dict(self._cached)
         data["snapshot"] = snapshot_meta or {}
         return data
+
+    def sources_page(self) -> dict:
+        """The Data sources page: every source in the registry, its terms, the owner's decisions, and the actions."""
+        from lc_core.approvals import registry
+
+        r = self._reader
+        entries = registry(os.environ.get("LC_SOURCES_CONFIG") or _default_sources_path())
+        decisions, decisions_error = _try(lambda: r.bucket_json("control", "source-approvals.json") or {}, {})
+        statuses = effective_approvals(entries, decisions if not decisions_error else {})
+        if decisions_error:  # can't read the owner's decisions: show nothing as approved, as the jobs do
+            statuses = {k: {**v, "status": "unknown"} for k, v in statuses.items()}
+        services, _ = _try(lambda: r.api(f"https://run.googleapis.com/v2/projects/{r.project}/locations/{r.region}/services")
+                           .get("services", []), [])
+        console = next((s.get("uri") for s in services if s["name"].rsplit("/", 1)[1] == "owner-console"), None)
+        actions = {}
+        for a in source_catalogue(entries, statuses) if not decisions_error else []:
+            actions.setdefault(a["id"].split(":", 1)[1], []).append(a)
+        rows = []
+        for s in entries:
+            pipeline = s.get("pipeline") or {}
+            records = None
+            if pipeline.get("store"):
+                manifest, _ = _try(lambda p=pipeline["store"]: r.bucket_json("data", f"{p}/manifest.json"))
+                records = (manifest or {}).get("records")
+            history = ((decisions or {}).get(s["id"]) or {}).get("history") or []
+            rows.append({k: s.get(k) for k in ("id", "name", "country", "access", "method", "licence", "cadence", "url",
+                                                 "terms_url", "assessment")}
+                        | {"built": bool(pipeline), "label": pipeline.get("label"), "job": pipeline.get("job"), "records": records,
+                           "approval": statuses[s["id"]], "history": list(reversed(history))[:10],
+                           "actions": actions.get(s["id"], [])})
+        counts = {k: sum(1 for x in rows if x["approval"]["status"] == k) for k in ("approved", "denied", "pending")}
+        return {"total": len(rows), **counts, "sources": rows, "console": console, "decisionsError": decisions_error}
 
     def _feed(self, r) -> list:
         """The newest decisions from the jobs' run objects, today's and yesterday's, newest first."""

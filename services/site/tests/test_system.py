@@ -146,3 +146,18 @@ def test_sources_steps_and_the_cycle_timeline_come_from_the_registry():
     assert data["steps"] == ["ingest-gleif", "ingest-xx", "build-snapshot", "load-db"]
     assert data["feed"][0]["actor"] == "job:ingest-gleif"
     assert [s["job"] for s in data["lastCycle"]["steps"]] == data["steps"]
+
+
+def test_the_data_sources_page_lists_every_registry_source_with_its_decisions():
+    page = SystemView(Reader()).sources_page()
+    ids = [s["id"] for s in page["sources"]]
+    assert "gleif" in ids and "us-co-sos" in ids and page["total"] == len(ids)
+    assert page["approved"] == 5 and page["pending"] == len(ids) - 5 and page["denied"] == 0
+    gleif = next(s for s in page["sources"] if s["id"] == "gleif")
+    assert gleif["built"] and gleif["records"] == 3355011 and gleif["terms_url"] and gleif["assessment"]["risk"] == "low"
+    assert {a["id"] for a in gleif["actions"]} == {"source-deny:gleif", "source-pending:gleif"}
+
+
+def test_unreadable_decisions_show_nothing_as_approved():
+    page = SystemView(Reader(fail={"storage"})).sources_page()
+    assert page["decisionsError"] and page["approved"] == 0 and all(not s["actions"] for s in page["sources"])

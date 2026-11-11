@@ -50,6 +50,29 @@ class GoogleBackend:
         except PreconditionFailed as exc:
             raise Conflict("the control state changed meanwhile; try again") from exc
 
+    def _approvals_blob(self):
+        return self._storage.bucket(f"{self.project}-control").blob("source-approvals.json")
+
+    def read_approvals(self):
+        """(decisions dict, generation); ({}, 0) if nobody has decided anything yet."""
+        from google.api_core.exceptions import NotFound
+
+        blob = self._approvals_blob()
+        try:
+            blob.reload()
+        except NotFound:
+            return {}, 0
+        return json.loads(blob.download_as_bytes(if_generation_match=blob.generation)), blob.generation
+
+    def write_approvals(self, decisions: dict, generation: int) -> None:
+        from google.api_core.exceptions import PreconditionFailed
+
+        try:
+            self._approvals_blob().upload_from_string(json.dumps(decisions, indent=2, sort_keys=True) + "\n",
+                                                      content_type="application/json", if_generation_match=generation)
+        except PreconditionFailed as exc:
+            raise Conflict("the source approvals changed meanwhile; try again") from exc
+
     def run_job(self, job: str) -> str:
         url = f"https://run.googleapis.com/v2/projects/{self.project}/locations/{self.region}/jobs/{job}:run"
         response = self._http.post(url, json={}, timeout=30)

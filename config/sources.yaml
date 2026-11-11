@@ -4,6 +4,14 @@
 #   owner-key     - needs a credential the owner creates and enters in the console
 #   web-discovery - no registry access; build from public web pages
 # status: active | awaiting-owner | disabled
+# url / terms_url: where the data is published, and its licence or terms.
+# assessment: Claude's reading of the terms, for the owner's review. Not legal advice;
+#   verified: false until the owner (or counsel) has checked it.
+#   risk: low | medium | high | unknown
+# approval: the starting status before any owner decision: approved | pending (default).
+#   The owner approves, denies or keeps pending on the Data sources page (owner console,
+#   fresh second-factor code); those decisions override this. Only approved sources are
+#   fetched, and only approved sources' records reach the snapshot, database and site.
 # pipeline: present once a source is built and running in the daily cycle. The site's
 #   System page and the status views are drawn from these entries, so adding a source
 #   here (with its job and store) is all they need.
@@ -22,6 +30,21 @@ sources:
     licence: CC0-1.0
     cadence: daily
     status: active
+    url: https://www.gleif.org/en/lei-data/gleif-golden-copy
+    terms_url: https://www.gleif.org/en/meta/lei-data-terms-of-use
+    assessment:
+      risk: low
+      commercial: allowed
+      attribution: not required (GLEIF asks for it as good practice)
+      summary: >-
+        LEI data is published under CC0 1.0: no copyright restrictions, free for any use including
+        commercial redistribution. GLEIF's terms disclaim accuracy and ask that the data not be
+        presented as GLEIF's own service.
+      verified: false
+    approval: approved
+    approved_by: owner
+    approved_at: "2026-11-11"
+    approval_note: In use before the approvals page; approved by the owner on 2026-11-11.
     pipeline: {job: ingest-gleif, store: gleif, records_as: gleif, label: GLEIF, refresh: new files daily, relationships: gleif-rr}
 
   - id: gb-coh
@@ -29,9 +52,26 @@ sources:
     country: GB
     access: open
     method: bulk           # monthly basic company data
-    licence: OGL-UK-3.0
+    licence: OGL-UK-3.0 (unconfirmed)
     cadence: monthly
     status: active
+    url: https://download.companieshouse.gov.uk/en_output.html
+    terms_url: https://www.gov.uk/guidance/companies-house-data-products
+    assessment:
+      risk: medium
+      commercial: allowed (widely reused commercially)
+      attribution: expected if OGL applies ("Contains public sector information licensed under the Open Government Licence v3.0")
+      summary: >-
+        The Free Company Data Product is free to download and is widely redistributed. Its licence
+        is not stated on the download page. A 2014 Companies House FOI answer said it was not
+        published under the Open Government Licence; later third-party sources say OGL v3.0 applies.
+        Worth written confirmation from Companies House before going public. The file holds no
+        officer data; the care-of column is never read.
+      verified: false
+    approval: approved
+    approved_by: owner
+    approved_at: "2026-11-11"
+    approval_note: In use before the approvals page; approved by the owner on 2026-11-11.
     upgrade:
       access: owner-key    # streaming API for daily changes
       secret: sources/gb-coh/api-key
@@ -43,14 +83,75 @@ sources:
     country: US
     access: open
     method: api
-    licence: to-be-verified
+    licence: OPEN-NY terms of use
     cadence: weekly
     status: active
+    url: https://data.ny.gov/Economic-Development/Active-Corporations-Beginning-1800/n9v6-gdp6
+    terms_url: https://ny.github.io/open-data-handbook/publicuse.html
+    assessment:
+      risk: low
+      commercial: allowed
+      attribution: not required
+      summary: >-
+        New York State publishes under its own OPEN-NY terms rather than a Creative Commons licence.
+        Reported as permissive: no attribution or share-alike requirement and no ban on commercial use,
+        but users agree to hold the State harmless (indemnification). Individual datasets can add terms;
+        this one lists none. Only non-personal columns are requested (no agents, chairmen or process
+        addresses).
+      verified: false
+    approval: approved
+    approved_by: owner
+    approved_at: "2026-11-11"
+    approval_note: In use before the approvals page; approved by the owner on 2026-11-11.
     pipeline: {job: ingest-ny, store: us-ny, records_as: us-ny-dos, label: New York DOS, refresh: weekly}
-  - {id: us-co-sos, name: Colorado Secretary of State (open data), country: US, access: open, method: api, licence: public-domain, cadence: daily, status: active}
-  - {id: us-pa-dos, name: Pennsylvania Department of State, country: US, access: open, method: bulk, licence: public-domain, cadence: monthly, status: active}
-  - {id: us-or-sos, name: Oregon Secretary of State (open data), country: US, access: open, method: api, licence: public-domain, cadence: daily, status: active}
-  - {id: us-ct-sots, name: Connecticut Secretary of the State (open data), country: US, access: open, method: api, licence: public-domain, cadence: daily, status: active}
+
+  - id: us-co-sos
+    name: Colorado Secretary of State (open data)
+    country: US
+    access: open
+    method: api
+    licence: to-be-verified
+    cadence: daily
+    status: active
+    url: https://data.colorado.gov
+    terms_url: https://data.colorado.gov
+    assessment: {risk: unknown, commercial: unknown, attribution: unknown, summary: Not built yet; terms not yet researched., verified: false}
+
+  - id: us-pa-dos
+    name: Pennsylvania Department of State
+    country: US
+    access: open
+    method: bulk
+    licence: to-be-verified
+    cadence: monthly
+    status: active
+    url: https://www.dos.pa.gov
+    terms_url: https://www.dos.pa.gov
+    assessment: {risk: unknown, commercial: unknown, attribution: unknown, summary: Not built yet; terms not yet researched., verified: false}
+
+  - id: us-or-sos
+    name: Oregon Secretary of State (open data)
+    country: US
+    access: open
+    method: api
+    licence: to-be-verified
+    cadence: daily
+    status: active
+    url: https://data.oregon.gov
+    terms_url: https://data.oregon.gov
+    assessment: {risk: unknown, commercial: unknown, attribution: unknown, summary: Not built yet; terms not yet researched., verified: false}
+
+  - id: us-ct-sots
+    name: Connecticut Secretary of the State (open data)
+    country: US
+    access: open
+    method: api
+    licence: to-be-verified
+    cadence: daily
+    status: active
+    url: https://data.ct.gov
+    terms_url: https://data.ct.gov
+    assessment: {risk: unknown, commercial: unknown, attribution: unknown, summary: Not built yet; terms not yet researched., verified: false}
 
   - id: br-rfb-cnpj
     name: Receita Federal CNPJ open data
@@ -60,6 +161,23 @@ sources:
     licence: to-be-verified
     cadence: monthly
     status: active
+    url: https://www.gov.br/receitafederal/pt-br/assuntos/orientacao-tributaria/cadastros/consultas/dados-publicos-cnpj
+    terms_url: https://www.gov.br/receitafederal/pt-br/acesso-a-informacao/lgpd/termo-de-uso
+    assessment:
+      risk: medium
+      commercial: likely allowed (Brazil's open data policy); not confirmed for this dataset
+      attribution: expected (credit Receita Federal)
+      summary: >-
+        Published monthly as open data under Brazil's open data policy, and widely reused. No
+        dataset-specific licence was found; the Receita Federal website itself is CC BY-ND 3.0, which
+        may not be meant for the data. The files hold personal data (individual entrepreneurs, MEI,
+        partners' names and contact details); we drop all natural persons and never read contact
+        columns, which also matters under the LGPD. Worth confirming the terms before going public.
+      verified: false
+    approval: approved
+    approved_by: owner
+    approved_at: "2026-11-11"
+    approval_note: In use before the approvals page; approved by the owner on 2026-11-11.
     pipeline: {job: ingest-br, store: br, records_as: br-rfb, label: Receita Federal, refresh: monthly release}
 
   - id: in-mca
@@ -70,6 +188,9 @@ sources:
     secret: sources/in-mca/credentials
     status: awaiting-owner
     fallback: web-discovery
+    url: https://www.mca.gov.in
+    terms_url: https://www.mca.gov.in
+    assessment: {risk: unknown, commercial: unknown, attribution: unknown, summary: "Needs MCA access arranged by the owner; terms depend on the access route.", verified: false}
 
   - id: sg-acra
     name: Singapore ACRA (data.gov.sg)
@@ -79,6 +200,22 @@ sources:
     licence: SG-Open-Data-1.0
     cadence: monthly
     status: active
+    url: https://data.gov.sg/collections/2/view
+    terms_url: https://data.gov.sg/open-data-licence
+    assessment:
+      risk: low
+      commercial: allowed
+      attribution: required (name the dataset and source, link the licence)
+      summary: >-
+        Singapore Open Data Licence v1.0: free to use, adapt and redistribute, including commercially,
+        with attribution and without implying endorsement. Singapore law governs; the licence can be
+        updated, and continued use accepts the new version. Sole proprietorships and partnerships are
+        dropped (they are people's business names).
+      verified: false
+    approval: approved
+    approved_by: owner
+    approved_at: "2026-11-11"
+    approval_note: In use before the approvals page; approved by the owner on 2026-11-11.
     pipeline: {job: ingest-sg, store: sg, records_as: sg-acra, label: ACRA Singapore, refresh: monthly}
 
   - id: web
@@ -88,3 +225,6 @@ sources:
     method: crawl
     licence: per-page
     status: active
+    url: https://commoncrawl.org
+    terms_url: https://commoncrawl.org/terms-of-use
+    assessment: {risk: high, commercial: varies by page, attribution: varies by page, summary: "Not built yet. Each page has its own terms; Common Crawl's terms of use apply to its archive. Needs a careful review before any use.", verified: false}
