@@ -13,7 +13,8 @@ import time
 
 CACHE_SECONDS = 30
 DECISIONS_SHOWN = 20
-SOURCE_STORES = {"gleif": "GLEIF entities", "gleif-rr": "GLEIF relationships", "gb": "Companies House"}
+SOURCE_STORES = {"gleif": "GLEIF entities", "gleif-rr": "GLEIF relationships", "gb": "Companies House",
+                 "br": "Receita Federal (Brazil)", "us-ny": "New York Department of State", "sg": "ACRA (Singapore)"}
 AGENT_ROLES = ["engineering"]  # agents/roles; none runs until the owner switches agents on
 
 OK, BAD, BUSY, IDLE, UNKNOWN = "ok", "failed", "running", "idle", "unknown"
@@ -164,9 +165,11 @@ def node_statuses(data: dict) -> dict:
         return OK if data["stores"][prefix]["records"] else UNKNOWN
 
     return {
-        "gleif": store("gleif"), "gb": store("gb"),
+        "gleif": store("gleif"), "gb": store("gb"), "br": store("br"), "us-ny": store("us-ny"), "sg": store("sg"),
         "gateway": services.get("conduct-gateway", UNKNOWN), "egress": jobs.get("egress-check", UNKNOWN),
         "ingest-gleif": jobs.get("ingest-gleif", UNKNOWN), "ingest-gb": jobs.get("ingest-gb", UNKNOWN),
+        "ingest-br": jobs.get("ingest-br", UNKNOWN), "ingest-ny": jobs.get("ingest-ny", UNKNOWN),
+        "ingest-sg": jobs.get("ingest-sg", UNKNOWN),
         "data": OK if any(s["records"] for s in data["stores"].values()) else UNKNOWN,
         "snapshot": OK if data["snapshot"].get("date") else UNKNOWN,
         "site": services.get("lei-commons-site", UNKNOWN), "console": services.get("owner-console", UNKNOWN),

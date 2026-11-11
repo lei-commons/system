@@ -6,17 +6,29 @@ const KIND = { ok: "good", failed: "bad", running: "busy", idle: "idle", unknown
 const ICON = { good: "✓", bad: "✕", busy: "●", idle: "○" };
 const WORD = { good: "healthy", bad: "failed", busy: "running", idle: "idle" };
 
+// One row per source: the source, then its ingestion job. Every job runs in the 02:00 UTC daily cycle;
+// the sub-label says how often its source publishes something new.
+const SOURCES = [
+  ["gleif", "ingest-gleif", "GLEIF", "GLEIF ingestion", "new files daily"],
+  ["gb", "ingest-gb", "Companies House", "UK ingestion", "monthly register"],
+  ["br", "ingest-br", "Receita Federal", "Brazil ingestion", "monthly release"],
+  ["us-ny", "ingest-ny", "New York DOS", "New York ingestion", "weekly"],
+  ["sg", "ingest-sg", "ACRA Singapore", "Singapore ingestion", "monthly"],
+];
+const ROW = 65, TOP = 20;
 const NODES = {
-  gleif: [30, 40, "GLEIF", "source"], gb: [30, 140, "Companies House", "source"],
-  gateway: [260, 90, "Conduct gateway", "the only way out"], egress: [260, 200, "Egress check", "proves the seal"],
-  "ingest-gleif": [490, 40, "GLEIF ingestion", "daily 02:00 UTC"], "ingest-gb": [490, 140, "UK ingestion", "daily 03:00 UTC"],
-  data: [720, 90, "Data bucket", "records and changes"], snapshot: [950, 40, "Daily snapshot", "06:00 UTC, signed"],
-  site: [950, 140, "Site and API", "private"],
-  console: [30, 320, "Owner console", "two factors"], control: [260, 320, "Control state", "owner only"],
-  guard: [490, 320, "Budget guard", "pauses at the cap"], agents: [720, 320, "Agents", "off until you switch them on"],
+  ...Object.fromEntries(SOURCES.flatMap(([store, job, name, jobName, cadence], i) => [
+    [store, [30, TOP + i * ROW, name, "source"]], [job, [490, TOP + i * ROW, jobName, cadence]]])),
+  gateway: [260, TOP + 2 * ROW, "Conduct gateway", "the only way out"],
+  egress: [260, TOP + 3.6 * ROW, "Egress check", "proves the seal"],
+  data: [720, TOP + 2 * ROW, "Data bucket", "records and changes"],
+  snapshot: [950, TOP + 1.3 * ROW, "Daily snapshot", "02:00 UTC, signed"],
+  site: [950, TOP + 2.7 * ROW, "Site and API", "private"],
+  console: [30, 380, "Owner console", "two factors"], control: [260, 380, "Control state", "owner only"],
+  guard: [490, 380, "Budget guard", "pauses at the cap"], agents: [720, 380, "Agents", "off until you switch them on"],
 };
-const FLOWS = [["gleif", "gateway"], ["gb", "gateway"], ["gateway", "ingest-gleif"], ["gateway", "ingest-gb"],
-  ["ingest-gleif", "data"], ["ingest-gb", "data"], ["data", "snapshot"], ["snapshot", "site"]];
+const FLOWS = [...SOURCES.flatMap(([store, job]) => [[store, "gateway"], ["gateway", job], [job, "data"]]),
+  ["data", "snapshot"], ["snapshot", "site"]];
 const LINKS = [["egress", "gateway"], ["console", "control"], ["guard", "control"], ["control", "agents"]];
 const W = 190, H = 50;
 
@@ -25,8 +37,8 @@ function statuses(d) {
   const svc = (n) => (d.services.find((s) => s.name === n) || {}).status || "unknown";
   const store = (p) => (d.stores[p] && d.stores[p].records ? "ok" : "unknown");
   const control = { running: "ok", paused: "idle", manual: "idle", stopped: "failed" }[d.control.state] || "unknown";
-  return { gleif: store("gleif"), gb: store("gb"), gateway: svc("conduct-gateway"), egress: job("egress-check"),
-    "ingest-gleif": job("ingest-gleif"), "ingest-gb": job("ingest-gb"),
+  return { ...Object.fromEntries(SOURCES.flatMap(([s, j]) => [[s, store(s)], [j, job(j)]])),
+    gateway: svc("conduct-gateway"), egress: job("egress-check"),
     data: Object.values(d.stores).some((s) => s.records) ? "ok" : "unknown", snapshot: d.snapshot.date ? "ok" : "unknown",
     site: svc("lei-commons-site"), console: svc("owner-console"), guard: svc("budget-guard"), control, agents: "idle" };
 }
@@ -44,7 +56,7 @@ function diagram(d) {
     const mx = (x1 + x2) / 2;
     return svg("path", { class: cls, d: `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}` });
   };
-  return svg("svg", { class: "sys-diagram", viewBox: "0 0 1170 400", width: "100%", role: "img", "aria-label": "System diagram" },
+  return svg("svg", { class: "sys-diagram", viewBox: "0 0 1170 450", width: "100%", role: "img", "aria-label": "System diagram" },
     ...FLOWS.map((f) => curve(f, "edge")), ...LINKS.map((f) => curve(f, "edge")),
     ...(running ? FLOWS.map((f) => curve(f, "flow")) : []),
     ...Object.entries(NODES).map(([key, [x, y, label, sub]]) => {
