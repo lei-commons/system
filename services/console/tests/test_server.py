@@ -293,6 +293,15 @@ class Backend:
         self.runs.append(job)
         return f"{job}-abc12"
 
+    approvals, approvals_generation = None, 0
+
+    def read_approvals(self):
+        return dict(self.approvals or {}), self.approvals_generation
+
+    def write_approvals(self, decisions, generation):
+        assert generation == self.approvals_generation
+        self.approvals, self.approvals_generation = decisions, generation + 1
+
     def record(self, event):
         self.events.append(event)
 
@@ -304,6 +313,7 @@ SOURCES = [{"job": "ingest-gleif", "label": "GLEIF"}, {"job": "ingest-br", "labe
 def act(env):
     env.app.backend = Backend({"state": "running", "paused_components": []})
     env.app.sources, env.app.site_url = SOURCES, "https://site.test"
+    env.app.registry = [{"id": "gleif", "name": "GLEIF", "approval": "approved"}, {"id": "us-co-sos", "name": "Colorado"}]
     return env
 
 
@@ -404,3 +414,19 @@ def test_the_way_back_only_goes_to_a_run_app_site(act):
     assert 'href="https://lei-commons-site-abc-uc.a.run.app/#/system"' in r.body
     r = call(act, "/act?do=pause&back=https%3A%2F%2Fevil.example%2F")
     assert "evil.example" not in r.body and 'href="https://site.test/#/system"' in r.body
+
+
+def test_data_sources_are_approved_denied_or_kept_pending_and_can_be_toggled(act):
+    assert call(act, "/act?do=source-approve%3Agleif").status == 409  # already approved
+    assert call(act, "/act?do=source-deny%3Agleif").status == 200
+    assert call(act, "/act?do=source-deny%3Anowhere").status == 404
+    r = call(act, "/act", "POST", body=f"do=source-deny%3Agleif&reason=licence+check&code={code(act)}")
+    assert r.status == 200 and "now denied" in r.body
+    assert act.app.backend.approvals["gleif"]["status"] == "denied"
+    act.clock.t += 30
+    call(act, "/act", "POST", body=f"do=source-pending%3Agleif&reason=legal+review&code={code(act)}")
+    act.clock.t += 30
+    call(act, "/act", "POST", body=f"do=source-approve%3Agleif&reason=confirmed&code={code(act)}")
+    decision = act.app.backend.approvals["gleif"]
+    assert decision["status"] == "approved" and [h["status"] for h in decision["history"]] == ["denied", "pending"]
+    assert [e["subject"] for e in act.app.backend.events[-3:]] == ["source gleif"] * 3

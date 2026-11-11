@@ -5,7 +5,7 @@ name: deploy-build-snapshot
 on:
   push:
     branches: [main]
-    paths: ["packages/lc_publish/**", "packages/lc_core/**", "packages/lc_directory/**", "services/build_snapshot/Dockerfile", ".github/workflows/deploy-build-snapshot.yml"]
+    paths: ["packages/lc_publish/**", "packages/lc_core/**", "packages/lc_directory/**", "services/build_snapshot/Dockerfile", ".github/workflows/deploy-build-snapshot.yml", "config/sources.yaml"]
   workflow_dispatch:
 
 permissions:

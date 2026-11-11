@@ -7,7 +7,7 @@ name: deploy-ingest-br
 on:
   push:
     branches: [main]
-    paths: ["services/ingest_br/**", "packages/lc_ingest/**", "packages/lc_core/**", "config/fields.yaml", ".github/workflows/deploy-ingest-br.yml"]
+    paths: ["services/ingest_br/**", "packages/lc_ingest/**", "packages/lc_core/**", "config/fields.yaml", ".github/workflows/deploy-ingest-br.yml", "config/sources.yaml"]
   workflow_dispatch:
 
 permissions:

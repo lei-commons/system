@@ -27,6 +27,7 @@ from datetime import date, timedelta
 
 from lc_core.allowlist import AllowList
 from lc_core.control import SystemHalted, require_running
+from lc_core.approvals import require_approved
 from lc_core.decisions import Recorder, log_bucket_name
 from lc_core.fetch import FetchError, Gateway
 from lc_core.lease import Busy, lease
@@ -35,6 +36,14 @@ from lc_ingest.runner import run_ingest
 from lc_ingest.store import SHARDS, GcsStore
 
 COMPONENT = "job:ingest-br"
+SOURCE_ID = "br-rfb-cnpj"  # its entry in config/sources.yaml
+
+
+def gate():
+    """Run only while the system is running and the owner has approved this source."""
+    require_running(COMPONENT)
+    require_approved(SOURCE_ID)
+
 SHARE = "https://arquivos.receitafederal.gov.br/public.php/dav/files/gn672Ad4CF8N6TK/Dados/Cadastros/CNPJ"
 FILES = 10
 DOWNLOAD_ATTEMPTS = 3
@@ -110,7 +119,7 @@ def build(gateway, lookup, month, log=log) -> dict:
     return dict(counts)
 
 
-def run(gateway, store, lookup_for, today=None, gate=lambda: require_running(COMPONENT), allowlist=None, log=log,
+def run(gateway, store, lookup_for, today=None, gate=gate, allowlist=None, log=log,
         budget=BUDGET_SECONDS, clock=time.monotonic) -> str:
     """Return the outcome: halted, done, already-done, held or denied."""
     try:

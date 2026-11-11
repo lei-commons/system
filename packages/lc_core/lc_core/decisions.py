@@ -67,6 +67,10 @@ def _event(actor: str, record: dict) -> Event | None:
         detail = record.get("reason")
         return Event(actor, "checked", subject, "skipped", f"{reasons[kind]}: {detail}" if detail else reasons[kind],
                      refs=_refs(record))
+    if kind == "sources-included":
+        excluded = record.get("excluded")
+        reason = f"included {record.get('included') or 'no sources'}" + (f"; excluded (not approved): {excluded}" if excluded else "")
+        return Event(actor, "selected", "snapshot sources", "done", reason, refs=_refs(record))
     if kind == "reconciled":
         reason = (f"{_n(record.get('absent', 0))} of {_n(record.get('total', 0))} records were in no part of the month's file "
                   "and are labelled absent from the source")

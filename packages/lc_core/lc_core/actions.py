@@ -16,6 +16,11 @@ AFTER_INGEST = ["build-snapshot", "load-db"]
 GATES = {"build-snapshot": "job:publish", "load-db": "job:load-db"}
 
 
+# Data source approvals: the action names and the status each sets (see lc_core.approvals).
+SOURCE_ACTIONS = {"source-approve": "approved", "source-deny": "denied", "source-pending": "pending"}
+SOURCE_LABELS = {"source-approve": "Approve", "source-deny": "Deny", "source-pending": "Keep pending"}
+
+
 class Refused(Exception):
     """The action can't be applied. Nothing is written."""
 
@@ -60,11 +65,29 @@ def catalogue(sources: list, state: dict | None) -> list:
     return out
 
 
-def known(sources: list, action: str) -> bool:
+def source_catalogue(registry: list, statuses: dict) -> list:
+    """Approve, deny or keep pending, for every source in the registry: the choices other than its status now."""
+    out = []
+    for source in registry:
+        current = (statuses.get(source["id"]) or {}).get("status", "pending")
+        for kind, status in SOURCE_ACTIONS.items():
+            if status != current:
+                out.append({"id": f"{kind}:{source['id']}", "group": "Data sources",
+                            "label": f"{SOURCE_LABELS[kind]} {source.get('name') or source['id']}",
+                            "tone": "primary" if status == "approved" else ("danger" if status == "denied" else ""),
+                            "help": {"approved": "Its jobs may fetch from it, and its records reach the snapshot, database and site.",
+                                     "denied": "Its jobs stop before fetching, and its records leave the next snapshot, database and site.",
+                                     "pending": "Not used until you decide: its jobs stop and its records leave the next snapshot."}[status]})
+    return out
+
+
+def known(sources: list, action: str, registry: list = ()) -> bool:
     """Whether ``action`` is one this system could ever offer (whatever the state now)."""
     if action in ("pause", "stop", "resume", "restart", "manual"):
         return True
     kind, _, name = action.partition(":")
+    if kind in SOURCE_ACTIONS:
+        return name in {s["id"] for s in registry}
     if kind == "run":
         return name in jobs(sources)
     if kind in ("pause-component", "resume-component"):

@@ -17,6 +17,7 @@ import time
 
 from lc_core.allowlist import AllowList
 from lc_core.control import require_running
+from lc_core.approvals import require_approved
 from lc_core.decisions import Recorder, log_bucket_name
 from lc_core.fetch import FetchError, Gateway
 from lc_core.lease import Busy, lease
@@ -25,6 +26,14 @@ from lc_ingest.runner import run_ingest
 from lc_ingest.store import GcsStore
 
 COMPONENT = "job:ingest-sg"
+SOURCE_ID = "sg-acra"  # its entry in config/sources.yaml
+
+
+def gate():
+    """Run only while the system is running and the owner has approved this source."""
+    require_running(COMPONENT)
+    require_approved(SOURCE_ID)
+
 COLLECTION = "https://api-production.data.gov.sg/v2/public/api/collections/2/metadata"
 DOWNLOAD = "https://api-open.data.gov.sg/v1/public/api/datasets/{}/{}"
 POLLS, POLL_WAIT = 30, 3
@@ -65,7 +74,7 @@ def fetch_all(sleep=time.sleep):
     return fetch
 
 
-def run(gateway, store, gate=lambda: require_running(COMPONENT), allowlist=None, log=log, sleep=time.sleep) -> str:
+def run(gateway, store, gate=gate, allowlist=None, log=log, sleep=time.sleep) -> str:
     return run_ingest(gateway=gateway, store=store, gate=gate, find=find, read=read_csv, mapper=sg_record,
                       source="sg-acra", maker="ingestion@sg", allowlist=allowlist or AllowList.load(), log=log,
                       fetch=fetch_all(sleep))

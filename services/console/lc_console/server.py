@@ -28,7 +28,8 @@ from urllib.parse import parse_qs
 
 from datetime import datetime, timezone
 
-from lc_core.actions import Refused, apply, catalogue, known
+from lc_core.actions import SOURCE_ACTIONS, Refused, apply, catalogue, known, source_catalogue
+from lc_core.approvals import decide, effective
 from lc_core.control import load_state
 
 from .auth import SESSION_SECONDS, Sessions, verify_iap
@@ -72,7 +73,7 @@ CODE_FORM = ("<form method=post action={action}><label>Code from your authentica
 
 class App:
     def __init__(self, *, owners, audience, store, read_state=load_state, sessions=None, verifier=None, iap=verify_iap, log=None,
-                 backend=None, sources=(), site_url="", clock=None):
+                 backend=None, sources=(), site_url="", clock=None, registry=()):
         self.owners = {o.strip().lower() for o in owners if o.strip()}
         self.audience = audience
         self.store = store
@@ -83,6 +84,7 @@ class App:
         self.log = log or (lambda record: print(json.dumps(record, sort_keys=True), flush=True))
         self.lock = threading.Lock()
         self.backend, self.sources, self.site_url = backend, list(sources), site_url.rstrip("/")
+        self.registry = list(registry)
         self.clock = clock or (lambda: datetime.now(timezone.utc))
 
 
@@ -237,16 +239,18 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(status, page("Set up your authenticator", body))
 
     def _describe(self, action: str):
-        state = None
-        if self.app.backend is not None:
+        if self.app.backend is None:
+            return None
+        if action.partition(":")[0] in SOURCE_ACTIONS:
+            decisions, _ = self.app.backend.read_approvals()
+            offered = source_catalogue(self.app.registry, effective(self.app.registry, decisions))
+        else:
             state, _ = self.app.backend.read_state()
-        for a in catalogue(self.app.sources, state):
-            if a["id"] == action:
-                return a
-        return None
+            offered = catalogue(self.app.sources, state)
+        return next((a for a in offered if a["id"] == action), None)
 
     def _confirm_page(self, action, status=200, note="", back=""):
-        if not known(self.app.sources, action) or self.app.backend is None:
+        if not known(self.app.sources, action, self.app.registry) or self.app.backend is None:
             return self._send(404, page("No such action", "<p>This action isn't one the console offers.</p>"))
         a = self._describe(action)
         if a is None:
@@ -274,7 +278,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._same_origin():
             self._audit(email, f"action-refused:{action}", False)
             return self._send(403, page("Not allowed", "<p>Actions must come from this console.</p>"))
-        if not known(self.app.sources, action) or self.app.backend is None:
+        if not known(self.app.sources, action, self.app.registry) or self.app.backend is None:
             return self._send(404, page("No such action", ""))
         if not reason:
             return self._confirm_page(action, status=400, note="Say why, for the decision log.", back=form.get("back", ""))
@@ -286,7 +290,15 @@ class Handler(BaseHTTPRequestHandler):
         event = {"ts": now, "actor": actor, "action": action, "subject": "control state", "trigger": "owner-console",
                  "reason": reason, "decision": "done", "component": action.partition(":")[2]}
         try:
-            if action.startswith("run:"):
+            kind, _, name = action.partition(":")
+            if kind in SOURCE_ACTIONS:
+                decisions, generation = self.app.backend.read_approvals()
+                status = SOURCE_ACTIONS[kind]
+                self.app.backend.write_approvals(decide(decisions, name, status, actor, now, reason), generation)
+                event.update(subject=f"source {name}", component=name)
+                outcome = (f"Data source {name} is now {status}. Its jobs check this before fetching, and the next "
+                           "snapshot includes only approved sources.")
+            elif action.startswith("run:"):
                 job = action.split(":", 1)[1]
                 execution = self.app.backend.run_job(job)
                 event.update(subject=job, run_id=execution)
@@ -346,6 +358,7 @@ def make_server(app: App, address) -> ThreadingHTTPServer:
 
 def main() -> int:
     try:
+        from lc_core.approvals import registry
         from lc_core.sources import pipelines
 
         from .backend import GoogleBackend
@@ -355,6 +368,7 @@ def main() -> int:
                   store=SecretManagerStore(project),
                   backend=GoogleBackend(project, os.environ.get("GCP_REGION", "us-central1")),
                   sources=pipelines(os.environ.get("LC_SOURCES_CONFIG", "/app/config/sources.yaml")),
+                  registry=registry(os.environ.get("LC_SOURCES_CONFIG", "/app/config/sources.yaml")),
                   site_url=os.environ.get("LC_SITE_URL", ""))
     except KeyError as exc:
         print(f"refusing to start: {exc} is not set", file=sys.stderr)

@@ -42,3 +42,12 @@ def test_state_rules_match_the_control_repository():
     assert apply("resume-component:job:ingest-br", new, actor, now)["paused_components"] == []
     with pytest.raises(Refused):
         apply("run:load-db", {"state": "running"}, actor, now)
+
+
+def test_every_registry_source_can_be_approved_denied_or_kept_pending():
+    from lc_core.actions import source_catalogue
+
+    registry = [{"id": "gleif", "name": "GLEIF"}, {"id": "us-co-sos", "name": "Colorado"}]
+    got = ids(source_catalogue(registry, {"gleif": {"status": "approved"}, "us-co-sos": {"status": "pending"}}))
+    assert got == ["source-deny:gleif", "source-pending:gleif", "source-approve:us-co-sos", "source-deny:us-co-sos"]
+    assert known([], "source-deny:gleif", registry) and not known([], "source-deny:nowhere", registry)

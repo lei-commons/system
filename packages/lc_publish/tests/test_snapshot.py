@@ -152,3 +152,20 @@ def test_the_decision_log_seal_is_in_the_manifest_not_the_data_root(tmp_path):
     assert "decisionLog" not in plain and sealed["decisionLog"] == seal
     assert sealed["snapshotRoot"] == plain["snapshotRoot"]  # the data's root covers data only
     assert json.loads((tmp_path / "b" / "manifest.json").read_text())["decisionLog"]["head"] == "ab" * 32
+
+
+def test_status_spellings_are_one_value_downstream(tmp_path):
+    import pyarrow.parquet as pq
+
+    from lc_publish.snapshot import build_sharded, normalise_status
+
+    assert normalise_status("ACTIVE") == "Active" and normalise_status("INACTIVE") == "Inactive"
+    assert normalise_status("Active") == "Active" and normalise_status("Dissolved") == "Dissolved" and normalise_status(None) is None
+    recs = {"gleif": {"A" * 20: {"directoryId": "A" * 20, "legalName": "X", "legalStatus": "ACTIVE", "legalJurisdiction": "DE"}},
+            "gb-coh": {"B" * 20: {"directoryId": "B" * 20, "legalName": "Y", "legalStatus": "Active", "legalJurisdiction": "GB"}}}
+    readers = {sid: (lambda n, r=r: dict(r) if n == 0 else {}) for sid, r in recs.items()}
+    m = build_sharded(readers, tmp_path, "2026-11-11", shards=1)
+    statuses = set()
+    for f in m["files"]:
+        statuses |= set(pq.read_table(tmp_path / f["name"]).column("legalStatus").to_pylist())
+    assert statuses == {"Active"}

@@ -249,3 +249,20 @@ dl.mini dd { margin: 2px 0 0; word-break: break-word; }
 .btn.danger:hover { background: color-mix(in srgb, var(--critical) 10%, transparent); }
 @media (prefers-reduced-motion: reduce) { .tl-bar.busy { animation: none; } .ring-fill { transition: none; } }
 @media (max-width: 700px) { .action-group { grid-template-columns: 1fr; } .tl-row { grid-template-columns: 90px 1fr 50px; } .tl-axis { margin-left: 100px; margin-right: 60px; } }
+
+/* ---- Data sources page ---- */
+.kpi.ok .kpi-value { color: var(--good-ink); }
+.kpi.warnish .kpi-value { color: color-mix(in srgb, var(--warning) 70%, var(--ink)); }
+.kpi.badish .kpi-value { color: var(--critical); }
+.source-row { border-left: 4px solid var(--hairline); }
+.source-row.approved { border-left-color: var(--good); }
+.source-row.pending { border-left-color: var(--warning); }
+.source-row.denied { border-left-color: var(--critical); }
+.source-row-head { display: flex; gap: 12px; align-items: center; }
+dl.mini.wide { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.assessment { margin: 10px 0 0; line-height: 1.55; }
+.held { margin: 10px 0 0; padding: 8px 12px; border-radius: 8px; background: color-mix(in srgb, var(--warning) 16%, transparent); }
+.chip.warnish { background: color-mix(in srgb, var(--warning) 16%, transparent); border-color: transparent; }
+.decision { margin-top: 10px; font-size: 13px; }
+.history { margin-top: 6px; font-size: 13px; color: var(--ink-2); }
+.history ul { margin: 6px 0 0; padding-left: 18px; }
