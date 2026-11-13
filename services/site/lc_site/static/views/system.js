@@ -1,9 +1,9 @@
 // The live system view. Everything here is drawn from the data: sources come from
 // the registry (config/sources.yaml), so a new source appears without changes here.
 // Status always comes with an icon and a word, never colour alone; motion stops for
-// people who ask for reduced motion. Actions open the owner console, which asks for
-// a fresh second-factor code; this page itself can't change anything.
-import { api, errorBox, flag, fmt, h, svg } from "../lib.js";
+// people who ask for reduced motion. Owner actions ask, inline, for a reason and a
+// fresh authenticator code before the site acts (lc_site.actions).
+import { actionBar, api, errorBox, flag, fmt, h, svg } from "../lib.js";
 
 const KIND = { ok: "good", failed: "bad", running: "busy", idle: "idle", unknown: "idle" };
 const ICON = { good: "✓", bad: "✕", busy: "●", idle: "○" };
@@ -156,22 +156,17 @@ function feed(d) {
 }
 
 // ---- owner actions: open the console, which asks for a fresh code ----
-function actions(d) {
-  if (!d.console || !d.actions || !d.actions.length) return null;
+function actions(d, reload) {
+  if (!d.actions || !d.actions.length) return null;
   const groups = {};
   for (const a of d.actions) (groups[a.group] = groups[a.group] || []).push(a);
   return h("section", { class: "card card-pad actions" }, h("h3", {}, "Owner actions"),
-    h("p", { class: "muted", style: { marginTop: 0 } }, "Each opens the owner console, which asks for a fresh code from your authenticator before it acts, and records the action in the decision log."),
+    h("p", { class: "muted", style: { marginTop: 0 } }, "Each asks, right here, for a reason and a fresh code from your authenticator before it acts, and is recorded in the decision log."),
     ...Object.entries(groups).map(([group, items]) => h("div", { class: "action-group" },
-      h("div", { class: "action-label" }, group),
-      h("div", { class: "toolbar", style: { margin: 0 } }, ...items.map((a) => h("a", {
-        class: `btn${a.tone === "danger" ? " danger" : a.tone === "primary" ? " primary" : ""}`,
-        href: `${d.console}/act?do=${encodeURIComponent(a.id)}&back=${encodeURIComponent(location.origin)}`, target: "_blank", rel: "noopener",
-        title: a.help || "",
-      }, a.label))))));
+      h("div", { class: "action-label" }, group), actionBar(items, reload))));
 }
 
-function page(d, meta, updated) {
+function page(d, meta, updated, reload) {
   const c = d.control;
   return h("div", { class: "wrap" },
     h("div", { class: "toolbar" }, h("h1", { style: { margin: 0, fontSize: "28px", letterSpacing: "-.02em" } }, "System"),
@@ -180,7 +175,7 @@ function page(d, meta, updated) {
       (c.pausedComponents || []).length ? h("span", { class: "pill warn" }, `paused: ${c.pausedComponents.join(", ")}`) : null,
       h("span", { class: "muted" }, `Updated ${updated.toLocaleTimeString("en-GB")} · refreshes every 30 seconds`)),
     kpis(d, meta),
-    actions(d),
+    actions(d, reload),
     h("section", { class: "card card-pad" }, diagram(d), unavailable(c.error),
       h("p", { class: "muted", style: { marginBottom: 0 } },
         c.state === "running" ? "Moving lines show the data path while the system is running." : "The system is not running, so nothing moves.")),
@@ -206,15 +201,17 @@ function page(d, meta, updated) {
 
 export async function render(root) {
   let timer;
-  const load = async () => {
+  const load = async (force) => {
+    // Don't redraw under an open action form: the owner may be typing a code.
+    if (!force && root.querySelector(".action-panel:not([hidden])")) return;
     try {
       const [d, meta] = await Promise.all([api("/api/v1/system"), api("/api/v1/meta")]);
-      root.replaceChildren(page(d, meta, new Date()));
+      root.replaceChildren(page(d, meta, new Date(), () => load(true)));
     } catch (error) {
       root.replaceChildren(h("div", { class: "wrap" }, errorBox(error)));
     }
   };
-  await load();
+  await load(true);
   timer = setInterval(load, 30000);
   return () => clearInterval(timer);
 }

@@ -85,6 +85,11 @@ class SystemView:
         self._cached, self._at = None, -1e9
         self._lock = threading.Lock()
 
+    def invalidate(self) -> None:
+        """Forget the cached view, so the page shows an owner action at once."""
+        with self._lock:
+            self._cached, self._at = None, -1e9
+
     def collect(self, snapshot_meta: dict = None) -> dict:
         with self._lock:
             if self._cached is None or self._clock() - self._at > CACHE_SECONDS:
@@ -213,7 +218,7 @@ class SystemView:
             "cyclesError": cycles_error,
             "stores": stores,
             "sources": sources,
-            # The owner console performs actions; this site only links to it.
+            # Owner actions are taken inline on the site's pages (lc_site.actions); the console offers them too.
             "console": next((s.get("uri") for s in services if s["name"].rsplit("/", 1)[1] == "owner-console"), None),
             "actions": catalogue(self._sources, control or {}) if control is not None else [],
             "steps": steps,

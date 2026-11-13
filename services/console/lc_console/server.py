@@ -1,9 +1,9 @@
 """The console's HTTP front end.
 
 It shows the system state and performs the owner's actions (lc_core.actions):
-pause, resume, stop, restart, manual mode, pausing one job, and running a job
-now. The System page on the site links here; the site itself can't change
-anything.
+pause, resume, stop, restart, manual mode, pausing one job, running a job now,
+and approving data sources. The site takes the same actions inline on its own
+pages; both run lc_core.owner, and a code works once across both.
 
 Every action needs both factors at the moment it is taken: the owner's IAP
 login and a fresh code from the authenticator, entered on the confirmation
@@ -28,8 +28,8 @@ from urllib.parse import parse_qs
 
 from datetime import datetime, timezone
 
-from lc_core.actions import SOURCE_ACTIONS, Refused, apply, catalogue, known, source_catalogue
-from lc_core.approvals import decide, effective
+from lc_core.actions import SOURCE_ACTIONS, catalogue, known, source_catalogue
+from lc_core.approvals import effective
 from lc_core.control import load_state
 
 from .auth import SESSION_SECONDS, Sessions, verify_iap
@@ -145,6 +145,11 @@ class Handler(BaseHTTPRequestHandler):
         return (form if form is not None else self._form()).get("code", "").strip()
 
     def _same_origin(self) -> bool:
+        """Browsers say where a request came from in Sec-Fetch-Site. Origin alone isn't enough: this page's
+        no-referrer policy makes browsers send "Origin: null" on its own form posts (the 2026-11-13 bug)."""
+        site = self.headers.get("Sec-Fetch-Site")
+        if site is not None:
+            return site == "same-origin"
         origin = self.headers.get("Origin")
         return origin is None or origin == f"https://{self.headers.get('Host', '')}"
 
@@ -273,63 +278,26 @@ class Handler(BaseHTTPRequestHandler):
         return f'<p><a href="{html.escape(site, quote=True)}/#/system">Back to the System page</a></p>' if site else ""
 
     def _act(self, email, secret, form):
-        action, reason = form.get("do", ""), " ".join(form.get("reason", "").split())[:MAX_REASON]
-        back_link = self._back(form.get("back", ""))
+        from lc_core.owner import perform
+
+        action = form.get("do", "")
+        back = form.get("back", "")
         if not self._same_origin():
             self._audit(email, f"action-refused:{action}", False)
-            return self._send(403, page("Not allowed", "<p>Actions must come from this console.</p>"))
-        if not known(self.app.sources, action, self.app.registry) or self.app.backend is None:
+            return self._send(403, page("Not allowed", "<p>Actions must come from this console or the site's own pages.</p>"))
+        if self.app.backend is None:
             return self._send(404, page("No such action", ""))
-        if not reason:
-            return self._confirm_page(action, status=400, note="Say why, for the decision log.", back=form.get("back", ""))
-        ok = self.app.verifier.verify(secret, self._code(form))
-        self._audit(email, f"action-code:{action}", ok)
-        if not ok:
-            return self._confirm_page(action, status=403, note=self._failure(), back=form.get("back", ""))
-        actor, now = f"owner:{email}", self.app.clock().strftime("%Y-%m-%dT%H:%M:%SZ")
-        event = {"ts": now, "actor": actor, "action": action, "subject": "control state", "trigger": "owner-console",
-                 "reason": reason, "decision": "done", "component": action.partition(":")[2]}
-        try:
-            kind, _, name = action.partition(":")
-            if kind in SOURCE_ACTIONS:
-                decisions, generation = self.app.backend.read_approvals()
-                status = SOURCE_ACTIONS[kind]
-                self.app.backend.write_approvals(decide(decisions, name, status, actor, now, reason), generation)
-                event.update(subject=f"source {name}", component=name)
-                outcome = (f"Data source {name} is now {status}. Its jobs check this before fetching, and the next "
-                           "snapshot includes only approved sources.")
-            elif action.startswith("run:"):
-                job = action.split(":", 1)[1]
-                execution = self.app.backend.run_job(job)
-                event.update(subject=job, run_id=execution)
-                outcome = f"Started {job}" + (f" ({execution})" if execution else "") + "."
-            else:
-                current, generation = self.app.backend.read_state()
-                new = apply(action, current, actor, now)
-                self.app.backend.write_state(new, generation)
-                outcome = f"The system is {new['state']}" + (
-                    f"; paused jobs: {', '.join(new.get('paused_components') or []) or 'none'}." )
-        except Refused as exc:
-            event.update(decision="rejected", reason=f"{reason} (refused: {exc})")
-            self._record(event)
-            return self._send(409, page("Refused", f"<p>{html.escape(str(exc))}</p>{back_link}"))
-        except Exception as exc:
-            event.update(decision="failed", reason=f"{reason} ({type(exc).__name__})")
-            self._record(event)
-            self.app.log({"event": "action-failed", "action": action, "error": type(exc).__name__})
-            return self._send(502, page("Didn't work", f"<p>{html.escape(type(exc).__name__)}: "
-                                                       f"{html.escape(str(exc)[:200])}</p>{back_link}"))
-        self._record(event)
-        self._audit(email, f"action:{action}", True)
-        return self._send(200, page("Done", f"<p>{html.escape(outcome)}</p><p class=muted>Recorded in the decision log. "
-                                             "Jobs read the new state at their next check. The GitHub variable "
-                                             "SYSTEM_STATE is set only by the control repository's commands.</p>" + back_link))
-
-    def _record(self, event):
-        try:
-            self.app.backend.record(event)
-        except Exception as exc:  # the action stands; the failure to log it is itself logged
-            self.app.log({"event": "decision-unrecorded", "action": event["action"], "error": type(exc).__name__})
+        outcome = perform(backend=self.app.backend, verifier=self.app.verifier, secret=secret, sources=self.app.sources,
+                          registry=self.app.registry, action=action, reason=form.get("reason", ""), code=self._code(form),
+                          email=email, now=self.app.clock().strftime("%Y-%m-%dT%H:%M:%SZ"), trigger="owner-console",
+                          log=self.app.log)
+        self._audit(email, f"action:{action}", outcome.ok)
+        if outcome.status in (400, 403) and known(self.app.sources, action, self.app.registry):
+            return self._confirm_page(action, status=outcome.status, note=outcome.message, back=back)
+        title = {200: "Done", 404: "No such action", 409: "Refused"}.get(outcome.status, "Didn't work")
+        extra = ("<p class=muted>Recorded in the decision log. Jobs read the new state at their next check.</p>"
+                 if outcome.ok else "")
+        return self._send(outcome.status, page(title, f"<p>{html.escape(outcome.message)}</p>{extra}{self._back(back)}"))
 
     def _status_page(self):
         try:
@@ -361,7 +329,10 @@ def main() -> int:
         from lc_core.approvals import registry
         from lc_core.sources import pipelines
 
-        from .backend import GoogleBackend
+        from google.cloud import storage
+        from lc_core.owner import GoogleBackend
+        from lc_core.totp import GcsSteps
+        from lc_core.totp import Verifier as SharedVerifier
 
         project = os.environ["GCP_PROJECT_ID"]
         app = App(owners=os.environ["LC_CONSOLE_OWNERS"].split(","), audience=os.environ["LC_IAP_AUDIENCE"],
@@ -369,7 +340,9 @@ def main() -> int:
                   backend=GoogleBackend(project, os.environ.get("GCP_REGION", "us-central1")),
                   sources=pipelines(os.environ.get("LC_SOURCES_CONFIG", "/app/config/sources.yaml")),
                   registry=registry(os.environ.get("LC_SOURCES_CONFIG", "/app/config/sources.yaml")),
-                  site_url=os.environ.get("LC_SITE_URL", ""))
+                  site_url=os.environ.get("LC_SITE_URL", ""),
+                  # One code, once, across the console and the site: login and actions share the record.
+                  verifier=SharedVerifier(GcsSteps(storage.Client().bucket(f"{project}-control"))))
     except KeyError as exc:
         print(f"refusing to start: {exc} is not set", file=sys.stderr)
         return 1
