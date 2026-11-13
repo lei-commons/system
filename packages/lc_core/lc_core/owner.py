@@ -121,7 +121,13 @@ def perform(*, backend, verifier, secret: str, sources: list, registry: list, ac
         return Outcome(400, "Say why, for the decision log.")
     if not secret:
         return Outcome(403, "The second factor isn't set up yet: enrol in the owner console first.")
-    if not verifier.verify(secret, (code or "").strip()):
+    try:
+        verified = verifier.verify(secret, (code or "").strip())
+    except Exception as exc:  # e.g. the shared record of used codes can't be written: fail closed, and say why
+        log({"event": "action-code-unchecked", "action": action, "error": type(exc).__name__})
+        return Outcome(503, f"The code couldn't be checked ({type(exc).__name__}: {str(exc).splitlines()[0][:120]}), "
+                            "so nothing was done.")
+    if not verified:
         log({"event": "action-code-refused", "action": action})
         if verifier.locked():
             return Outcome(403, "Too many wrong codes. Wait five minutes, then try again.")
