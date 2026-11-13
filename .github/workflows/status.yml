@@ -46,6 +46,13 @@ jobs:
             --freshness=2d --order=desc --limit=30 --format=json \
             | jq -c '.[] | {time: .timestamp[0:19], revision: .resource.labels.revision_name} + (.jsonPayload | {event, action, status, error})
                      | with_entries(select(.value != null))' || true
+      - name: The site's recent POST requests and errors (status, latency, method and path only)
+        run: |
+          gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="lei-commons-site" AND httpRequest.requestMethod="POST"' \
+            --freshness=2d --order=desc --limit=15 --format=json \
+            | jq -c '.[] | {time: .timestamp[0:19], status: .httpRequest.status, latency: .httpRequest.latency, path: (.httpRequest.requestUrl | sub("^https?://[^/]+"; ""))}' || true
+          gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="lei-commons-site" AND (severity>=ERROR OR textPayload:"Traceback" OR textPayload:"Error")' \
+            --freshness=2d --order=desc --limit=20 --format='value(timestamp,textPayload)' | cut -c1-220 || true
       - name: Schedules
         run: gcloud scheduler jobs list --location "$REGION" --format='table(name.basename(),schedule,state,lastAttemptTime,status.code)' || true
       - name: Services
