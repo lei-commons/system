@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "The lei-commons site and API, private to the owner until they approve going public"
 requires-python = ">=3.11"
 license = {text = "Apache-2.0"}
-dependencies = ["duckdb>=1.0", "google-auth[requests]>=2.30", "google-cloud-storage>=2.16"]  # also needs lc-core
+dependencies = ["duckdb>=1.0", "google-auth[requests]>=2.30", "google-cloud-storage>=2.16", "google-cloud-secret-manager>=2.20"]  # also needs lc-core
 
 [project.optional-dependencies]
 test = ["pytest>=8", "pyarrow>=15"]

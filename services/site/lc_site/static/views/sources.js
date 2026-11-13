@@ -1,9 +1,9 @@
 // Data sources: every source in the registry, its terms and Claude's reading of
 // them, and the owner's decision. Approve, deny or keep pending at any time; each
-// opens the owner console, which asks for a reason and a fresh authenticator code.
+// opens a small form right here, asking for a reason and a fresh authenticator code.
 // Only approved sources are fetched, and only their records reach the snapshot,
 // database and this site.
-import { api, errorBox, flag, fmt, h } from "../lib.js";
+import { actionBar, api, errorBox, flag, fmt, h } from "../lib.js";
 
 const STATUS = { approved: ["good", "✓", "Approved"], denied: ["bad", "✕", "Denied"], pending: ["warn", "◷", "Pending"],
   unknown: ["idle", "?", "Unknown"] };
@@ -27,7 +27,9 @@ function link(href, text) {
   return href ? h("a", { href, target: "_blank", rel: "noopener noreferrer" }, text, " ↗") : h("span", { class: "muted" }, "–");
 }
 
-function row(s, consoleUrl) {
+const SHORT = { "source-approve": "Approve", "source-deny": "Deny", "source-pending": "Keep pending" };
+
+function row(s, reload) {
   const a = s.assessment || {};
   const ap = s.approval || {};
   const held = s.records && ap.status !== "approved";
@@ -56,10 +58,8 @@ function row(s, consoleUrl) {
       : `Starting status: ${ap.status}${ap.reason ? " · " + ap.reason : ""}`),
     s.history && s.history.length ? h("details", { class: "history" }, h("summary", {}, `Earlier decisions (${s.history.length})`),
       h("ul", {}, ...s.history.map((x) => h("li", {}, `${x.status} by ${x.by} on ${when(x.at)}${x.reason ? " · “" + x.reason + "”" : ""}`)))) : null,
-    consoleUrl && s.actions.length ? h("div", { class: "toolbar", style: { margin: "10px 0 0" } }, ...s.actions.map((x) => h("a", {
-      class: `btn${x.tone === "danger" ? " danger" : x.tone === "primary" ? " primary" : ""}`,
-      href: `${consoleUrl}/act?do=${encodeURIComponent(x.id)}&back=${encodeURIComponent(location.origin)}`, target: "_blank", rel: "noopener",
-      title: x.help }, x.label.split(" ")[0] === "Keep" ? "Keep pending" : x.label.split(" ")[0]))) : null);
+    s.actions.length ? h("div", { style: { marginTop: "10px" } },
+      actionBar(s.actions, reload, (x) => SHORT[x.id.split(":")[0]] || x.label)) : null);
 }
 
 export async function render(root, arg) {
@@ -81,7 +81,7 @@ export async function render(root, arg) {
       tile(d.pending, "pending: not used until you decide", "warnish"), tile(d.denied, "denied: never fetched", "badish"),
       tile(review, "need your review (pending, or terms not yet verified)")),
     d.decisionsError ? h("p", { class: "held" }, `Your decisions can't be read right now (${d.decisionsError}), so nothing is treated as approved and the jobs stop.`) : null,
-    h("p", { class: "muted" }, "Every ingestion job checks its source here before fetching anything, and the daily snapshot includes only approved sources, so denying a source also removes its records from the next snapshot, database and site. Actions open the owner console, which asks for a reason and a fresh code."),
+    h("p", { class: "muted" }, "Every ingestion job checks its source here before fetching anything, and the daily snapshot includes only approved sources, so denying a source also removes its records from the next snapshot, database and site. Each decision asks, right here, for a reason and a fresh code from your authenticator."),
     h("div", { class: "toolbar" }, ...FILTERS.map(([k, label]) => h("a", { class: `chip${k === filter ? " on" : ""}`, href: `#/sources/${k}` }, label))),
-    h("div", { class: "grid", style: { gap: "14px" } }, ...shown.map((s) => row(s, d.console)))));
+    h("div", { class: "grid", style: { gap: "14px" } }, ...shown.map((s) => row(s, () => render(root, arg))))));
 }

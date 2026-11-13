@@ -266,3 +266,16 @@ dl.mini.wide { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
 .decision { margin-top: 10px; font-size: 13px; }
 .history { margin-top: 6px; font-size: 13px; color: var(--ink-2); }
 .history ul { margin: 6px 0 0; padding-left: 18px; }
+
+/* ---- inline owner actions ---- */
+.action-bar { display: grid; gap: 10px; }
+.action-panel { border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--hairline)); border-radius: 10px; padding: 12px 14px;
+  background: color-mix(in srgb, var(--accent) 5%, var(--raised)); }
+.action-form { display: grid; gap: 8px; }
+.action-fields { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.action-fields input { border: 1px solid var(--hairline); border-radius: 8px; padding: 8px 10px; background: var(--surface); color: var(--ink);
+  font: inherit; min-width: 260px; flex: 1; }
+.action-fields input.code-input { min-width: 0; flex: 0 0 120px; letter-spacing: .2em; font-variant-numeric: tabular-nums; }
+.action-status { font-size: 13.5px; min-height: 1.2em; }
+.action-status.good { color: var(--good-ink); }
+.action-status.bad { color: var(--critical); }

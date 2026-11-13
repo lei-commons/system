@@ -59,7 +59,7 @@ locals {
       "roles/storage.objectViewer" = ["console", "site", "loader"]
     }
     decision_log = {
-      "roles/storage.objectCreator" = ["ingest", "crawler", "resolver", "maker", "checker", "publisher", "workflow", "console", "budget-guard", "control-operator", "loader"]
+      "roles/storage.objectCreator" = ["ingest", "crawler", "resolver", "maker", "checker", "publisher", "workflow", "console", "budget-guard", "control-operator", "loader", "site"]
       "roles/storage.objectViewer"  = ["publisher", "console", "site"]
     }
     ledger_baselines = {
@@ -72,7 +72,8 @@ locals {
     }
     control = {
       "roles/storage.objectViewer" = local.runtime_sas
-      "roles/storage.objectUser"   = ["console", "budget-guard", "control-operator"]
+      # The site takes the owner's actions inline (IAP plus a fresh code each time), as the console does.
+      "roles/storage.objectUser" = ["console", "budget-guard", "control-operator", "site"]
     }
   }
 

@@ -430,3 +430,25 @@ def test_data_sources_are_approved_denied_or_kept_pending_and_can_be_toggled(act
     decision = act.app.backend.approvals["gleif"]
     assert decision["status"] == "approved" and [h["status"] for h in decision["history"]] == ["denied", "pending"]
     assert [e["subject"] for e in act.app.backend.events[-3:]] == ["source gleif"] * 3
+
+
+def post_from_browser(e, body, **headers):
+    c = http.client.HTTPConnection("127.0.0.1", e.port, timeout=5)
+    c.request("POST", "/act", body=body, headers={"X-Goog-IAP-JWT-Assertion": "owner",
+                                                   "Content-Type": "application/x-www-form-urlencoded", **headers})
+    r = c.getresponse()
+    out = (r.status, r.read().decode())
+    c.close()
+    return out
+
+
+def test_a_browsers_own_form_post_works_despite_origin_null(act):
+    # The 2026-11-13 bug: with Referrer-Policy no-referrer, browsers send "Origin: null" on a same-origin form post.
+    status, body = post_from_browser(act, f"do=source-approve%3Aus-co-sos&reason=terms+checked&code={code(act)}",
+                                     Origin="null", **{"Sec-Fetch-Site": "same-origin"})
+    assert status == 200 and act.app.backend.approvals["us-co-sos"]["status"] == "approved", body
+
+
+def test_a_cross_site_post_is_refused_even_with_a_good_code(act):
+    status, _ = post_from_browser(act, f"do=pause&reason=x&code={code(act)}", Origin="null", **{"Sec-Fetch-Site": "cross-site"})
+    assert status == 403 and act.app.backend.state["state"] == "running"

@@ -97,3 +97,10 @@ resource "google_iap_web_cloud_run_service_iam_member" "owner" {
   role                   = "roles/iap.httpsResourceAccessor"
   member                 = "user:${var.owner_email}"
 }
+
+# The site checks the same second factor for owner actions taken inline on its pages.
+resource "google_secret_manager_secret_iam_member" "site_totp" {
+  secret_id = google_secret_manager_secret.console_totp.id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = google_service_account.sa["site"].member
+}

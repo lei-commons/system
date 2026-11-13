@@ -51,6 +51,7 @@ class Handler(BaseHTTPRequestHandler):
     system = None
     decisions = None
     downloads = None
+    actions = None
     files: dict = {}
     iap = staticmethod(verify_iap)
 
@@ -175,10 +176,27 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, self.system.collect({k: snap.meta.get(k) for k in ("date", "snapshotRoot")}))
         return self._json(404, {"error": "not found"})
 
+    def do_POST(self):
+        """Only owner actions (lc_site.actions): IAP first, then same-origin JSON, a reason and a fresh code."""
+        if urlsplit(self.path).path != "/api/v1/act":
+            return self._send(405, b"")
+        email = self.iap(self.headers.get(HEADER), self.audience)
+        if email is None or email not in self.owners:
+            return self._json(403, {"ok": False, "message": "not allowed"})
+        if self.actions is None:
+            return self._json(503, {"ok": False, "message": "Owner actions aren't configured on this site."})
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        body = self.rfile.read(length) if 0 < length <= 4096 else b""
+        outcome = self.actions.handle(email, self.headers, body)
+        return self._json(outcome.status, {"ok": outcome.ok, "message": outcome.message})
+
     def do_HEAD(self):
         return self._send(405, b"")
 
-    do_POST = do_PUT = do_PATCH = do_DELETE = do_OPTIONS = do_TRACE = do_CONNECT = do_HEAD
+    do_PUT = do_PATCH = do_DELETE = do_OPTIONS = do_TRACE = do_CONNECT = do_HEAD
 
 
 def load_latest(bucket_name: str):
@@ -205,10 +223,11 @@ def load_latest(bucket_name: str):
     return snap
 
 
-def make_server(snapshot, owners, audience, address, iap=verify_iap, system=None, decisions=None, downloads=None):
+def make_server(snapshot, owners, audience, address, iap=verify_iap, system=None, decisions=None, downloads=None,
+                actions=None):
     attrs = {"snapshot": snapshot, "owners": {o.strip().lower() for o in owners if o.strip()}, "audience": audience,
              "iap": staticmethod(iap), "system": system, "decisions": decisions, "downloads": downloads,
-             "files": static_files()}
+             "actions": actions, "files": static_files()}
     return ThreadingHTTPServer(address, type("Bound", (Handler,), attrs))
 
 
@@ -238,9 +257,37 @@ def main() -> int:
         system = SystemView(GoogleReader(project, os.environ.get("GCP_REGION", "us-central1"), buckets))
     except Exception as exc:  # the rest of the site works without it
         print(json.dumps({"event": "system-view-unavailable", "error": type(exc).__name__}), flush=True)
+    actions = None
+    try:
+        actions = _owner_actions(system)
+    except Exception as exc:  # the rest of the site works without it; actions answer 503
+        print(json.dumps({"event": "owner-actions-unavailable", "error": type(exc).__name__}), flush=True)
     make_server(choose_directory(bucket), owners, audience, ("0.0.0.0", int(os.environ.get("PORT", "8080"))),
-                system=system, decisions=decisions, downloads=downloads).serve_forever()
+                system=system, decisions=decisions, downloads=downloads, actions=actions).serve_forever()
     return 0
+
+
+def _owner_actions(system):
+    from google.cloud import secretmanager, storage
+    from lc_core.approvals import registry
+    from lc_core.owner import GoogleBackend
+    from lc_core.sources import pipelines
+    from lc_core.totp import GcsSteps, Verifier
+
+    from .actions import OwnerActions
+
+    project, region = os.environ["GCP_PROJECT_ID"], os.environ.get("GCP_REGION", "us-central1")
+    secrets = secretmanager.SecretManagerServiceClient()
+
+    def read_secret():
+        name = f"projects/{project}/secrets/console-totp/versions/latest"
+        return secrets.access_secret_version(name=name).payload.data.decode("ascii")
+
+    path = os.environ.get("LC_SOURCES_CONFIG")
+    return OwnerActions(backend=GoogleBackend(project, region),
+                        verifier=Verifier(GcsSteps(storage.Client().bucket(f"{project}-control"))),
+                        read_secret=read_secret, sources=pipelines(path) if path else pipelines(),
+                        registry=registry(path), on_change=(system.invalidate if system else None))
 
 
 def choose_directory(bucket, open_database=None, load_snapshot=None):
