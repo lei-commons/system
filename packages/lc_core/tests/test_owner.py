@@ -159,3 +159,16 @@ def test_the_shared_step_record_refuses_replays_across_services():
 
     site, console = GcsSteps(Bucket()), GcsSteps(Bucket())
     assert site.claim(100) and not console.claim(100) and not console.claim(99) and console.claim(101)
+
+
+def test_a_code_record_that_cant_be_written_fails_closed_with_a_clear_message():
+    class Broken:
+        def claim(self, step):
+            raise PermissionError("403 POST .../b/lei-commons-prod-control/o: Forbidden")
+
+    backend = Backend()
+    out = perform(backend=backend, verifier=Verifier(Broken(), clock=Clock()), secret=SECRET, sources=SOURCES, registry=REGISTRY,
+                  action="source-approve:us-co-sos", reason="x", code=code_at(SECRET, int(Clock.t) // 30),
+                  email="o@x.test", now="t", trigger="site")
+    assert out.status == 503 and "PermissionError" in out.message and "nothing was done" in out.message
+    assert backend.approvals == {} and backend.events == []
