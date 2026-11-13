@@ -15,6 +15,8 @@ locals {
     "ledger-br@refs/heads/main"    = "maker"
     "ledger-us@refs/heads/main"    = "maker"
     "ledger-sg@refs/heads/main"    = "maker"
+    # Read-only: prints the owner's suggestions for Claude in a private repository's logs.
+    "intake@refs/heads/main" = "reader"
   }
 }
 

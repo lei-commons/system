@@ -99,11 +99,16 @@ class SystemView:
         return data
 
     def sources_page(self) -> dict:
-        """The Data sources page: every source in the registry, its terms, the owner's decisions, and the actions."""
+        """The Data sources page: every source in the registry with the owner's edits, its terms, decisions and actions."""
+        from lc_core import source_edits
         from lc_core.approvals import registry
 
         r = self._reader
-        entries = registry(os.environ.get("LC_SOURCES_CONFIG") or _default_sources_path())
+        base = registry(os.environ.get("LC_SOURCES_CONFIG") or _default_sources_path())
+        edits, edits_error = _try(lambda: r.bucket_json("control", source_edits.EDITS_NAME) or {}, {})
+        if not edits_error and not isinstance(edits, dict):
+            edits, edits_error = {}, "malformed"
+        entries = source_edits.merged(base, edits if not edits_error else {})
         decisions, decisions_error = _try(lambda: r.bucket_json("control", "source-approvals.json") or {}, {})
         statuses = effective_approvals(entries, decisions if not decisions_error else {})
         if decisions_error:  # can't read the owner's decisions: show nothing as approved, as the jobs do
@@ -114,6 +119,7 @@ class SystemView:
         actions = {}
         for a in source_catalogue(entries, statuses) if not decisions_error else []:
             actions.setdefault(a["id"].split(":", 1)[1], []).append(a)
+        editable = not edits_error
         rows = []
         for s in entries:
             pipeline = s.get("pipeline") or {}
@@ -122,13 +128,28 @@ class SystemView:
                 manifest, _ = _try(lambda p=pipeline["store"]: r.bucket_json("data", f"{p}/manifest.json"))
                 records = (manifest or {}).get("records")
             history = ((decisions or {}).get(s["id"]) or {}).get("history") or []
+            status = statuses[s["id"]]["status"]
+            remove_blocked = ("In use: deny it instead, so its records leave the snapshot." if pipeline
+                              else "Approved: deny it or keep it pending first." if status == "approved"
+                              else "Your decisions can't be read right now." if decisions_error else None)
             rows.append({k: s.get(k) for k in ("id", "name", "country", "access", "method", "licence", "cadence", "url",
                                                  "terms_url", "assessment")}
                         | {"built": bool(pipeline), "label": pipeline.get("label"), "job": pipeline.get("job"), "records": records,
+                           "pipeline": {k: pipeline.get(k) for k in ("job", "store", "records_as")} if pipeline else None,
                            "approval": statuses[s["id"]], "history": list(reversed(history))[:10],
-                           "actions": actions.get(s["id"], [])})
+                           "actions": actions.get(s["id"], []), "owner": s.get("owner") or {},
+                           "editable": editable, "removable": editable and not remove_blocked, "removeBlocked": remove_blocked})
         counts = {k: sum(1 for x in rows if x["approval"]["status"] == k) for k in ("approved", "denied", "pending")}
-        return {"total": len(rows), **counts, "sources": rows, "console": console, "decisionsError": decisions_error}
+        review = sum(1 for x in rows if x["approval"]["status"] == "pending"
+                     or (x["approval"]["status"] == "approved" and not (x["assessment"] or {}).get("verified")))
+        changes = [{k: e.get(k) for k in ("at", "by", "source", "change")} | {"fields": sorted((e.get("after") or {}))}
+                   for e in reversed((edits or {}).get("history") or [])][:20] if not edits_error else []
+        return {"total": len(rows), **counts, "review": review, "sources": rows, "console": console,
+                "decisionsError": decisions_error, "editsError": edits_error, "editable": editable, "changes": changes,
+                "limits": {"hint": source_edits.HINT_MAX, "summary": source_edits.SUMMARY_MAX, "name": source_edits.NAME_MAX,
+                           "text": source_edits.TEXT_MAX},
+                "choices": {"access": source_edits.ACCESS, "method": source_edits.METHOD, "cadence": source_edits.CADENCE,
+                            "risk": source_edits.RISK}}
 
     def _feed(self, r) -> list:
         """The newest decisions from the jobs' run objects, today's and yesterday's, newest first."""

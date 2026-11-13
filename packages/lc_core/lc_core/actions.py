@@ -19,6 +19,8 @@ GATES = {"build-snapshot": "job:publish", "load-db": "job:load-db"}
 # Data source approvals: the action names and the status each sets (see lc_core.approvals).
 SOURCE_ACTIONS = {"source-approve": "approved", "source-deny": "denied", "source-pending": "pending"}
 SOURCE_LABELS = {"source-approve": "Approve", "source-deny": "Deny", "source-pending": "Keep pending"}
+# Changes to the registry itself (lc_core.source_edits): add, edit or remove a source, or leave Claude a suggestion.
+EDIT_ACTIONS = ("source-add", "source-edit", "source-remove", "source-hint")
 
 
 class Refused(Exception):
@@ -86,7 +88,9 @@ def known(sources: list, action: str, registry: list = ()) -> bool:
     if action in ("pause", "stop", "resume", "restart", "manual"):
         return True
     kind, _, name = action.partition(":")
-    if kind in SOURCE_ACTIONS:
+    if action == "source-add":
+        return True
+    if kind in SOURCE_ACTIONS or (kind in EDIT_ACTIONS and kind != "source-add"):
         return name in {s["id"] for s in registry}
     if kind == "run":
         return name in jobs(sources)

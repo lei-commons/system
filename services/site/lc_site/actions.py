@@ -1,11 +1,12 @@
 """Owner actions taken inline on the site's pages (Data sources, System).
 
-POST /api/v1/act with a JSON body {action, reason, code}. Accepted only when:
+POST /api/v1/act with a JSON body {action, reason, code}, plus ``fields`` (a source's
+attributes) or ``hint`` (a suggestion for Claude) for changes to the registry. Accepted only when:
 - the request carries the owner's IAP login (checked by the server first);
 - the browser marks it same-origin (Sec-Fetch-Site), with a JSON body, so no
   other site and no plain HTML form can send it;
-- the reason is given and the authenticator code is fresh: a code works once,
-  across the site and the owner console (lc_core.totp).
+- the reason is given (optional for registry changes) and the authenticator code is
+  fresh: a code works once, across the site and the owner console (lc_core.totp).
 The work itself is lc_core.owner.perform, the same code the console runs.
 """
 
@@ -16,7 +17,7 @@ from datetime import datetime, timezone
 
 from lc_core.owner import Outcome, perform
 
-MAX_BODY = 4096
+MAX_BODY = 32768  # a 1,000-character suggestion or summary, even all escaped, fits
 PENDING = "pending:"  # the console's marker for a key that hasn't been confirmed yet
 
 
@@ -42,7 +43,8 @@ class OwnerActions:
         try:
             data = json.loads(body)
             action, reason, code = str(data.get("action", "")), str(data.get("reason", "")), str(data.get("code", ""))
-        except (ValueError, AttributeError):
+            extra = {k: data[k] for k in ("fields", "hint") if k in data}
+        except (ValueError, AttributeError, TypeError):
             return Outcome(400, "The request isn't valid JSON.")
         try:
             secret = self.secret()
@@ -51,7 +53,7 @@ class OwnerActions:
             return Outcome(503, "The second factor can't be checked right now, so nothing was done.")
         outcome = perform(backend=self.backend, verifier=self.verifier, secret=secret, sources=self.sources,
                           registry=self.registry, action=action, reason=reason, code=code, email=email,
-                          now=self.clock().strftime("%Y-%m-%dT%H:%M:%SZ"), trigger="site", log=self.log)
+                          now=self.clock().strftime("%Y-%m-%dT%H:%M:%SZ"), trigger="site", log=self.log, data=extra)
         self.log({"event": "owner-action", "action": action, "status": outcome.status})
         if outcome.ok:
             self.on_change()

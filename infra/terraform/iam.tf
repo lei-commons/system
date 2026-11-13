@@ -18,10 +18,12 @@ locals {
     loader       = "Loads each snapshot into the serving database"
     # Used only by the owner's workflows in the control repo. Never an agent identity.
     control-operator = "Writes the control state on the owner's command, from control@main only"
+    # Lets Claude read the owner's suggestions and source edits, privately, from intake@main. Read-only.
+    reader = "Reads the owner's source edits and approvals (control bucket, two objects), from intake@main only"
   }
 
   # Runtime identities read the control state before every step.
-  runtime_sas = [for k in keys(local.service_accounts) : k if !contains(["deployer", "control-operator"], k)]
+  runtime_sas = [for k in keys(local.service_accounts) : k if !contains(["deployer", "control-operator", "reader"], k)]
 
   common_roles = ["roles/logging.logWriter", "roles/monitoring.metricWriter"]
 
@@ -45,6 +47,8 @@ locals {
     loader = ["roles/cloudsql.client"]
     # No project roles: it only touches the two buckets below.
     control-operator = []
+    # No project roles: it reads two objects in the control bucket (below).
+    reader = []
   }
 
   # bucket => { role => [sa keys] }
@@ -125,6 +129,19 @@ resource "google_storage_bucket_iam_member" "sa" {
   bucket = local.buckets[each.value.bucket]
   role   = each.value.role
   member = google_service_account.sa[each.value.sa].member
+}
+
+# The reader sees only the owner's source edits and approvals, nothing else in the control bucket.
+resource "google_storage_bucket_iam_member" "reader_source_files" {
+  bucket = google_storage_bucket.control.name
+  role   = "roles/storage.objectViewer"
+  member = google_service_account.sa["reader"].member
+
+  condition {
+    title       = "source-files-only"
+    description = "source-edits.json and source-approvals.json"
+    expression  = "resource.name == \"projects/_/buckets/${google_storage_bucket.control.name}/objects/source-edits.json\" || resource.name == \"projects/_/buckets/${google_storage_bucket.control.name}/objects/source-approvals.json\""
+  }
 }
 
 # The deployer may attach runtime identities to the jobs it deploys, nothing more.

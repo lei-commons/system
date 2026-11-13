@@ -6,6 +6,12 @@ works once, system-wide). Then it writes the control state or the source
 approvals, only if they haven't changed since they were read, or starts a job.
 Every attempt that reaches a decision is recorded in the decision log under
 ``owner-control/``.
+
+Changes to the sources registry (add, edit, remove, a suggestion for Claude;
+lc_core.source_edits) are checked before the code is: a form with a mistake
+answers 400 and leaves the code unused. Their reason is optional (it defaults to
+what changed). The decision log records which fields changed, never their
+values: the values and their history stay in the control bucket.
 """
 
 from __future__ import annotations
@@ -14,7 +20,8 @@ import json
 import secrets
 from dataclasses import dataclass, field
 
-from .actions import SOURCE_ACTIONS, Refused, apply, catalogue, known, source_catalogue
+from . import source_edits
+from .actions import EDIT_ACTIONS, SOURCE_ACTIONS, Refused, apply, catalogue, known, source_catalogue
 from .approvals import decide, effective
 
 MAX_REASON = 300
@@ -86,6 +93,14 @@ class GoogleBackend:
     def write_approvals(self, decisions, generation):
         self._write("source-approvals.json", decisions, generation)
 
+    def read_edits(self):
+        """(edits, generation); edits is None if the file can't be parsed."""
+        data, generation = self._read(source_edits.EDITS_NAME, {})
+        return (data if isinstance(data, dict) else None), generation
+
+    def write_edits(self, edits, generation):
+        self._write(source_edits.EDITS_NAME, edits, generation)
+
     def run_job(self, job: str) -> str:
         url = f"https://run.googleapis.com/v2/projects/{self.project}/locations/{self.region}/jobs/{job}:run"
         response = self._http.post(url, json={}, timeout=30)
@@ -100,9 +115,19 @@ class GoogleBackend:
             json.dumps(event, indent=2, sort_keys=True), content_type="application/json", if_generation_match=0)
 
 
+def current_registry(backend, registry: list) -> list:
+    """The registry with the owner's edits laid over it; the base alone if the edits can't be read."""
+    try:
+        edits, _ = backend.read_edits()
+    except Exception:
+        return registry
+    return source_edits.merged(registry, edits or {})
+
+
 def offered(backend, sources: list, registry: list, action: str):
     """The action as the catalogue describes it now, or None if it doesn't apply now."""
     if action.partition(":")[0] in SOURCE_ACTIONS:
+        registry = current_registry(backend, registry)
         decisions, _ = backend.read_approvals()
         choices = source_catalogue(registry, effective(registry, decisions))
     else:
@@ -111,12 +136,104 @@ def offered(backend, sources: list, registry: list, action: str):
     return next((a for a in choices if a["id"] == action), None)
 
 
+def _plan_edit(backend, kind: str, name: str, edits: dict, registry: list, data: dict, actor: str, now: str):
+    """(new edits, subject id, message, default reason, event details). Raises source_edits.Invalid."""
+    data = data or {}
+    fields = data.get("fields") or {}
+    if not isinstance(fields, dict):
+        raise source_edits.Invalid("fields must be an object")
+    if kind == "source-add":
+        new, sid = source_edits.add(edits, registry, fields, actor, now)
+        return new, sid, f"Added {new['sources'][sid]['fields']['name']} ({sid}); it is pending until you approve it.", \
+            f"added {sid}", {"fields": sorted(new["sources"][sid]["fields"])}
+    merged = {s["id"]: s for s in source_edits.merged(registry, edits)}
+    title = (merged.get(name) or {}).get("name") or name
+    if kind == "source-edit":
+        new, changed = source_edits.edit(edits, registry, name, fields, actor, now)
+        return new, name, f"Saved {title}: {', '.join(changed)}.", f"edited {', '.join(changed)}", {"fields": changed}
+    if kind == "source-hint":
+        new = source_edits.hint(edits, registry, name, data.get("hint"), actor, now)
+        text = new["sources"][name]["hint"]
+        message = f"Saved your suggestion for {title}." if text else f"Cleared the suggestion for {title}."
+        return new, name, message, "suggestion for Claude " + ("updated" if text else "cleared"), {"hint_chars": len(text)}
+    if kind == "source-remove":
+        decisions, _ = backend.read_approvals()
+        if effective(list(merged.values()), decisions).get(name, {}).get("status") == "approved":
+            raise source_edits.Invalid(f"{title} is approved: deny it or keep it pending first, then remove it")
+        new = source_edits.remove(edits, registry, name, actor, now)
+        return new, name, f"Removed {title}.", "removed", {}
+    raise source_edits.Invalid("not an edit")
+
+
+def _perform_edit(*, backend, verifier, secret, registry, action, kind, name, reason, code, email, now, trigger, data, log):
+    actor = f"owner:{email}"
+    try:
+        edits, _ = backend.read_edits()
+    except Exception as exc:
+        return Outcome(503, f"Your earlier edits can't be read right now ({type(exc).__name__}), so nothing was changed.")
+    if edits is None:
+        return Outcome(503, "The edits file can't be read, so nothing was changed (it would be overwritten).")
+    try:  # check the form before the code, so a mistake doesn't use the code up
+        _, subject, _, default_reason, _ = _plan_edit(backend, kind, name, edits, registry, data, actor, now)
+    except source_edits.Invalid as exc:
+        return Outcome(400, f"Nothing saved: {exc}.")
+    if not secret:
+        return Outcome(403, "The second factor isn't set up yet: enrol in the owner console first.")
+    if not verifier.verify(secret, (code or "").strip()):
+        log({"event": "action-code-refused", "action": action})
+        if verifier.locked():
+            return Outcome(403, "Too many wrong codes. Wait five minutes, then try again.")
+        return Outcome(403, "That code didn't work, or it was already used. Enter the code your app shows now.")
+    reason = reason or default_reason
+    event = {"ts": now, "actor": actor, "action": action, "subject": f"source {subject}", "trigger": trigger,
+             "reason": reason, "decision": "done", "component": subject, "change": kind.removeprefix("source-")}
+    try:
+        edits, generation = backend.read_edits()  # again, with the generation the write must match
+        if edits is None:
+            raise Conflict("the edits file became unreadable")
+        new, subject, message, _, details = _plan_edit(backend, kind, name, edits, registry, data, actor, now)
+        event.update(details, subject=f"source {subject}", component=subject)
+        backend.write_edits(new, generation)
+    except source_edits.Invalid as exc:
+        event.update(decision="rejected", reason=f"{reason} (refused: {exc})")
+        _record(backend, event, log)
+        return Outcome(409, f"Nothing saved: {exc}.", event)
+    except Conflict as exc:
+        event.update(decision="failed", reason=f"{reason} (conflict)")
+        _record(backend, event, log)
+        return Outcome(409, f"Nothing saved: {exc}", event)
+    except Exception as exc:
+        event.update(decision="failed", reason=f"{reason} ({type(exc).__name__})")
+        _record(backend, event, log)
+        log({"event": "action-failed", "action": action, "error": type(exc).__name__})
+        return Outcome(502, f"It didn't work: {type(exc).__name__}: {str(exc)[:200]}", event)
+    _record(backend, event, log)
+    return Outcome(200, message, event)
+
+
 def perform(*, backend, verifier, secret: str, sources: list, registry: list, action: str, reason: str, code: str,
-            email: str, now: str, trigger: str, log=lambda record: None) -> Outcome:
-    """Check and carry out one owner action. ``now`` is an ISO time, ``trigger`` says where it came from."""
+            email: str, now: str, trigger: str, log=lambda record: None, data: dict = None) -> Outcome:
+    """Check and carry out one owner action. ``now`` is an ISO time, ``trigger`` says where it came from.
+
+    ``registry`` is the sources registry from git; the owner's edits are read and laid over it here.
+    ``data`` carries a registry change's ``fields`` or ``hint``.
+    """
     reason = " ".join((reason or "").split())[:MAX_REASON]
+    kind, _, name = action.partition(":")
+    base = registry
+    if kind in SOURCE_ACTIONS or kind in EDIT_ACTIONS:
+        registry = current_registry(backend, registry)
     if not known(sources, action, registry):
         return Outcome(404, "That isn't an action this system offers.")
+    if kind in EDIT_ACTIONS:
+        try:
+            return _perform_edit(backend=backend, verifier=verifier, secret=secret, registry=base,
+                                 action=action, kind=kind, name=name, reason=reason, code=code, email=email, now=now,
+                                 trigger=trigger, data=data, log=log)
+        except Exception as exc:  # e.g. the code couldn't be checked: fail closed, with a message
+            log({"event": "action-failed", "action": action, "error": type(exc).__name__})
+            return Outcome(503, f"The change couldn't be checked ({type(exc).__name__}: {str(exc).splitlines()[0][:120] if str(exc) else ''}), "
+                                "so nothing was done.")
     if not reason:
         return Outcome(400, "Say why, for the decision log.")
     if not secret:
