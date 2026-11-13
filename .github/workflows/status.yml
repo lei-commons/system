@@ -40,6 +40,12 @@ jobs:
             gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$job\" AND labels.\"run.googleapis.com/execution_name\"=\"$execution\" AND textPayload:*" \
               --order=desc --limit=8 --format='value(textPayload)' | tac | cut -c1-200 || true
           done
+      - name: The site's owner-action events (event names and error types only)
+        run: |
+          gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="lei-commons-site" AND jsonPayload.event:*' \
+            --freshness=2d --order=desc --limit=30 --format=json \
+            | jq -c '.[] | {time: .timestamp[0:19], revision: .resource.labels.revision_name} + (.jsonPayload | {event, action, status, error})
+                     | with_entries(select(.value != null))' || true
       - name: Schedules
         run: gcloud scheduler jobs list --location "$REGION" --format='table(name.basename(),schedule,state,lastAttemptTime,status.code)' || true
       - name: Services
