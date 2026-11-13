@@ -189,7 +189,9 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
             length = 0
-        body = self.rfile.read(length) if 0 < length <= 4096 else b""
+        from .actions import MAX_BODY
+
+        body = self.rfile.read(length) if 0 < length <= MAX_BODY else b""
         outcome = self.actions.handle(email, self.headers, body)
         return self._json(outcome.status, {"ok": outcome.ok, "message": outcome.message})
 

@@ -1,0 +1,63 @@
+# The owner's suggestions for Claude and edits to the data sources, printed where only
+# the organisation can read them. Canonical copy: system/intake/suggestions.yml; it runs
+# from the private lei-commons/intake repository (`system`'s logs are public, so this
+# can't run there). Read-only: lc-reader may read two objects in the control bucket,
+# source-edits.json and source-approvals.json, and nothing else.
+name: suggestions
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: suggestions
+  cancel-in-progress: false
+
+jobs:
+  print:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: lc-reader@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Read the owner's edits and decisions
+        env:
+          BUCKET: ${{ vars.GCP_PROJECT_ID }}-control
+        run: |
+          mkdir -p "$RUNNER_TEMP/in"
+          for f in source-edits.json source-approvals.json; do
+            gcloud storage cat "gs://$BUCKET/$f" > "$RUNNER_TEMP/in/$f" 2> "$RUNNER_TEMP/in/$f.err" \
+              || { grep -q "404\|No URLs matched\|not found" "$RUNNER_TEMP/in/$f.err" && echo '{}' > "$RUNNER_TEMP/in/$f" \
+                   || { echo "can't read $f:"; cat "$RUNNER_TEMP/in/$f.err"; exit 1; }; }
+          done
+          python3 - "$RUNNER_TEMP/in" <<'PY'
+          import json, sys
+          from pathlib import Path
+          d = Path(sys.argv[1])
+          edits = json.loads((d / "source-edits.json").read_text() or "{}")
+          approvals = json.loads((d / "source-approvals.json").read_text() or "{}")
+          sources = edits.get("sources") or {}
+          print(f"== {len(sources)} sources with owner edits; {len(approvals)} owner decisions ==")
+          for sid, e in sorted(sources.items()):
+              tags = [t for t in ("added", "removed") if e.get(t)]
+              print(f"\n## {sid}" + (f"  [{', '.join(tags)}]" if tags else "")
+                    + f"  (edited {e.get('edited_at', '-')}; approval: {(approvals.get(sid) or {}).get('status', 'registry default')})")
+              for k, v in sorted((e.get("fields") or {}).items()):
+                  print(f"  {k}: {json.dumps(v, ensure_ascii=False)}")
+              if e.get("hint"):
+                  print(f"  SUGGESTION FOR CLAUDE ({e.get('hint_at', '-')}):")
+                  for line in e["hint"].splitlines():
+                      print(f"    | {line}")
+          print("\n== decisions ==")
+          for sid, a in sorted(approvals.items()):
+              print(f"  {sid}: {a.get('status')} at {a.get('at')}: {a.get('reason') or ''}")
+          print("\n== latest edits ==")
+          for h in (edits.get("history") or [])[-15:]:
+              print(f"  {h.get('at')} {h.get('change')} {h.get('source')} {sorted((h.get('after') or {}))}")
+          PY

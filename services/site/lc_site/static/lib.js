@@ -120,68 +120,80 @@ export function errorBox(error) {
 // buttons: a reason and the code from the authenticator app. It posts to this
 // site (same origin, JSON), which checks the owner's login and the code before
 // acting. `onDone` runs after a success, to refresh the page's data.
-export async function postAction(action, reason, code) {
+export async function postAction(action, reason, code, extra = {}) {
   const response = await fetch("/api/v1/act", {
     method: "POST", credentials: "same-origin",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ action, reason, code }),
+    body: JSON.stringify({ ...extra, action, reason, code }),
   });
   let data = {};
   try { data = await response.json(); } catch (_) { /* answered without JSON */ }
   return { ok: response.ok && data.ok !== false, message: data.message || `${response.status}` };
 }
 
-export function actionBar(actions, onDone, label = (a) => a.label) {
+// A form, shown in `panel`, that asks for a fresh authenticator code (and a reason)
+// before posting an action. `fields` are extra inputs shown above the code;
+// `collect()` returns the action's extra payload, or a string saying what's wrong.
+export function codeForm(panel, { title, help, fields = [], collect = () => ({}), action, confirmLabel, tone = "primary",
+  reasonOptional = false, reasonHint, onDone }) {
+  const reason = h("input", { type: "text", maxlength: 300, required: !reasonOptional, "aria-label": "Reason",
+    placeholder: reasonHint || (reasonOptional ? "Why? (optional; recorded in the decision log)" : "Why? (recorded in the decision log)") });
+  const code = h("input", { type: "text", inputmode: "numeric", autocomplete: "one-time-code", pattern: "[0-9]{6}", maxlength: 6,
+    required: true, placeholder: "6-digit code", "aria-label": "Authenticator code", class: "code-input" });
+  const status = h("div", { class: "action-status", role: "status" });
+  const confirm = h("button", { type: "submit", class: `btn${tone === "danger" ? " danger" : " primary"}` }, confirmLabel);
+  const close = () => { panel.hidden = true; panel.replaceChildren(); };
+  const fail = (message) => { status.className = "action-status bad"; status.textContent = message; };
+  const form = h("form", {
+    class: "action-form", novalidate: true,
+    onsubmit: async (event) => {
+      event.preventDefault();
+      const extra = collect();
+      if (typeof extra === "string") return fail(extra);
+      if ((!reasonOptional && !reason.value.trim()) || !/^[0-9]{6}$/.test(code.value)) {
+        return fail(reasonOptional ? "Enter the 6-digit code your authenticator shows now."
+          : "Give a reason and the 6-digit code your authenticator shows now.");
+      }
+      confirm.disabled = true;
+      status.className = "action-status";
+      status.textContent = "Checking the code…";
+      let result;
+      try {
+        result = await postAction(typeof action === "function" ? action() : action, reason.value, code.value, extra);
+      } catch (error) {
+        result = { ok: false, message: `Couldn't reach the site (${error.message}).` };
+      }
+      status.className = `action-status ${result.ok ? "good" : "bad"}`;
+      status.textContent = result.ok ? `✓ ${result.message}` : `✕ ${result.message}`;
+      if (result.ok) {
+        setTimeout(() => onDone && onDone(), 1200);
+      } else {
+        confirm.disabled = false;
+        code.value = "";
+        code.focus();
+      }
+    },
+  },
+  h("div", { class: "action-what" }, h("strong", {}, title), help ? h("span", { class: "muted" }, ` · ${help}`) : null),
+  ...fields,
+  h("div", { class: "action-fields" }, reason, code, confirm, h("button", { type: "button", class: "btn", onclick: close }, "Cancel")),
+  h("div", { class: "muted", style: { fontSize: "12px" } }, "A code works once. If you've just used one, wait for the next."),
+  status);
+  panel.replaceChildren(form);
+  panel.hidden = false;
+  const first = form.querySelector("input:not([type=hidden]), textarea, select");
+  (first || reason).focus();
+  return form;
+}
+
+export function actionBar(actions, onDone, label = (a) => a.label, extraButtons = []) {
   const panel = h("div", { class: "action-panel", hidden: true });
   const buttons = actions.map((a) => h("button", {
     type: "button", class: `btn${a.tone === "danger" ? " danger" : a.tone === "primary" ? " primary" : ""}`, title: a.help || "",
-    onclick: () => open(a),
+    onclick: () => codeForm(panel, { title: label(a), help: a.help, action: a.id, confirmLabel: `Confirm: ${label(a)}`,
+      tone: a.tone === "danger" ? "danger" : "primary", onDone }),
   }, label(a)));
-
-  function open(a) {
-    const reason = h("input", { type: "text", maxlength: 300, required: true, placeholder: "Why? (recorded in the decision log)", "aria-label": "Reason" });
-    const code = h("input", { type: "text", inputmode: "numeric", autocomplete: "one-time-code", pattern: "[0-9]{6}", maxlength: 6,
-      required: true, placeholder: "6-digit code", "aria-label": "Authenticator code", class: "code-input" });
-    const status = h("div", { class: "action-status", role: "status" });
-    const confirm = h("button", { type: "submit", class: `btn${a.tone === "danger" ? " danger" : " primary"}` }, `Confirm: ${label(a)}`);
-    const form = h("form", {
-      class: "action-form",
-      onsubmit: async (event) => {
-        event.preventDefault();
-        if (!reason.value.trim() || !/^[0-9]{6}$/.test(code.value)) {
-          status.className = "action-status bad";
-          status.textContent = "Give a reason and the 6-digit code your authenticator shows now.";
-          return;
-        }
-        confirm.disabled = true;
-        status.className = "action-status";
-        status.textContent = "Checking the code…";
-        let result;
-        try {
-          result = await postAction(a.id, reason.value, code.value);
-        } catch (error) {
-          result = { ok: false, message: `Couldn't reach the site (${error.message}).` };
-        }
-        status.className = `action-status ${result.ok ? "good" : "bad"}`;
-        status.textContent = result.ok ? `✓ ${result.message}` : `✕ ${result.message}`;
-        if (result.ok) {
-          setTimeout(() => onDone && onDone(), 1200);
-        } else {
-          confirm.disabled = false;
-          code.value = "";
-          code.focus();
-        }
-      },
-    },
-    h("div", { class: "action-what" }, h("strong", {}, label(a)), a.help ? h("span", { class: "muted" }, ` · ${a.help}`) : null),
-    h("div", { class: "action-fields" }, reason, code, confirm,
-      h("button", { type: "button", class: "btn", onclick: () => { panel.hidden = true; panel.replaceChildren(); } }, "Cancel")),
-    h("div", { class: "muted", style: { fontSize: "12px" } }, "A code works once. If you've just used one, wait for the next."),
-    status);
-    panel.replaceChildren(form);
-    panel.hidden = false;
-    reason.focus();
-  }
-
-  return h("div", { class: "action-bar" }, h("div", { class: "toolbar", style: { margin: 0 } }, ...buttons), panel);
+  const extras = extraButtons.map((b) => h("button", { type: "button", class: `btn${b.tone ? " " + b.tone : ""}`, title: b.help || "",
+    onclick: () => b.open(panel) }, b.label));
+  return h("div", { class: "action-bar" }, h("div", { class: "toolbar", style: { margin: 0 } }, ...buttons, ...extras), panel);
 }

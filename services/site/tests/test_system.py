@@ -161,3 +161,45 @@ def test_the_data_sources_page_lists_every_registry_source_with_its_decisions():
 def test_unreadable_decisions_show_nothing_as_approved():
     page = SystemView(Reader(fail={"storage"})).sources_page()
     assert page["decisionsError"] and page["approved"] == 0 and all(not s["actions"] for s in page["sources"])
+
+
+class EditedReader(Reader):
+    edits = {"sources": {
+        "us-co-sos": {"fields": {"name": "Colorado SOS", "url": "https://data.colorado.gov/business"},
+                      "hint": "Try <the bulk CSV> first", "hint_by": "owner:p", "hint_at": "t", "edited_by": "owner:p"},
+        "us-pa-dos": {"removed": True},
+        "gleif": {"removed": True},  # a built source can't be removed this way
+        "us-de-corporations": {"added": True, "fields": {"name": "Delaware", "country": "US"}, "edited_by": "owner:p"}},
+        "history": [{"at": "t", "by": "owner:p", "source": "us-co-sos", "change": "hint", "after": {"hint": "secret text"}}]}
+
+    def bucket_json(self, bucket, name):
+        if name == "source-edits.json" and "storage" not in self.fail:
+            return self.edits
+        return super().bucket_json(bucket, name)
+
+
+def test_the_data_sources_page_shows_the_owners_edits():
+    page = SystemView(EditedReader()).sources_page()
+    by = {s["id"]: s for s in page["sources"]}
+    assert "us-pa-dos" not in by and "gleif" in by and by["us-de-corporations"]["approval"]["status"] == "pending"
+    co = by["us-co-sos"]
+    assert co["name"] == "Colorado SOS" and co["owner"]["hint"] == "Try <the bulk CSV> first" and co["removable"]
+    assert not by["gleif"]["removable"] and "deny it instead" in by["gleif"]["removeBlocked"]
+    assert by["gleif"]["pipeline"] == {"job": "ingest-gleif", "store": "gleif", "records_as": "gleif"}
+    assert {a["id"] for a in by["us-de-corporations"]["actions"]} == {"source-approve:us-de-corporations",
+                                                                     "source-deny:us-de-corporations"}
+    assert page["editable"] and page["changes"] == [{"at": "t", "by": "owner:p", "source": "us-co-sos", "change": "hint",
+                                                     "fields": ["hint"]}]
+    assert "secret text" not in json.dumps(page["changes"]) and page["limits"]["hint"] == 1000
+
+
+def test_unreadable_edits_show_the_registry_and_offer_no_edits():
+    class Broken(EditedReader):
+        def bucket_json(self, bucket, name):
+            if name == "source-edits.json":
+                raise PermissionError("no")
+            return super().bucket_json(bucket, name)
+
+    page = SystemView(Broken()).sources_page()
+    assert page["editsError"] == "PermissionError" and not page["editable"]
+    assert "us-pa-dos" in {s["id"] for s in page["sources"]} and not any(s["removable"] for s in page["sources"])

@@ -12,6 +12,13 @@
 #   The owner approves, denies or keeps pending on the Data sources page (owner console,
 #   fresh second-factor code); those decisions override this. Only approved sources are
 #   fetched, and only approved sources' records reach the snapshot, database and site.
+# Owner edits: on the Data sources page the owner can add a source, edit its attributes
+#   (name, country, url, terms_url, licence, access, method, cadence, assessment, verified),
+#   remove one that isn't built and isn't approved, and leave Claude a suggestion (1,000
+#   characters). They are kept in the control bucket (source-edits.json, lc_core.source_edits)
+#   and laid over this file for the page and the owner's actions; jobs, the snapshot and
+#   approvals read only this file. id, approval and pipeline can only change here.
+#   When an edit should become permanent, copy it here and clear it there.
 # pipeline: present once a source is built and running in the daily cycle. The site's
 #   System page and the status views are drawn from these entries, so adding a source
 #   here (with its job and store) is all they need.

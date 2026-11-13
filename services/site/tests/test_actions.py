@@ -25,6 +25,13 @@ class Clock:
 class Backend:
     def __init__(self):
         self.state, self.approvals, self.events, self.runs = {"state": "running", "paused_components": []}, {}, [], []
+        self.edits = {}
+
+    def read_edits(self):
+        return self.edits, 1
+
+    def write_edits(self, edits, generation):
+        self.edits = edits
 
     def read_state(self):
         return dict(self.state), 1
@@ -136,3 +143,35 @@ def test_not_enrolled_or_secret_unavailable(site):
 def test_other_posts_are_refused(site):
     post, code, *_ = site
     assert post({"x": 1}, path="/api/v1/search")[0] == 405
+
+
+def test_editing_a_source_and_leaving_a_suggestion_inline(site):
+    post, code, clock, backend, changed, _ = site
+    status, data = post({"action": "source-edit:us-co-sos", "code": code(),
+                         "fields": {"url": "https://data.colorado.gov", "licence": "CC0-1.0"}})
+    assert status == 200 and data["message"] == "Saved Colorado: url, licence."
+    assert backend.edits["sources"]["us-co-sos"]["fields"] == {"url": "https://data.colorado.gov", "licence": "CC0-1.0"}
+    assert backend.events[-1]["reason"] == "edited url, licence" and backend.events[-1]["fields"] == ["url", "licence"]
+    clock.t += 30
+    hint = "Look at the Business Entities dataset (4ykn-tg5h).\n" + "ü" * 940
+    status, data = post({"action": "source-hint:us-co-sos", "code": code(), "hint": hint, "reason": "a lead"})
+    assert status == 200 and backend.edits["sources"]["us-co-sos"]["hint"] == hint and backend.events[-1]["reason"] == "a lead"
+    clock.t += 30
+    status, data = post({"action": "source-add", "code": code(), "fields": {"name": "Delaware", "country": "US"}})
+    assert status == 200 and "us-delaware" in backend.edits["sources"]
+    clock.t += 30
+    status, _ = post({"action": "source-approve:us-delaware", "code": code(), "reason": "ok"})
+    assert status == 200 and backend.approvals["us-delaware"]["status"] == "approved"
+
+
+def test_registry_changes_are_checked_like_every_action(site):
+    post, code, clock, backend, changed, _ = site
+    assert post({"action": "source-edit:us-co-sos", "code": code(), "fields": {"pipeline": {"job": "x"}}})[0] == 400
+    assert post({"action": "source-remove:gleif", "code": code()})[0] == 400  # approved, and the code is unused...
+    assert post({"action": "source-hint:us-co-sos", "code": code(), "hint": "x" * 1001})[0] == 400
+    assert post({"action": "source-hint:us-co-sos", "code": "000000", "hint": "x"})[0] == 403
+    assert post({"action": "source-hint:us-co-sos", "code": code(), "hint": "x"}, fetch_site="cross-site")[0] == 403
+    assert post({"action": "source-hint:us-co-sos", "code": code(), "hint": "x"}, token="other")[0] == 403
+    assert post({"action": "source-hint:us-co-sos", "code": code(), "hint": "x" * 40000})[0] == 400  # too big
+    assert backend.edits == {} and backend.events == []
+    assert post({"action": "source-hint:us-co-sos", "code": code(), "hint": "x"})[0] == 200  # ...so it still works
