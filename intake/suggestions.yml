@@ -31,10 +31,16 @@ jobs:
           BUCKET: ${{ vars.GCP_PROJECT_ID }}-control
         run: |
           mkdir -p "$RUNNER_TEMP/in"
+          token=$(gcloud auth print-access-token)
+          # A direct object read: lc-reader may get these two objects, but not list the bucket.
           for f in source-edits.json source-approvals.json; do
-            gcloud storage cat "gs://$BUCKET/$f" > "$RUNNER_TEMP/in/$f" 2> "$RUNNER_TEMP/in/$f.err" \
-              || { grep -q "404\|No URLs matched\|not found" "$RUNNER_TEMP/in/$f.err" && echo '{}' > "$RUNNER_TEMP/in/$f" \
-                   || { echo "can't read $f:"; cat "$RUNNER_TEMP/in/$f.err"; exit 1; }; }
+            code=$(curl -sS -o "$RUNNER_TEMP/in/$f" -w '%{http_code}' -H "Authorization: Bearer $token" \
+              "https://storage.googleapis.com/storage/v1/b/$BUCKET/o/$f?alt=media")
+            case "$code" in
+              200) ;;
+              404) echo '{}' > "$RUNNER_TEMP/in/$f" ;;
+              *) echo "can't read $f: HTTP $code"; head -c 300 "$RUNNER_TEMP/in/$f"; exit 1 ;;
+            esac
           done
           python3 - "$RUNNER_TEMP/in" <<'PY'
           import json, sys
