@@ -34,13 +34,13 @@ RELS = {"REL1": {"directoryId": "REL1", "startNode": "529900T8BM49AURSDO55", "en
 
 
 def build(tmp, recs, date="2026-11-07"):
-    from lc_publish.shards import shard_of
-    from lc_publish.snapshot import build_sharded
+    from lc_core.publishing import load as settings
+    from lc_publish.snapshot import build as build_snapshot
 
-    readers = {sid: (lambda n, r=r: {k: v for k, v in r.items() if shard_of(k) == n}) for sid, r in recs.items()}
-    m = build_sharded(readers, tmp, date, relationships=lambda n: {k: v for k, v in RELS.items() if shard_of(k) == n})
-    files = [str(tmp / f["name"]) for f in m["files"] if f.get("kind") != "relationships"]
-    return files, [str(tmp / "relationships.parquet")], {"date": m["date"], "snapshotRoot": m["snapshotRoot"]}
+    m = build_snapshot(recs, tmp, date, settings=settings().snapshots, relationships=RELS)
+    files = [str(tmp / "parts" / f["name"]) for f in m["parts"] if f["kind"] == "entities"]
+    rels = [str(tmp / "parts" / f["name"]) for f in m["parts"] if f["kind"] == "relationships"]
+    return files, rels, {k: m[k] for k in ("date", "snapshotRoot", "records", "relationships", "stats")}
 
 
 class Pool:

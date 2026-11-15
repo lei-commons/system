@@ -49,7 +49,10 @@ DOWNWARD = {  # the other -> this entity
 
 
 class Snapshot:
-    def __init__(self, entity_files: list, meta: dict, relationship_files: list = (), path: str = None):
+    """``entity_files`` are a full snapshot's parts (v2, with a country column) or per-country files (v1, named
+    after their country). ``changes`` are later days' (entity change files, relationship change files), in order."""
+
+    def __init__(self, entity_files: list, meta: dict, relationship_files: list = (), path: str = None, changes=()):
         self.meta = meta
         path = path or os.path.join(tempfile.mkdtemp(prefix="site-db-"), "snapshot.duckdb")
         self._con = duckdb.connect(path)
@@ -58,20 +61,32 @@ class Snapshot:
             settings.append(f"SET extension_directory='{EXTENSIONS}'")
         for setting in settings:
             self._con.execute(setting)
-        self._con.execute(
-            "CREATE TABLE e AS SELECT * EXCLUDE (filename), regexp_extract(filename, '([A-Z]{2})\\.parquet$', 1) AS country "
-            "FROM read_parquet(?, filename = true)", [list(entity_files)])
-        self._con.execute("INSTALL fts")
-        self._con.execute("LOAD fts")
-        # Keep digits: "3M" and "APPLE 12" are names. The default tokenizer drops them.
-        self._con.execute("PRAGMA create_fts_index('e', 'directoryId', 'legalName', 'otherNames', "
-                          "stemmer='none', stopwords='none', ignore='(\\.|[^a-z0-9])+', overwrite=1)")
+        columns = {r[0] for r in self._con.execute("DESCRIBE SELECT * FROM read_parquet(?)", [list(entity_files)]).fetchall()}
+        if "country" in columns:  # v2 parts carry their country
+            self._con.execute("CREATE TABLE e AS SELECT * FROM read_parquet(?)", [list(entity_files)])
+        else:
+            self._con.execute(
+                "CREATE TABLE e AS SELECT * EXCLUDE (filename), regexp_extract(filename, '([A-Z]{2})\\.parquet$', 1) AS country "
+                "FROM read_parquet(?, filename = true)", [list(entity_files)])
         if relationship_files:
             self._con.execute("CREATE TABLE r AS SELECT * FROM read_parquet(?)", [list(relationship_files)])
         else:
             self._con.execute("CREATE TABLE r (relationshipId VARCHAR, startNode VARCHAR, endNode VARCHAR, startId VARCHAR, "
                               "endId VARCHAR, relationshipType VARCHAR, relationshipStatus VARCHAR, percentage VARCHAR, "
                               "periodStart VARCHAR, periodEnd VARCHAR)")
+        # Later days' changes, in order, before the search index: DuckDB's index doesn't follow edits.
+        for entity_changes, relationship_changes in changes:
+            for table, key, files in (("e", "directoryId", entity_changes), ("r", "relationshipId", relationship_changes)):
+                if files:
+                    self._con.execute(f"DELETE FROM {table} WHERE {key} IN (SELECT {key} FROM read_parquet(?) "
+                                      "WHERE op IN ('change', 'delete'))", [list(files)])
+                    self._con.execute(f"INSERT INTO {table} BY NAME SELECT * EXCLUDE (op) FROM read_parquet(?) "
+                                      "WHERE op IN ('add', 'change')", [list(files)])
+        self._con.execute("INSTALL fts")
+        self._con.execute("LOAD fts")
+        # Keep digits: "3M" and "APPLE 12" are names. The default tokenizer drops them.
+        self._con.execute("PRAGMA create_fts_index('e', 'directoryId', 'legalName', 'otherNames', "
+                          "stemmer='none', stopwords='none', ignore='(\\.|[^a-z0-9])+', overwrite=1)")
         self._con.execute("CHECKPOINT")
         self.count = self._con.execute("SELECT count(*) FROM e").fetchone()[0]
         self.relationship_count = self._con.execute("SELECT count(*) FROM r").fetchone()[0]

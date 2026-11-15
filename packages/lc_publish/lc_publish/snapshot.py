@@ -1,23 +1,32 @@
-"""Builds the snapshot from the current records of every source.
+"""Builds the day's snapshot from the current records of every source (format v2, docs/snapshots-v2.md).
 
 A company present in more than one source becomes one record. Register values
 win for register fields (Article 4.3); GLEIF supplies the LEI. Every record says
 which sources it came from (Article 3.3).
+
+Each record goes to a part named for its country and its exact sources, split into
+2, 4, 8... parts by shard when the group is large. Against the previous day's state,
+the build also writes the day's changes (added, changed and deleted records), and the
+new state for tomorrow. Whether the day is published as a full snapshot or as changes
+only is decided by ``plan`` (every ``full_every_days``) and by the size of the changes.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-from collections import defaultdict
+import shutil
+from collections import Counter, defaultdict
 from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+from lc_core.snapshot_format import (CHANGES_KIND, ENTITY_KIND, RELATIONSHIP_CHANGES_KIND, RELATIONSHIP_GROUP,
+                                     RELATIONSHIP_KIND, SCHEMA_VERSION, SHARDS, days_between, group_of, part_name,
+                                     parts_for)
 
-from .merkle import leaf, root
+from .merkle import StreamingRoot, leaf, root
 
-SCHEMA_VERSION = 1
 # Earlier sources win on conflicting fields: registers before GLEIF.
 SOURCES = [
     {"id": "gb-coh", "prefix": "gb", "name": "Companies House basic company data", "licence": "OGL-UK-3.0",
@@ -35,10 +44,16 @@ SOURCES = [
 SCALARS = ["directoryId", "lei", "legalName", "legalForm", "legalJurisdiction", "registrationAuthority",
            "registrationNumber", "legalStatus", "incorporationDate", "dissolutionDate", "recordMode", "registryUrl"]
 NESTED = ["otherNames", "legalAddress", "headquartersAddress", "industryCodes", "labels"]
-COLUMNS = SCALARS + NESTED + ["sources"]
-RELATIONSHIP_FILE = "relationships.parquet"
+COLUMNS = SCALARS + NESTED + ["sources", "country"]
 RELATIONSHIP_COLUMNS = ["relationshipId", "startNode", "endNode", "startId", "endId", "relationshipType",
                         "relationshipStatus", "percentage", "periodStart", "periodEnd"]
+ENTITY_SCHEMA = pa.schema([(c, pa.string()) for c in COLUMNS])
+RELATIONSHIP_SCHEMA = pa.schema([(c, pa.string()) for c in RELATIONSHIP_COLUMNS])
+CHANGE_SCHEMA = pa.schema([("op", pa.string())] + [(c, pa.string()) for c in COLUMNS])
+RELATIONSHIP_CHANGE_SCHEMA = pa.schema([("op", pa.string())] + [(c, pa.string()) for c in RELATIONSHIP_COLUMNS])
+STATE_SCHEMA = pa.schema([("shard", pa.int16()), ("id", pa.string()), ("h", pa.binary(16))])
+STATE_FILES = {ENTITY_KIND: "entities.parquet", RELATIONSHIP_KIND: "relationships.parquet"}
+STATS_TOP = {"byCountry": 30, "bySources": 10, "byStatus": 15}
 
 
 def merge(records_by_source: dict) -> dict:
@@ -72,16 +87,31 @@ def normalise_status(value):
     return STATUS_SPELLINGS.get(value, value) if isinstance(value, str) else value
 
 
-def _row(record: dict) -> dict:
-    row = {c: record.get(c) for c in SCALARS}
+def entity_row(record: dict) -> dict:
+    """The published row: exactly the Parquet columns, all strings. A record's leaf is the hash of this."""
+    row = {}
+    for c in SCALARS:
+        value = record.get(c)
+        row[c] = None if value is None else str(value)
+    row["legalStatus"] = normalise_status(row["legalStatus"])
     for c in NESTED:
         value = record.get(c)
         row[c] = json.dumps(value, sort_keys=True, ensure_ascii=False) if value not in (None, [], {}) else None
     row["sources"] = ",".join(record["sources"])
+    row["country"] = country_of(record)
     return row
 
 
-def _sha256(path: Path) -> str:
+def relationship_row(key: str, rel: dict, lei_to_id: dict) -> dict:
+    row = {"relationshipId": key, "startId": lei_to_id.get(rel.get("startNode")), "endId": lei_to_id.get(rel.get("endNode"))}
+    for c in RELATIONSHIP_COLUMNS[1:]:
+        if c not in row:
+            value = rel.get(c)
+            row[c] = None if value is None else str(value)
+    return row
+
+
+def sha256_file(path: Path) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
@@ -89,106 +119,293 @@ def _sha256(path: Path) -> str:
     return "sha256:" + h.hexdigest()
 
 
-def _write_relationships(read, lei_to_id: dict, out: Path, shards: int) -> dict:
-    """Write relationships.parquet, resolving each LEI to its directory ID where we hold it."""
-    schema = pa.schema([(c, pa.string()) for c in RELATIONSHIP_COLUMNS])
-    path = out / RELATIONSHIP_FILE
-    leaves, count, resolved = [], 0, 0
-    with pq.ParquetWriter(path, schema, compression="zstd") as writer:
-        for n in range(shards):
-            rows = []
-            for key in sorted(shard := read(n)):
-                rel = shard[key]
-                row = {"relationshipId": key, "startId": lei_to_id.get(rel.get("startNode")),
-                       "endId": lei_to_id.get(rel.get("endNode"))}
-                for c in RELATIONSHIP_COLUMNS[1:]:
-                    if c not in row:
-                        value = rel.get(c)
-                        row[c] = None if value is None else str(value)
-                rows.append(row)
-                leaves.append(leaf(row))
-                resolved += bool(row["startId"] and row["endId"])
-            if rows:
-                writer.write_table(pa.table({c: [r[c] for r in rows] for c in RELATIONSHIP_COLUMNS}, schema=schema))
-            count += len(rows)
-    return {"name": RELATIONSHIP_FILE, "kind": "relationships", "records": count, "bothEndsInDirectory": resolved,
-            "root": root(leaves), "sha256": _sha256(path)}
+def _table(rows, schema):
+    return pa.table({f.name: [r.get(f.name) for r in rows] for f in schema}, schema=schema)
 
 
-def build_sharded(readers: dict, out: Path, date: str, shards: int = 256, relationships=None, decision_log=None) -> dict:
-    """Write one Parquet file per country and return the manifest, a shard at a time.
+def _top(counter: Counter, n=None) -> list:
+    ordered = sorted(counter.items(), key=lambda kv: (-kv[1], kv[0] is None, kv[0] or ""))
+    return [{"value": v, "records": c} for v, c in (ordered[:n] if n else ordered)]
 
-    ``readers`` maps a source ID to ``read(n)``, which returns that source's
-    records in shard ``n``. A company has the same directory ID, and so the same
-    shard, in every source, so merging shard by shard merges everything. Only
-    one shard is in memory at once. Records are ordered by shard, then ID.
+
+class StateReader:
+    """The previous day's state: (directory id -> 16-byte hash) for each shard, read a shard at a time."""
+
+    def __init__(self, path: Path):
+        self.path = path
+        pq.ParquetFile(path)  # unreadable: fail now, before anything is built from it
+
+    def shard(self, n: int) -> dict:
+        table = pq.read_table(self.path, filters=[("shard", "=", n)], columns=["id", "h"])
+        return dict(zip(table.column("id").to_pylist(), table.column("h").to_pylist()))
+
+
+class _ChangeWriter:
+    """Writes changes.000.parquet, changes.001.parquet, ... with at most ``max_rows`` rows each."""
+
+    def __init__(self, directory: Path, stem: str, kind: str, schema, max_rows: int):
+        self.directory, self.stem, self.kind, self.schema, self.max_rows = directory, stem, kind, schema, max_rows
+        self.files, self._writer, self._rows, self._root = [], None, 0, None
+
+    def _open(self):
+        name = f"{self.stem}.{len(self.files):03d}.parquet"
+        self._writer = pq.ParquetWriter(self.directory / name, self.schema, compression="zstd")
+        self.files.append({"name": name, "kind": self.kind, "records": 0})
+        self._rows, self._root = 0, StreamingRoot()
+
+    def _close(self):
+        if self._writer:
+            self._writer.close()
+            entry = self.files[-1]
+            entry.update(records=self._rows, root=self._root.hexdigest())
+            self._writer = None
+
+    def write(self, rows: list):
+        while rows:
+            if self._writer is None or self._rows >= self.max_rows:
+                self._close()
+                self._open()
+            take = rows[:self.max_rows - self._rows]
+            rows = rows[len(take):]
+            self._writer.write_table(_table(take, self.schema))
+            for r in take:
+                self._root.add(leaf(r))
+            self._rows += len(take)
+
+    def finish(self) -> list:
+        self._close()
+        for entry in self.files:
+            path = self.directory / entry["name"]
+            entry.update(sha256=sha256_file(path), bytes=path.stat().st_size)
+        return self.files
+
+
+class _Parts:
+    """The parts of one kind (entities or relationships): a writer, a streaming root and a count per part."""
+
+    def __init__(self, directory: Path, schema):
+        self.directory, self.schema = directory, schema
+        self.writers, self.roots, self.records, self.info = {}, {}, Counter(), {}
+
+    def add(self, name: str, rows: list, leaves: list, info: dict):
+        if name not in self.writers:
+            self.writers[name] = pq.ParquetWriter(self.directory / name, self.schema, compression="zstd")
+            self.roots[name] = StreamingRoot()
+            self.info[name] = info
+        self.writers[name].write_table(_table(rows, self.schema))
+        for h in leaves:
+            self.roots[name].add(h)
+        self.records[name] += len(rows)
+
+    def close(self):
+        for writer in self.writers.values():
+            writer.close()
+
+    def entries(self) -> list:
+        return [{"name": name, **self.info[name], "records": self.records[name], "root": self.roots[name].hexdigest()}
+                for name in sorted(self.writers)]
+
+
+def plan(date: str, previous: dict | None, settings, force_full: str = None, shards: int = SHARDS) -> dict:
+    """Decide the day: full or changes, its base and the part layout. ``previous`` is the last published v2 manifest."""
+    target = settings.part_target_records
+    if previous is None:
+        return {"kind": "full", "why": force_full or "no previous state", "base": None, "layout": {}}
+    if (previous.get("layout") or {}).get("shards", SHARDS) != shards:
+        force_full = force_full or "the shard count changed"
+    base = {"date": previous["date"], "snapshotRoot": previous["snapshotRoot"]}
+    since = days_between(previous["anchor"], date)
+    layout = dict((previous.get("layout") or {}).get("groups") or {})
+    if force_full or since >= settings.full_every_days:
+        counts = Counter()
+        for p in previous.get("parts", []):
+            counts[p["group"]] += p["records"]
+        return {"kind": "full", "why": force_full or f"{since} days since the last full snapshot", "base": base,
+                "layout": {g: parts_for(c, target) for g, c in sorted(counts.items())}}
+    return {"kind": "changes", "why": f"{since} days since the last full snapshot", "base": base, "layout": layout}
+
+
+def build_sharded(readers: dict, out: Path, date: str, *, settings, previous: dict = None, state: dict = None,
+                  relationships=None, decision_log=None, shards: int = SHARDS, force_full: str = None) -> dict:
+    """Build the day into ``out`` and return its manifest.
+
+    ``readers`` maps a source id to ``read(n)``, its records in shard n. ``previous`` is the last
+    published v2 manifest and ``state`` its {kind: StateReader}; with neither, the day is a full
+    snapshot with no base. ``out`` gets: parts/ (every part), day/ (the change files),
+    state/ (tomorrow's state), manifest.json and NOTICE.txt.
     """
-    out.mkdir(parents=True, exist_ok=True)
-    schema = pa.schema([(c, pa.string()) for c in COLUMNS])
-    writers, leaves, per_country, lei_to_id = {}, defaultdict(list), defaultdict(int), {}
-    counts = {s["id"]: 0 for s in SOURCES}
-    total = shared = 0
+    if (previous is None) != (state is None):
+        raise ValueError("previous and state go together")
+    decided = plan(date, previous, settings, force_full, shards)
+    layout = decided["layout"]
+    for sub in ("parts", "day", "state"):
+        shutil.rmtree(out / sub, ignore_errors=True)
+        (out / sub).mkdir(parents=True, exist_ok=True)
+    parts = {ENTITY_KIND: _Parts(out / "parts", ENTITY_SCHEMA), RELATIONSHIP_KIND: _Parts(out / "parts", RELATIONSHIP_SCHEMA)}
+    changes = {ENTITY_KIND: _ChangeWriter(out / "day", "changes", CHANGES_KIND, CHANGE_SCHEMA, settings.change_file_max_rows),
+               RELATIONSHIP_KIND: _ChangeWriter(out / "day", "relationship-changes", RELATIONSHIP_CHANGES_KIND,
+                                                RELATIONSHIP_CHANGE_SCHEMA, settings.change_file_max_rows)}
+    state_writers = {kind: pq.ParquetWriter(out / "state" / name, STATE_SCHEMA, compression="zstd")
+                     for kind, name in STATE_FILES.items()}
+    counted = Counter()
+    per_source = {s["id"]: 0 for s in SOURCES}
+    stats = {"byCountry": Counter(), "bySources": Counter(), "byStatus": Counter(), "relationshipTypes": Counter()}
+    lei_to_id = {}
+    total = shared = resolved = 0
+
+    def diff(kind, n, rows, key, leaves):
+        """This shard's changes against the previous state, and its new state."""
+        old = state[kind].shard(n) if state else None
+        out_rows, ids, hashes = [], [], []
+        for row, h in zip(rows, leaves):
+            rid = row[key]
+            ids.append(rid)
+            hashes.append(h[:16])
+            if old is None:
+                continue
+            before = old.pop(rid, None)
+            if before is None:
+                out_rows.append({"op": "add", **row})
+                counted[(kind, "add")] += 1
+            elif before != h[:16]:
+                out_rows.append({"op": "change", **row})
+                counted[(kind, "change")] += 1
+        for rid in (old or {}):
+            out_rows.append({"op": "delete", key: rid})
+            counted[(kind, "delete")] += 1
+        if out_rows:
+            out_rows.sort(key=lambda r: r[key])
+            changes[kind].write(out_rows)
+        if ids:
+            state_writers[kind].write_table(pa.table({"shard": [n] * len(ids), "id": ids, "h": hashes}, schema=STATE_SCHEMA))
+
     try:
         for n in range(shards):
             shard = {sid: readers[sid](n) for sid in readers}
             for sid, records in shard.items():
-                counts[sid] += len(records)
+                per_source[sid] += len(records)
             merged = merge(shard)
-            by_country = defaultdict(list)
-            for directory_id in sorted(merged):
-                record = merged[directory_id]
-                if record.get("legalStatus") in STATUS_SPELLINGS:  # before its Merkle leaf, so the root covers what is published
-                    record["legalStatus"] = normalise_status(record["legalStatus"])
-                by_country[country_of(record)].append(record)
-                if record.get("lei"):
-                    lei_to_id[record["lei"]] = directory_id
-                shared += len(record["sources"]) > 1
-            total += len(merged)
-            for country, records in by_country.items():
-                if country not in writers:
-                    writers[country] = pq.ParquetWriter(out / f"{country}.parquet", schema, compression="zstd")
-                rows = [_row(r) for r in records]
-                writers[country].write_table(pa.table({c: [r[c] for r in rows] for c in COLUMNS}, schema=schema))
-                leaves[country].extend(leaf(r) for r in records)
-                per_country[country] += len(records)
+            rows = [entity_row(merged[d]) for d in sorted(merged)]
+            leaves = [leaf(r) for r in rows]
+            part_rows, part_leaves, part_info = defaultdict(list), defaultdict(list), {}
+            for row, h in zip(rows, leaves):
+                if row["lei"]:
+                    lei_to_id[row["lei"]] = row["directoryId"]
+                shared += "," in row["sources"]
+                group = group_of(row["country"], row["sources"])
+                of = layout.get(group, 1)
+                name = part_name(group, n % of, of)
+                part_rows[name].append(row)
+                part_leaves[name].append(h)
+                part_info.setdefault(name, {"kind": ENTITY_KIND, "group": group, "country": row["country"],
+                                            "sources": row["sources"].split(","), "part": n % of, "of": of})
+                stats["byCountry"][row["country"]] += 1
+                stats["bySources"][row["sources"]] += 1
+                stats["byStatus"][row["legalStatus"]] += 1
+            for name in sorted(part_rows):
+                parts[ENTITY_KIND].add(name, part_rows[name], part_leaves[name], part_info[name])
+            total += len(rows)
+            diff(ENTITY_KIND, n, rows, "directoryId", leaves)
+        rel_total = 0
+        if relationships is not None:
+            of = layout.get(RELATIONSHIP_GROUP, 1)
+            for n in range(shards):
+                records = relationships(n)
+                rows = [relationship_row(k, records[k], lei_to_id) for k in sorted(records)]
+                leaves = [leaf(r) for r in rows]
+                if rows:
+                    parts[RELATIONSHIP_KIND].add(part_name(RELATIONSHIP_GROUP, n % of, of), rows, leaves,
+                                                 {"kind": RELATIONSHIP_KIND, "group": RELATIONSHIP_GROUP, "part": n % of, "of": of})
+                for r in rows:
+                    resolved += bool(r["startId"] and r["endId"])
+                    stats["relationshipTypes"][r["relationshipType"]] += 1
+                rel_total += len(rows)
+                diff(RELATIONSHIP_KIND, n, rows, "relationshipId", leaves)
+        elif state:  # no relationships today: every one from yesterday is deleted
+            for n in range(shards):
+                diff(RELATIONSHIP_KIND, n, [], "relationshipId", [])
     finally:
-        for writer in writers.values():
-            writer.close()
-
+        for p in parts.values():
+            p.close()
+        for w in state_writers.values():
+            w.close()
+    change_files = changes[ENTITY_KIND].finish() + changes[RELATIONSHIP_KIND].finish()
+    part_entries = parts[ENTITY_KIND].entries() + parts[RELATIONSHIP_KIND].entries()
+    change_total = sum(counted.values())
+    kind, why = decided["kind"], decided["why"]
+    if kind == "changes" and change_total > settings.full_when_changes_exceed * max(1, total + rel_total):
+        kind, why = "full", f"{change_total} changes exceed {settings.full_when_changes_exceed:.0%} of the records"
     files = []
-    for country in sorted(writers):
-        path = out / f"{country}.parquet"
-        files.append({"name": path.name, "country": country, "records": per_country[country],
-                      "root": root(leaves[country]), "sha256": _sha256(path)})
-    if relationships is not None:
-        files.append(_write_relationships(relationships, lei_to_id, out, shards))
+    if kind == "full":
+        for p in part_entries:
+            path = out / "parts" / p["name"]
+            digest = sha256_file(path)
+            p.update(sha256=digest, bytes=path.stat().st_size, object=f"parts/{digest.split(':', 1)[1]}.parquet")
+            files.append({k: p[k] for k in ("name", "kind", "records", "root", "sha256", "bytes", "object")}
+                         | ({"country": p["country"]} if "country" in p else {}))
+    for c in change_files:
+        c["object"] = f"{date}/{c['name']}"
+        files.append(dict(c))
+    if kind != "full":  # only the changes are published today; the parts' roots stay in the manifest
+        for p in part_entries:
+            (out / "parts" / p["name"]).unlink()
     manifest = {
-        "date": date,
         "schemaVersion": SCHEMA_VERSION,
+        "date": date,
+        "kind": kind,
+        "why": why,
+        "base": decided["base"],
+        "anchor": date if kind == "full" else previous["anchor"],
         "records": total,
-        "recordsPerSource": {k: v for k, v in counts.items() if v},  # sources with records only
+        "recordsPerSource": {k: v for k, v in per_source.items() if v},
         "inMoreThanOneSource": shared,
-        "relationships": next((f["records"] for f in files if f.get("kind") == "relationships"), 0),
+        "relationships": rel_total,
+        "relationshipsBothEndsInDirectory": resolved,
+        "snapshotRoot": root([bytes.fromhex(p["root"].split(":", 1)[1]) for p in part_entries]),
+        "parts": part_entries,
+        "changes": {"files": [c["name"] for c in change_files], "added": counted[(ENTITY_KIND, "add")],
+                    "changed": counted[(ENTITY_KIND, "change")], "deleted": counted[(ENTITY_KIND, "delete")],
+                    "relationshipsAdded": counted[(RELATIONSHIP_KIND, "add")],
+                    "relationshipsChanged": counted[(RELATIONSHIP_KIND, "change")],
+                    "relationshipsDeleted": counted[(RELATIONSHIP_KIND, "delete")]},
         "files": files,
-        "snapshotRoot": root([bytes.fromhex(f["root"].split(":", 1)[1]) for f in files]),
+        "layout": {"targetRecords": settings.part_target_records, "shards": shards,
+                   "groups": {p["group"]: p["of"] for p in part_entries}},
+        "stats": {k: _top(v, STATS_TOP.get(k)) for k, v in stats.items()},
+        "settings": {"fullEveryDays": settings.full_every_days, "fullWhenChangesExceed": settings.full_when_changes_exceed},
         "sources": [{k: s[k] for k in ("id", "name", "licence", "attribution")} for s in SOURCES],
     }
     if decision_log:  # the seal of the decision log up to yesterday, anchored with the manifest
         manifest["decisionLog"] = decision_log
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     notice = ["lei-commons snapshot " + date, "",
-              "An independent open directory. Not affiliated with GLEIF, and does not issue LEIs.", ""]
+              "An independent open directory. Not affiliated with GLEIF, and does not issue LEIs.", "",
+              ("A full snapshot." if kind == "full" else
+               f"Changes since {decided['base']['date']}. The whole state is the full snapshot of {manifest['anchor']} "
+               "plus each day's changes since; python -m lc_publish.rebuild rebuilds and checks it."), ""]
     notice += [f"{s['name']} ({s['licence']}). {s['attribution']}".strip() for s in SOURCES]
     (out / "NOTICE.txt").write_text("\n".join(notice) + "\n", encoding="utf-8")
+    (out / "state" / "state.json").write_text(json.dumps(
+        {"date": date, "snapshotRoot": manifest["snapshotRoot"], "schemaVersion": SCHEMA_VERSION,
+         "files": {name: sha256_file(out / "state" / name) for name in STATE_FILES.values()}}, indent=2) + "\n")
     return manifest
 
 
-def build(records_by_source: dict, out: Path, date: str) -> dict:
+def build(records_by_source: dict, out: Path, date: str, *, settings, previous=None, state=None, relationships=None,
+          shards: int = SHARDS) -> dict:
     """The same, from records already in memory: {source ID: {directory ID: record}}."""
     from .shards import shard_of
 
     by_shard = {sid: defaultdict(dict) for sid in records_by_source}
     for sid, records in records_by_source.items():
         for directory_id, record in records.items():
-            by_shard[sid][shard_of(directory_id)][directory_id] = record
-    return build_sharded({sid: (lambda n, b=by_shard[sid]: dict(b.get(n, {}))) for sid in by_shard}, out, date)
+            by_shard[sid][shard_of(directory_id) % shards][directory_id] = record
+    rel = None
+    if relationships is not None:
+        rel_shards = defaultdict(dict)
+        for key, value in relationships.items():
+            rel_shards[shard_of(key) % shards][key] = value
+        rel = lambda n: dict(rel_shards.get(n, {}))  # noqa: E731
+    return build_sharded({sid: (lambda n, b=by_shard[sid]: dict(b.get(n, {}))) for sid in by_shard}, out, date,
+                         settings=settings, previous=previous, state=state, relationships=rel, shards=shards)
+

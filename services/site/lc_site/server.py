@@ -202,27 +202,61 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def load_latest(bucket_name: str):
-    """Download the latest snapshot's files and load them. Returns None if there isn't one."""
-    from google.cloud import storage
+    """Download the latest snapshot's files and load them. Returns None if there isn't one.
 
-    from .data import Snapshot
+    A v2 day is its full snapshot's parts plus each later day's changes (docs/snapshots-v2.md);
+    every file is checked against the SHA-256 in its manifest first."""
+    from google.cloud import storage
 
     bucket = storage.Client().bucket(bucket_name)
     pointer = bucket.blob("latest.json")
     if not pointer.exists():
         return None
-    latest = json.loads(pointer.download_as_bytes())
+    return load_from(bucket, json.loads(pointer.download_as_bytes()))
+
+
+def load_from(bucket, latest: dict):
+    import hashlib
+
+    from lc_core.snapshot_format import from_anchor
+
+    from .data import Snapshot
+
     target = tempfile.mkdtemp(prefix="snapshot-")
-    paths = {"files": [], "relationships": []}
-    for group in paths:
-        for name in latest.get(group, []):
-            local = os.path.join(target, name)
-            bucket.blob(f"{latest['prefix']}/{name}").download_to_filename(local)
-            paths[group].append(local)
-    snap = Snapshot(paths["files"], {k: latest[k] for k in ("date", "snapshotRoot")}, paths["relationships"])
-    for local in paths["files"] + paths["relationships"]:
-        os.remove(local)  # loaded into the database; the disk is memory on Cloud Run
-    return snap
+    downloaded = []
+
+    def fetch(obj, sha256=None):
+        local = os.path.join(target, obj.replace("/", "_"))
+        bucket.blob(obj).download_to_filename(local)
+        downloaded.append(local)
+        if sha256:
+            with open(local, "rb") as f:
+                if "sha256:" + hashlib.sha256(f.read()).hexdigest() != sha256:
+                    raise ValueError(f"{obj} doesn't match its manifest")
+        return local
+
+    def read_manifest(date):
+        blob = bucket.blob(f"{date}/manifest.json")
+        return json.loads(blob.download_as_bytes()) if blob.exists() else None
+
+    try:
+        if latest.get("schemaVersion", 1) >= 2:
+            manifest = read_manifest(latest["date"])
+            chain = from_anchor(read_manifest, manifest)
+            anchor, steps = chain[0], chain[1:]
+            files = [fetch(f["object"], f["sha256"]) for f in anchor["files"] if f["kind"] == "entities"]
+            rels = [fetch(f["object"], f["sha256"]) for f in anchor["files"] if f["kind"] == "relationships"]
+            changes = [([fetch(f["object"], f["sha256"]) for f in m["files"] if f["kind"] == "changes"],
+                        [fetch(f["object"], f["sha256"]) for f in m["files"] if f["kind"] == "relationship-changes"])
+                       for m in steps]
+            return Snapshot(files, {k: manifest[k] for k in ("date", "snapshotRoot")}, rels, changes=changes)
+        files = [fetch(f"{latest['prefix']}/{name}") for name in latest.get("files", [])]
+        rels = [fetch(f"{latest['prefix']}/{name}") for name in latest.get("relationships", [])]
+        return Snapshot(files, {k: latest[k] for k in ("date", "snapshotRoot")}, rels)
+    finally:
+        for local in downloaded:  # loaded into the database; the disk is memory on Cloud Run
+            if os.path.exists(local):
+                os.remove(local)
 
 
 def make_server(snapshot, owners, audience, address, iap=verify_iap, system=None, decisions=None, downloads=None,

@@ -1,4 +1,4 @@
-"""Build today's snapshot from the data bucket:
+"""Build a full snapshot from the data bucket, locally (the daily cycle uses lc_publish.job):
 
     python -m lc_publish --bucket lei-commons-prod-data --out out --date 2026-11-07
 """
@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 from lc_core.control import SystemHalted, require_running
+from lc_core.publishing import load as load_settings
 
 from .snapshot import SOURCES, build_sharded
 
@@ -47,9 +48,9 @@ def main(argv=None) -> int:
 
     bucket = storage.Client().bucket(a.bucket)
     manifest = build_sharded({s["id"]: shard_reader(bucket, s["prefix"]) for s in SOURCES}, Path(a.out), a.date,
-                             relationships=shard_reader(bucket, "gleif-rr"))
-    print(json.dumps({k: manifest[k] for k in ("date", "records", "recordsPerSource", "inMoreThanOneSource", "relationships",
-                                               "snapshotRoot")}))
+                             settings=load_settings().snapshots, relationships=shard_reader(bucket, "gleif-rr"))
+    print(json.dumps({k: manifest[k] for k in ("date", "kind", "records", "recordsPerSource", "inMoreThanOneSource",
+                                               "relationships", "snapshotRoot")}))
     return 0
 
 

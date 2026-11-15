@@ -1,5 +1,7 @@
 // Downloads: the daily snapshots, their files and the fingerprints to check them by.
 // Files stream from the private snapshots bucket through this site, behind the owner's login.
+// A full snapshot's files are its parts (by country and sources); a changes day's files hold
+// only what changed since the day before (docs/snapshots-v2.md).
 import { api, errorBox, flag, fmt, h, sourceName } from "../lib.js";
 
 function size(bytes) {
@@ -12,15 +14,32 @@ function fact(label, value, mono = false) {
   return h("div", {}, h("dt", {}, label), h("dd", { class: mono ? "mono" : "", style: mono ? { wordBreak: "break-all" } : {} }, value));
 }
 
+const ABOUT = { "manifest.json": "Manifest: counts, Merkle roots, file hashes",
+  "manifest.json.sigstore.json": "The manifest's Sigstore signature", "NOTICE.txt": "Licences and attribution" };
+
+function contents(f) {
+  if (f.kind === "about") return ABOUT[f.name] || "";
+  if (f.kind === "relationships") return "Relationships between entities";
+  if (f.kind === "changes") return "Records added, changed or deleted that day";
+  if (f.kind === "relationship-changes") return "Relationships added, changed or deleted that day";
+  const sources = (f.name.split(".")[1] || "").split("_").filter(Boolean).map(sourceName).join(" + ");
+  const where = f.country === "XX" ? "No country recorded" : h("span", {}, h("span", { class: "flag" }, flag(f.country)), " ", f.country);
+  return sources ? h("span", {}, where, h("span", { class: "muted" }, ` · ${sources}`)) : where;
+}
+
+function changeSummary(c) {
+  return `${fmt(c.added)} added, ${fmt(c.changed)} changed, ${fmt(c.deleted)} deleted`
+    + (c.relationshipsAdded || c.relationshipsChanged || c.relationshipsDeleted
+      ? `; relationships ${fmt(c.relationshipsAdded)} added, ${fmt(c.relationshipsChanged)} changed, ${fmt(c.relationshipsDeleted)} deleted` : "");
+}
+
 function filesTable(snap) {
   const rows = [...snap.files].sort((a, b) => (a.kind === "about") - (b.kind === "about") || (b.records || 0) - (a.records || 0));
   return h("table", { class: "data" },
     h("tr", {}, ...["File", "Contents", "Records", "Size", ""].map((c) => h("th", {}, c))),
     ...rows.map((f) => h("tr", {},
       h("td", { class: "mono" }, f.name),
-      h("td", {}, f.kind === "relationships" ? "Relationships between entities"
-        : f.kind === "about" ? (f.name === "manifest.json" ? "Manifest: counts, Merkle roots, file hashes" : "Licences and attribution")
-          : f.country === "XX" ? "No country recorded" : h("span", {}, h("span", { class: "flag" }, flag(f.country)), " ", f.country)),
+      h("td", {}, contents(f)),
       h("td", { class: "n" }, f.records === undefined || f.records === null ? "" : fmt(f.records)),
       h("td", { class: "n" }, size(f.bytes)),
       h("td", {}, h("a", { class: "btn", href: `/download/${snap.date}/${encodeURIComponent(f.name)}`, download: "" }, "Download")))));
@@ -36,7 +55,7 @@ export async function render(root, arg) {
   }
   const snap = list.find((s) => s.date === arg) || list[0];
   const head = h("div", { class: "toolbar" }, h("h1", { style: { margin: 0, fontSize: "28px", letterSpacing: "-.02em" } }, "Data"),
-    h("span", { class: "muted" }, "Daily snapshots as Parquet, one file per country, signed and recorded in Rekor"));
+    h("span", { class: "muted" }, "A full snapshot every few days, and each day's changes in between: Parquet, signed and recorded in Rekor"));
   if (!snap) {
     root.replaceChildren(h("div", { class: "wrap" }, head, h("p", { class: "empty" }, "No snapshots yet.")));
     return;
@@ -44,17 +63,22 @@ export async function render(root, arg) {
   const log = snap.decisionLog;
   root.replaceChildren(h("div", { class: "wrap" }, head,
     h("div", { class: "toolbar" }, ...list.map((s) => h("a", { class: `chip${s.date === snap.date ? " on" : ""}`, href: `#/data/${s.date}` },
-      s.date, h("span", { class: "count" }, fmt(s.records))))),
+      s.date, s.kind === "changes" ? h("span", { class: "count" }, "changes") : h("span", { class: "count" }, `full · ${fmt(s.records)}`)))),
     h("div", { class: "grid", style: { gap: "18px" } },
-      h("section", { class: "card card-pad" }, h("h3", {}, `Snapshot ${snap.date}`),
+      h("section", { class: "card card-pad" }, h("h3", {}, snap.kind === "changes" ? `Changes on ${snap.date}` : `Full snapshot ${snap.date}`),
+        snap.kind === "changes" ? h("p", { class: "muted" }, `The changes since ${snap.base}. That day's whole directory is the full snapshot of `,
+          h("a", { href: `#/data/${snap.anchor}` }, snap.anchor), " plus each day's changes since; ",
+          h("code", {}, "python -m lc_publish.rebuild"), " rebuilds it and checks it against the signed root below.") : null,
         h("dl", { class: "facts" },
+          snap.changes ? fact(snap.base ? `Changes since ${snap.base}` : "Changes", changeSummary(snap.changes)) : null,
           fact("Records", fmt(snap.records)), fact("Relationships", fmt(snap.relationships)),
           fact("Files", `${fmt(snap.files.length)} · ${size(snap.bytes)}`),
           ...Object.entries(snap.recordsPerSource || {}).map(([k, v]) => fact(`From ${sourceName(k)}`, fmt(v))),
           fact("Snapshot root", snap.snapshotRoot, true),
           log ? fact(`Decision log through ${log.day}`, `${log.head} · ${fmt(log.events)} events that day`, true) : null),
         h("p", { class: "muted", style: { marginBottom: 0 } },
-          "To check a file, compare its SHA-256 with the manifest. To check the manifest, verify its Sigstore signature, ",
-          "which is attached to the draft release of the same date in lei-commons/releases.")),
+          "To check a file, compare its SHA-256 with the manifest. To check the manifest, verify its Sigstore signature ",
+          "(listed here once the release has signed it, and attached to the draft release of the same date in lei-commons/releases). ",
+          "The snapshot root covers the whole directory that day, on change days too.")),
       h("section", { class: "card card-pad" }, h("h3", {}, "Files"), filesTable(snap)))));
 }
