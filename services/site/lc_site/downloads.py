@@ -14,7 +14,9 @@ import json
 import re
 import time
 
-from lc_core.snapshot_format import CHANGE_FILE, OBJECT, is_v2
+from urllib.parse import quote
+
+from lc_core.snapshot_format import CHANGE_FILE, OBJECT, FormatError, from_anchor, is_v2
 
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 NAME = re.compile(r"^[A-Za-z0-9_.-]{1,80}$")
@@ -70,6 +72,50 @@ class SnapshotFiles:
                                                                                  "relationshipsDeleted")})
             out.append(entry)
         return {"snapshots": out}
+
+    def recipe(self, date: str):
+        """Everything needed for the whole directory on ``date``, which may have published only its changes:
+        its full snapshot's files, then each later day's change files in order, each with its download URL and
+        SHA-256, and every manifest on the way (to check them by). (status, body)."""
+        if not DATE.match(date or ""):
+            return 404, {"error": "not a date"}
+        manifest = self._cached(f"manifest:{date}", lambda: self._manifest(date))
+        if manifest is None:
+            return 404, {"error": f"no snapshot for {date}"}
+
+        def link(day, f):
+            return {k: f.get(k) for k in ("name", "kind", "country", "records", "sha256", "bytes")} | {
+                "url": f"/download/{day}/{quote(f['name'])}"}
+
+        def manifest_link(day):
+            return f"/download/{day}/manifest.json"
+
+        if not is_v2(manifest):  # an old-format day is a full copy by itself
+            return 200, {"date": date, "kind": "full", "snapshotRoot": manifest.get("snapshotRoot"),
+                         "records": manifest.get("records"), "relationships": manifest.get("relationships"),
+                         "anchor": {"date": date, "manifest": manifest_link(date),
+                                    "files": [link(date, f) for f in manifest.get("files", [])]}, "steps": []}
+        try:
+            chain = from_anchor(lambda d: self._cached(f"manifest:{d}", lambda: self._manifest(d)) if DATE.match(d) else None,
+                                manifest)
+        except FormatError as exc:
+            return 409, {"error": f"{date} can't be assembled: {exc}"}
+        anchor, steps = chain[0], chain[1:]
+        parts = [f for f in anchor["files"] if f["kind"] in ("entities", "relationships")]
+        return 200, {
+            "date": date, "kind": manifest["kind"], "snapshotRoot": manifest["snapshotRoot"],
+            "records": manifest["records"], "relationships": manifest["relationships"],
+            "anchor": {"date": anchor["date"], "manifest": manifest_link(anchor["date"]),
+                       "files": [link(anchor["date"], f) for f in parts]},
+            "steps": [{"date": m["date"], "manifest": manifest_link(m["date"]),
+                       "files": [link(m["date"], f) for f in m["files"] if f["kind"] in ("changes", "relationship-changes")]}
+                      for m in steps],
+            "bytes": sum(f.get("bytes") or 0 for f in parts) + sum(f.get("bytes") or 0 for m in steps for f in m["files"]
+                                                                  if f["kind"] in ("changes", "relationship-changes")),
+            "how": "Load the full snapshot's files, then apply each day's change files in order: delete the ids marked "
+                   "change or delete, then insert the rows marked add or change. python -m lc_publish.rebuild does this "
+                   "and checks every root against the signed manifest.",
+        }
 
     def blob(self, date: str, name: str):
         """The object to stream, or None if the request isn't for a file that day's manifest lists."""

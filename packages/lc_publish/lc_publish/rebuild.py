@@ -3,7 +3,10 @@
     python -m lc_publish.rebuild --date 2026-11-20 --bucket lei-commons-prod-snapshots [--out DIR]
     python -m lc_publish.rebuild --date 2026-11-20 --dir ./mirror [--require-signature]
 
-``--dir`` is a copy of the bucket's layout (latest.json, parts/, <date>/...). The tool:
+``--dir`` is a copy of the bucket's layout (parts/, <date>/...), or files as downloaded from the
+site's recipe API or the GitHub releases: one folder per day, holding its manifest and its files by
+name (a full snapshot's parts in its own day's folder). Every file is checked by its SHA-256 either
+way. The tool:
 1. walks the day's ``base`` links back to its full snapshot (the ``anchor``), checking that
    each day names the previous day's root;
 2. checks each manifest's Sigstore signature where present (always, with --require-signature);
@@ -60,11 +63,11 @@ class DirStore:
         path = self.root / date / "manifest.json.sigstore.json"
         return path if path.exists() else None
 
-    def fetch(self, obj):
-        path = self.root / obj
-        if not path.exists():
-            raise VerifyError(f"{obj} is missing")
-        return path
+    def fetch(self, obj, fallback=None):
+        for candidate in (obj, fallback):
+            if candidate and (self.root / candidate).exists():
+                return self.root / candidate
+        raise VerifyError(f"{obj} is missing" + (f" (and so is {fallback})" if fallback else ""))
 
     def done(self, path):
         pass
@@ -94,7 +97,7 @@ class BucketStore:
     def signature_path(self, date):
         return self._download(f"{date}/manifest.json.sigstore.json", self.work / date / "manifest.json.sigstore.json")
 
-    def fetch(self, obj):
+    def fetch(self, obj, fallback=None):
         path = self._download(obj, self.work / "files" / obj.replace("/", "_"))
         if path is None:
             raise VerifyError(f"{obj} is missing")
@@ -119,9 +122,9 @@ def check_signature(store, date, required, identity=SIGNER, issuer=ISSUER) -> st
     return "verified"
 
 
-def _rows(store, entry, kinds):
+def _rows(store, entry, day):
     """The rows of one file, after checking its SHA-256 against the manifest entry."""
-    path = store.fetch(entry["object"])
+    path = store.fetch(entry["object"], f"{day}/{entry['name']}")
     try:
         if sha256_file(path) != entry["sha256"]:
             raise VerifyError(f"{entry['name']} doesn't match its SHA-256")
@@ -187,13 +190,14 @@ def state_stream(store, chain, kind):
     key = KEYS[kind]
     shards = (anchor.get("layout") or {}).get("shards", SHARDS)
     part_entries = [f for f in anchor["files"] if f["kind"] == kind]
-    stream = _ordered(heapq.merge(*(_keyed(_rows(store, f, kind), key, shards) for f in part_entries), key=lambda kr: kr[0]))
+    stream = _ordered(heapq.merge(*(_keyed(_rows(store, f, anchor["date"]), key, shards) for f in part_entries),
+                                  key=lambda kr: kr[0]))
     change_kind = CHANGES_KIND if kind == ENTITY_KIND else RELATIONSHIP_CHANGES_KIND
     for step in steps:
         if (step.get("layout") or {}).get("shards", SHARDS) != shards:
             raise VerifyError(f"{step['date']} uses another shard count than its anchor")
         files = [f for f in step["files"] if f["kind"] == change_kind]
-        changes = (kr for f in files for kr in _keyed(_rows(store, f, change_kind), key, shards))
+        changes = (kr for f in files for kr in _keyed(_rows(store, f, step["date"]), key, shards))
         stream = apply_changes(stream, changes, key)
     return stream
 

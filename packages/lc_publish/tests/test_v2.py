@@ -17,7 +17,7 @@ from lc_core.publishing import Publishing, SnapshotSettings, load
 from lc_core.snapshot_format import FormatError, parts_for
 from lc_publish.job import publish
 from lc_publish.prune import PruneAborted, plan as prune_plan, prune
-from lc_publish.rebuild import BucketStore, VerifyError, rebuild
+from lc_publish.rebuild import BucketStore, DirStore, VerifyError, rebuild
 from lc_publish.snapshot import CHANGE_SCHEMA, sha256_file
 
 START = Date(2026, 11, 18)
@@ -379,3 +379,34 @@ def test_the_rebuild_command_on_a_copy_of_the_bucket(env, capsys):
     assert main(["--date", m["date"], "--dir", str(mirror)]) == 1
     assert "FAILED" in capsys.readouterr().err
     assert main(["--date", "2030-01-01", "--dir", str(mirror)]) == 1
+
+
+def test_any_day_rebuilds_from_release_style_folders(env):
+    """What the GitHub releases (or the site's recipe API) give a consumer: one folder per day, with its
+    manifest and its files by name. A changes day needs its full snapshot's folder and every day since."""
+    world = World(n=300)
+    for _ in range(5):
+        env.publish(world)
+        world.mutate()
+    folders = env.tmp / "releases"
+    for name, obj in env.snapshots.objects.items():
+        day = name.split("/")[0]
+        if day[:2] == "20":
+            manifest = json.loads(env.snapshots.objects[f"{day}/manifest.json"]["data"])
+            (folders / day).mkdir(parents=True, exist_ok=True)
+            (folders / name).write_bytes(obj["data"])
+            for f in manifest["files"]:  # parts are named, not content-addressed, in a release
+                (folders / day / f["name"]).write_bytes(env.snapshots.objects[f["object"]]["data"])
+    for date, truth in env.truths.items():
+        out = env.tmp / f"from-releases-{date}"
+        assert rebuild(DirStore(folders), date, out, log=lambda r: None)["ok"]
+        rows = sorted(json.dumps(r, sort_keys=True) for p in sorted(out.glob("*.parquet")) if not p.name.startswith("relationships")
+                      for r in pq.read_table(p).to_pylist())
+        assert rows == truth, date
+    last = max(env.truths)
+    anchor = json.loads((folders / last / "manifest.json").read_text())["anchor"]
+    if anchor != last:
+        part = next(p for p in (folders / anchor).glob("*.parquet") if not p.name.startswith(("changes", "relationship-")))
+        part.unlink()
+        with pytest.raises(VerifyError, match="missing"):
+            rebuild(DirStore(folders), last, None, log=lambda r: None)

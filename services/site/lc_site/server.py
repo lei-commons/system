@@ -127,6 +127,10 @@ class Handler(BaseHTTPRequestHandler):
             if self.downloads is None:
                 return self._json(503, {"error": "downloads aren't configured"})
             return self._json(200, self.downloads.snapshots())
+        if path.startswith("/api/v1/snapshots/") and path.endswith("/recipe"):
+            if self.downloads is None:
+                return self._json(503, {"error": "downloads aren't configured"})
+            return self._json(*self.downloads.recipe(path[len("/api/v1/snapshots/"):-len("/recipe")]))
         if path == "/api/v1/log" or path.startswith("/api/v1/log/"):
             if self.decisions is None:
                 return self._json(503, {"error": "the decision log isn't configured"})

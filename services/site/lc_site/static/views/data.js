@@ -45,6 +45,28 @@ function filesTable(snap) {
       h("td", {}, h("a", { class: "btn", href: `/download/${snap.date}/${encodeURIComponent(f.name)}`, download: "" }, "Download")))));
 }
 
+// A changes day's whole directory: its full snapshot's files, then each day's changes, in order.
+async function wholeDay(snap) {
+  const box = h("section", { class: "card card-pad" }, h("h3", {}, `The whole directory on ${snap.date}`),
+    h("p", { class: "muted" }, "Working out which files make it up…"));
+  try {
+    const r = await api(`/api/v1/snapshots/${snap.date}/recipe`);
+    const fileLink = (f) => h("li", {}, h("a", { href: f.url, download: "" }, f.name), h("span", { class: "muted" }, ` · ${size(f.bytes)}`));
+    box.replaceChildren(h("h3", {}, `The whole directory on ${snap.date}`),
+      h("p", { class: "muted" }, `${fmt(r.records)} records in ${fmt(r.anchor.files.length + r.steps.reduce((n, s) => n + s.files.length, 0))} files `
+        + `(${size(r.bytes)}): the full snapshot of ${r.anchor.date}, then each day's changes in order. ${r.how}`),
+      h("details", { class: "history" }, h("summary", {}, `1. Full snapshot ${r.anchor.date} (${r.anchor.files.length} files)`),
+        h("ul", {}, ...r.anchor.files.map(fileLink))),
+      ...r.steps.map((step, i) => h("details", { class: "history" }, h("summary", {}, `${i + 2}. Changes on ${step.date} (${step.files.length} files)`),
+        h("ul", {}, ...step.files.map(fileLink)))),
+      h("p", { class: "muted", style: { marginBottom: 0 } }, "The list as JSON, with each file's SHA-256: ",
+        h("a", { href: `/api/v1/snapshots/${snap.date}/recipe` }, `/api/v1/snapshots/${snap.date}/recipe`)));
+  } catch (error) {
+    box.replaceChildren(h("h3", {}, `The whole directory on ${snap.date}`), errorBox(error));
+  }
+  return box;
+}
+
 export async function render(root, arg) {
   let list;
   try {
@@ -80,5 +102,6 @@ export async function render(root, arg) {
           "To check a file, compare its SHA-256 with the manifest. To check the manifest, verify its Sigstore signature ",
           "(listed here once the release has signed it, and attached to the draft release of the same date in lei-commons/releases). ",
           "The snapshot root covers the whole directory that day, on change days too.")),
-      h("section", { class: "card card-pad" }, h("h3", {}, "Files"), filesTable(snap)))));
+      snap.kind === "changes" ? await wholeDay(snap) : null,
+      h("section", { class: "card card-pad" }, h("h3", {}, snap.kind === "changes" ? "This day's files" : "Files"), filesTable(snap)))));
 }

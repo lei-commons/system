@@ -81,6 +81,19 @@ signs the manifest (Sigstore), so the signed snapshot root covers every record o
 4. Recompute every part root and the snapshot root for D and compare them with D's signed
    manifest. Optionally write D's parts.
 
+## Fetching a day's whole directory
+
+Most days publish only their changes, so every fetch path can assemble any kept day:
+- **Site API** (owner login): `GET /api/v1/snapshots/<date>/recipe` lists the full snapshot's files, then each
+  later day's change files in order, each with its download URL (`/download/<date>/<name>`), size and SHA-256,
+  plus each manifest. The Data page shows it on every changes day. A broken chain answers 409, never a guess.
+- **GitHub releases**: a full day's release holds its parts; a changes day's holds its changes. Download the
+  full snapshot's release and every later one, one folder per day, and run `lc_publish.rebuild --dir`.
+- **The bucket**: `lc_publish.rebuild --bucket`.
+Tested end to end: for every day of a simulated run (and after pruning), the recipe was fetched over HTTP,
+every file downloaded and checked, the day rebuilt from only those files and compared with the true records;
+the release workflow's own download step was run against every day and every day rebuilt from releases alone.
+
 ## Database load
 
 - **Incremental.** If the database holds a day in the latest day's `base` chain (same root),

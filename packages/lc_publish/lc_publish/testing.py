@@ -48,6 +48,13 @@ class FakeBlob:
             raise NotFound(self.name)
         return self.bucket.objects[self.name]["data"]
 
+    def open(self, mode="rb"):
+        import io
+
+        if mode != "rb":
+            raise ValueError("read only")
+        return io.BytesIO(self.download_as_bytes())
+
     def download_to_filename(self, path):
         Path(path).write_bytes(self.download_as_bytes())
 
