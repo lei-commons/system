@@ -1,5 +1,5 @@
 // The router: #/ search, #/entity/ID, #/graph/ID, #/dashboards, #/system, #/log/DAY, #/data/DATE, #/sources/FILTER.
-import { h, errorBox } from "./lib.js";
+import { h, errorBox, loadSourceNames } from "./lib.js";
 
 const views = {
   search: () => import("./views/search.js"),
@@ -55,4 +55,4 @@ function setupTheme() {
 
 setupTheme();
 window.addEventListener("hashchange", route);
-route();
+loadSourceNames().then(route);

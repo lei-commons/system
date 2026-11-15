@@ -74,9 +74,16 @@ export function statusPill(status) {
   return h("span", { class: `pill ${kind}` }, icon, " ", status || "unknown");
 }
 
-// One name per source, used everywhere a source is shown.
-export const SOURCE_NAMES = { gleif: "GLEIF", "gb-coh": "Companies House", "br-rfb": "Receita Federal (Brazil)",
-  "us-ny-dos": "New York Department of State", "sg-acra": "ACRA (Singapore)" };
+// One name per source, used everywhere a source is shown. The names come from the sources
+// registry (config/sources.yaml, each built source's label), loaded once when the app starts,
+// so a new source needs no change here.
+export const SOURCE_NAMES = {};
+
+export async function loadSourceNames() {
+  try {
+    Object.assign(SOURCE_NAMES, await api("/api/v1/source-names"));
+  } catch (_) { /* the ids themselves are shown instead */ }
+}
 
 export function sourceName(id) {
   return SOURCE_NAMES[id] || id;

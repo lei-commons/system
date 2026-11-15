@@ -15,6 +15,14 @@ jobs:
     env:
       REGION: ${{ vars.GCP_REGION }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: config/sources.yaml
+          sparse-checkout-cone-mode: false
+      - name: The cycle's jobs, from the sources registry
+        run: |
+          pip install -q pyyaml
+          python3 -c "import yaml; s = yaml.safe_load(open('config/sources.yaml'))['sources']; print('CYCLE_JOBS=' + ' '.join([x['pipeline']['job'] for x in s if x.get('pipeline')] + ['build-snapshot', 'load-db']))" >> "$GITHUB_ENV"
       - uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
@@ -24,13 +32,13 @@ jobs:
         run: gcloud workflows executions list daily-cycle --location "$REGION" --limit 5 --format='table(name.basename(),state,startTime,endTime)' || true
       - name: Jobs, last execution of each
         run: |
-          for job in ingest-gleif ingest-gb ingest-br ingest-ny ingest-sg build-snapshot load-db egress-check; do
+          for job in $CYCLE_JOBS egress-check; do
             gcloud run jobs executions list --job "$job" --region "$REGION" --limit 3 \
               --format="table[no-heading](\"$job\",metadata.name,status.completionTime,status.conditions[0].type,status.conditions[0].status)" || true
           done
       - name: What each job's last run recorded (event names and aggregate counts only)
         run: |
-          for job in ingest-gleif ingest-gb ingest-br ingest-ny ingest-sg build-snapshot load-db; do
+          for job in $CYCLE_JOBS; do
             execution=$(gcloud run jobs executions list --job "$job" --region "$REGION" --limit 1 --format='value(metadata.name)') || continue
             echo "== $job $execution"
             gcloud logging read "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"$job\" AND labels.\"run.googleapis.com/execution_name\"=\"$execution\" AND jsonPayload.event:*" \

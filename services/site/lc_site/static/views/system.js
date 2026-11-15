@@ -83,6 +83,17 @@ function diagram(d) {
 }
 
 // ---- headline figures ----
+// The sources tile stays one size however many sources there are: one flag per country, the names on hover
+// and in the cards below.
+function sourcesTile(sources) {
+  const countries = [...new Set(sources.map((s) => (s.country && s.country !== "*" ? s.country : "*")))];
+  return h("div", { class: "kpi", title: sources.map((s) => s.label).join(", ") }, h("div", {},
+    h("div", { class: "kpi-value num" }, fmt(sources.length)),
+    h("div", { class: "kpi-label" }, `sources in the daily cycle, from ${countries.length} ${countries.length === 1 ? "place" : "places"}`),
+    h("div", { class: "kpi-flags" }, ...countries.map((c) => h("span", { class: "flag", title: c === "*" ? "global" : c },
+      c === "*" ? "🌐" : flag(c))))));
+}
+
 function kpis(d, meta) {
   const cycle = d.lastCycle;
   const streak = Math.min(d.cleanStreak || 0, GATE);
@@ -95,7 +106,7 @@ function kpis(d, meta) {
   return h("div", { class: "kpis" },
     tile(fmt(meta.records), "records in the directory"),
     tile(fmt(meta.relationships), "relationships"),
-    tile(fmt(d.sources.length), `sources: ${d.sources.map((s) => s.label).join(", ")}`),
+    sourcesTile(d.sources),
     tile(`${d.cleanStreak || 0} of ${GATE}`, "clean daily cycles in a row (M2 gate)", ring),
     tile(cycle ? `${minutes(cycle.started, cycle.ended) ?? "–"} min` : "–",
       cycle ? `last cycle, ${clock(cycle.started)} · ${(cycle.state || "").toLowerCase()}` : "no cycle yet"));

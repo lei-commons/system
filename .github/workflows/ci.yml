@@ -72,6 +72,8 @@ jobs:
       - run: pytest -q services/ingest_ny
       - run: pip install -e services/ingest_sg
       - run: pytest -q services/ingest_sg
+      - run: pip install -e services/ingest_socrata
+      - run: pytest -q services/ingest_socrata
       - run: pip install -e packages/lc_publish
       - run: pytest -q packages/lc_publish
       - run: pip install -e packages/lc_directory
@@ -112,6 +114,8 @@ jobs:
         run: |
           docker build -f services/ingest_ny/Dockerfile -t ingest-ny .
           docker build -f services/ingest_sg/Dockerfile -t ingest-sg .
+          docker build -f services/ingest_socrata/Dockerfile -t ingest-socrata .
+          docker run --rm -e LC_SOURCE=us-co-sos ingest-socrata python -c "from lc_ingest.socrata import PROFILES; from lc_core.sources import pipelines; assert {p['id'] for p in pipelines() if p['job'].startswith('ingest-')} >= set(PROFILES)"
       - name: Site image builds and contains the app
         run: |
           docker build -f services/site/Dockerfile -t lei-commons-site .

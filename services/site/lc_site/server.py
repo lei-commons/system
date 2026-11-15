@@ -123,6 +123,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(b"0\r\n\r\n")
 
     def _api(self, path, query):
+        if path == "/api/v1/source-names":
+            return self._json(200, source_names())
         if path == "/api/v1/snapshots":
             if self.downloads is None:
                 return self._json(503, {"error": "downloads aren't configured"})
@@ -203,6 +205,13 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(405, b"")
 
     do_PUT = do_PATCH = do_DELETE = do_OPTIONS = do_TRACE = do_CONNECT = do_HEAD
+
+
+def source_names() -> dict:
+    """{id records carry: the name shown}, from the sources registry."""
+    from lc_core.sources import names
+
+    return names(os.environ.get("LC_SOURCES_CONFIG"))
 
 
 def load_latest(bucket_name: str):
