@@ -62,9 +62,9 @@ class MemStore:
 
 PEOPLE_COLUMNS = {
     "us-co-sos": ["agentfirstname", "agentlastname", "agentprincipaladdress1", "mailingaddress1", "agentorganizationname"],
-    "us-or-sos": ["first_name", "last_name", "middle_name", "address", "address_continued"],
+    "us-or-sos": ["first_name", "last_name", "middle_name", "suffix", "entity_of_record_name"],
     "us-ct-sots": ["business_email_address", "category_survey_email_address", "mailing_address", "records_address_street",
-                  "woman_owned_organization", "organization_is_lgbtqi_owned", "billingstreet"],
+                  "woman_owned_organization", "organization_is_lgbtqi_owned", "mailing_jurisdiction_address"],
 }
 
 
@@ -96,7 +96,7 @@ def test_unknown_source_is_refused():
 
 CO = {"entityid": "19871266267", "entityname": "EXAMPLE MINING COMPANY", "entitystatus": "Good Standing",
       "jurisdictonofformation": "CO", "entitytype": "DPC", "entityformdate": "1987-06-01T00:00:00.000",
-      "principalcity": "Denver", "principalstate": "CO", "principalzipcode": "80202", "principalcountry": "US"}
+      "principaladdress1": "1512 LARIMER STREET #760", "principaladdress2": "", "principalcity": "Denver", "principalstate": "CO", "principalzipcode": "80202", "principalcountry": "US"}
 
 
 def test_colorado_record_and_its_id_matches_gleif():
@@ -104,7 +104,8 @@ def test_colorado_record_and_its_id_matches_gleif():
     assert r["directoryId"] == mint("US", "RA000599", "19871266267")  # GLEIF's registeredAs for RA000599 is this number
     assert r == {**r, "legalName": "EXAMPLE MINING COMPANY", "legalForm": "Profit corporation", "legalJurisdiction": "US-CO",
                  "legalStatus": "Good Standing", "incorporationDate": "1987-06-01", "registrationAuthority": "US-CO-SOS",
-                 "legalAddress": {"city": "DENVER", "region": "CO", "postalCode": "80202", "country": "US"}}
+                 "legalAddress": {"addressLines": ["1512 LARIMER STREET #760"], "city": "DENVER", "region": "CO",
+                                  "postalCode": "80202", "country": "US"}}
     assert us_jurisdiction("Delaware") == "US-DE" and us_jurisdiction("Canada") is None
 
 
@@ -119,14 +120,17 @@ def test_colorado_drops_people_and_unreviewed_types(kind, why):
 
 OR = {"registry_number": "100001494", "entity_name": "PROUD AMERICAN WOODWORKS LLC",
       "entity_kind": "DOMESTIC LIMITED LIABILITY COMPANY", "registered": "2014-03-05T10:59:31.000", "formed_in": "OR",
-      "ppb_city": "BEND", "ppb_state": "OR", "ppb_zip": "97701"}
+      "ppb_address": "21040 SCOTTSDALE DR", "ppb_city": "BEND", "ppb_state": "OR", "ppb_zip": "97701"}
 
 
 def test_oregon_record():
     r = OREGON.record(OR)
     assert r["directoryId"] == mint("US", "RA000631", "100001494") and r["legalStatus"] == "Active"
     assert r["legalForm"] == "Domestic limited liability company" and r["legalJurisdiction"] == "US-OR"
-    assert r["legalAddress"] == {"city": "BEND", "region": "OR", "postalCode": "97701", "country": "US"}
+    assert r["legalAddress"] == {"addressLines": ["21040 SCOTTSDALE DR"], "city": "BEND", "region": "OR", "postalCode": "97701",
+                                 "country": "US"}
+    assert OREGON.record({**OR, "ppb_address": ""})["legalAddress"] == {"city": "BEND", "region": "OR", "postalCode": "97701",
+                                                                       "country": "US"}  # street lines are optional
 
 
 @pytest.mark.parametrize("kind", ["ASSUMED BUSINESS NAME", "RESERVED NAME", "REGISTERED NAME", "SOMETHING NEW"])
@@ -138,7 +142,11 @@ def test_oregon_drops_names_that_are_not_entities(kind):
 def test_oregon_groups_one_row_per_business_and_takes_only_the_principal_place():
     query = urllib.parse.parse_qs(urllib.parse.urlsplit(OREGON.url()).query)
     assert query["$group"] == ["registry_number"]
-    assert "PRINCIPAL PLACE OF BUSINESS" in query["$select"][0] and "REGISTERED AGENT" not in query["$select"][0]
+    select = query["$select"][0]
+    assert "PRINCIPAL PLACE OF BUSINESS" in select and "REGISTERED AGENT" not in select
+    # every address column is taken only from the principal place of business's row, never an agent's
+    for column in ("address", "address_continued", "city", "state", "zip"):
+        assert f", {column}, true, null)" in select
 
 
 # ---- Connecticut ----
@@ -190,3 +198,11 @@ def test_a_halted_or_unapproved_source_fetches_nothing():
     store, gw, events = MemStore(), FakeGateway(b""), []
     assert run(OREGON, gw, store, today=date(2026, 11, 18), gate=gate, allowlist=AllowList.load(), log=events.append) == "halted"
     assert gw.fetched == [] and events[0]["event"] == "halted"
+
+
+def test_placeholders_are_not_addresses():
+    from lc_ingest.socrata import us_address
+
+    assert us_address("Hartford", "CT", "06103", "United States", ("No information provided", "")) == {
+        "city": "HARTFORD", "region": "CT", "postalCode": "06103", "country": "US"}
+    assert us_address("", "", "", None, ("N/A",)) == {}
