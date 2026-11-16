@@ -117,12 +117,22 @@ sources:
     country: US
     access: open
     method: api
-    licence: to-be-verified
-    cadence: daily
+    licence: Public domain
+    cadence: weekly
     status: active
-    url: https://data.colorado.gov
-    terms_url: https://data.colorado.gov
-    assessment: {risk: unknown, commercial: unknown, attribution: unknown, summary: Not built yet; terms not yet researched., verified: false}
+    url: https://data.colorado.gov/Business/Business-Entities-in-Colorado/4ykn-tg5h
+    terms_url: https://data.colorado.gov/Business/Business-Entities-in-Colorado/4ykn-tg5h/about_data
+    assessment:
+      risk: low
+      commercial: allowed
+      attribution: not required (credit the Colorado Department of State as good practice)
+      summary: >-
+        "Business Entities in Colorado" on data.colorado.gov is published by the Department of State under a
+        public domain licence (dataset metadata, checked 2026-11-15), updated daily, about 3.1 million entities
+        since 1864. Only entity columns are requested: registered agents' names and addresses and mailing
+        addresses are never downloaded. General partnerships and sole proprietorships are dropped as people;
+        any entity type not yet reviewed is dropped too.
+      verified: false
 
   - id: us-pa-dos
     name: Pennsylvania Department of State
@@ -141,24 +151,46 @@ sources:
     country: US
     access: open
     method: api
-    licence: to-be-verified
-    cadence: daily
+    licence: none stated (Oregon open data law)
+    cadence: weekly
     status: active
-    url: https://data.oregon.gov
-    terms_url: https://data.oregon.gov
-    assessment: {risk: unknown, commercial: unknown, attribution: unknown, summary: Not built yet; terms not yet researched., verified: false}
+    url: https://data.oregon.gov/Business/Active-Businesses-ALL/tckn-sxa6
+    terms_url: https://oregon.public.law/statutes/ors_276A.356
+    assessment:
+      risk: medium
+      commercial: likely allowed (Oregon's open data standard calls for no restrictions on use); not stated for this dataset
+      attribution: not stated (credit the Oregon Secretary of State as good practice)
+      summary: >-
+        "Active Businesses - ALL" on data.oregon.gov (Corporation Division, weekly) states no licence. ORS 276A.356
+        asks that the state's publishable data be available without registration, licence requirements or
+        restrictions on use. About 453,000 active businesses. The dataset lists one row per associated name
+        (registered agents, representatives); the query asks for one row per business with only its principal
+        place of business's city, state and ZIP, so no person's name or address is downloaded. Assumed business
+        names (often people) and name reservations are dropped. GLEIF writes Oregon numbers with a two-digit
+        suffix ("115676-17") the dataset lacks, so about 1,600 Oregon companies with an LEI don't merge yet.
+      verified: false
 
   - id: us-ct-sots
     name: Connecticut Secretary of the State (open data)
     country: US
     access: open
     method: api
-    licence: to-be-verified
-    cadence: daily
+    licence: Public domain
+    cadence: weekly
     status: active
-    url: https://data.ct.gov
-    terms_url: https://data.ct.gov
-    assessment: {risk: unknown, commercial: unknown, attribution: unknown, summary: Not built yet; terms not yet researched., verified: false}
+    url: https://data.ct.gov/Business/Connecticut-Business-Registry-Business-Master/n7gp-d28j
+    terms_url: https://data.ct.gov/Business/Connecticut-Business-Registry-Business-Master/n7gp-d28j/about_data
+    assessment:
+      risk: low
+      commercial: allowed
+      attribution: not required (credit the Secretary of the State as good practice)
+      summary: >-
+        "Connecticut Business Registry - Business Master" on data.ct.gov is published by the Secretary of the State
+        under a public domain licence (dataset metadata, checked 2026-11-15); about 1.3 million records. Only
+        entity columns are requested: business and survey email addresses, mailing and records addresses, and
+        owner characteristics (woman-, veteran-, minority-, disability- or LGBTQI-owned) are never downloaded.
+        General partnerships, unknown types, name reservations and rejected filings are dropped.
+      verified: false
 
   - id: br-rfb-cnpj
     name: Receita Federal CNPJ open data
@@ -224,6 +256,281 @@ sources:
     approved_at: "2026-11-11"
     approval_note: In use before the approvals page; approved by the owner on 2026-11-11.
     pipeline: {job: ingest-sg, store: sg, records_as: sg-acra, label: ACRA Singapore, refresh: monthly}
+
+  # ---- Candidates found 2026-11-15, for the owner to approve, deny or keep pending. Not built yet:
+  # approving one only permits it; it is fetched once it is built. Claims marked "unverified" come
+  # from third-party pages and must be checked against the publisher before building. ----
+
+  - id: fr-insee-sirene
+    name: France SIRENE (INSEE) legal units
+    country: FR
+    access: open
+    method: bulk
+    licence: Licence Ouverte (Etalab)
+    cadence: monthly
+    status: active
+    url: https://www.data.gouv.fr/fr/datasets/base-sirene-des-entreprises-et-de-leurs-etablissements-siren-siret/
+    terms_url: https://www.etalab.gouv.fr/licence-ouverte-open-licence/
+    assessment:
+      risk: low
+      commercial: allowed
+      attribution: required (credit INSEE and the date of the data)
+      summary: >-
+        INSEE publishes the full SIRENE register on data.gouv.fr: a monthly stock of every legal unit since 1973,
+        active and ceased, plus daily updates, free of charge under the Licence Ouverte (version to confirm on
+        the dataset page). The largest open register found: tens of millions of legal units, of which a large
+        share are individual entrepreneurs, who would be dropped (legal category 1000), along with units whose
+        diffusion is partial. INSEE does not publish legal representatives as open data.
+      verified: false
+
+  - id: no-brreg
+    name: Norway Central Coordinating Register for Legal Entities (Brønnøysund)
+    country: "NO"
+    access: open
+    method: bulk
+    licence: NLOD 2.0
+    cadence: daily
+    status: active
+    url: https://data.brreg.no/enhetsregisteret/api/dokumentasjon/en/index.html
+    terms_url: https://data.norge.no/nlod/en/2.0
+    assessment:
+      risk: low
+      commercial: allowed
+      attribution: 'required (NLOD: credit the Brønnøysund Register Centre)'
+      summary: >-
+        Brønnøysund publishes every registered entity as a bulk download (JSON, CSV or spreadsheet) with no
+        registration or key, under the Norwegian Licence for Open Government Data. About a million units.
+        Sole proprietorships (ENK) are people and would be dropped. Roles (board members) are behind
+        Maskinporten and are not part of the open download, so they would not be used.
+      verified: false
+
+  - id: fi-prh
+    name: Finland Trade Register (PRH open data)
+    country: FI
+    access: open
+    method: bulk
+    licence: CC-BY-4.0
+    cadence: daily
+    status: active
+    url: https://avoindata.prh.fi/en
+    terms_url: https://prh.fi/en/companiesandorganisations/tietopalvelut/prhopendata.html
+    assessment:
+      risk: low
+      commercial: allowed
+      attribution: required (name the Finnish Patent and Registration Office as the source)
+      summary: >-
+        PRH's open data service publishes basic company data for registered companies under CC BY 4.0, free,
+        updated daily, with a single compressed download of all valid businesses (YTJ API v3). Sole traders
+        (toiminimi) are people and would be dropped.
+      verified: false
+
+  - id: ie-cro
+    name: Ireland Companies Registration Office (open data)
+    country: IE
+    access: open
+    method: bulk
+    licence: CC-BY-4.0
+    cadence: daily
+    status: active
+    url: https://opendata.cro.ie/dataset/companies
+    terms_url: https://opendata.cro.ie/dataset/companies
+    assessment:
+      risk: low
+      commercial: allowed
+      attribution: required (acknowledge the CRO as the source)
+      summary: >-
+        The CRO's "Company Records" dataset on opendata.cro.ie is updated daily and published for bulk download and
+        API access under CC BY 4.0, as an EU High Value Dataset. It covers companies, not directors (director data
+        is only in the CRO's separate paid bulk licence, which is not needed). Business names (often people) are a
+        separate register and would not be used.
+      verified: false
+
+  - id: au-asic
+    name: Australia ASIC company dataset
+    country: AU
+    access: open
+    method: bulk
+    licence: CC-BY-3.0-AU
+    cadence: weekly
+    status: active
+    url: https://www.data.gov.au/data/dataset/asic-companies
+    terms_url: https://creativecommons.org/licenses/by/3.0/au/
+    assessment:
+      risk: low
+      commercial: allowed
+      attribution: required (credit ASIC, licence CC BY 3.0 AU)
+      summary: >-
+        ASIC uploads a weekly snapshot of selected company register data to data.gov.au under CC BY 3.0
+        Australia (a ZIP of tab-separated text). It covers companies only; business names, which are often
+        sole traders, are a separate dataset and would not be used. A third-party page puts it at about
+        2.1 million companies (unverified).
+      verified: false
+
+  - id: jp-nta
+    name: Japan National Tax Agency corporate numbers
+    country: JP
+    access: open
+    method: bulk
+    licence: Public Data License 1.0 (CC BY compatible)
+    cadence: daily
+    status: active
+    url: https://www.houjin-bangou.nta.go.jp/en/
+    terms_url: https://www.houjin-bangou.nta.go.jp/en/riyokiyaku/
+    assessment:
+      risk: low
+      commercial: allowed
+      attribution: 'required ("Source: National Tax Agency Corporate Number Publication Site", and say if edited)'
+      summary: >-
+        The NTA publishes the corporate number, name and head-office address of every corporation and
+        association, with a full bulk download, under its terms based on the Public Data License 1.0. Corporate
+        numbers go to legal entities, not individuals. Several million records (a third-party figure says about
+        8 million; unverified). Names are in Japanese; transliterated names would need care.
+      verified: false
+
+  - id: ca-ised
+    name: Canada federal corporations (Corporations Canada)
+    country: CA
+    access: open
+    method: bulk
+    licence: OGL-Canada-2.0
+    cadence: weekly
+    status: active
+    url: https://open.canada.ca/data/en/dataset/0032ce54-c5dd-4b66-99a0-320a7b5e99f2
+    terms_url: https://open.canada.ca/en/open-government-licence-canada
+    assessment:
+      risk: low
+      commercial: allowed
+      attribution: required ("Contains information licensed under the Open Government Licence – Canada")
+      summary: >-
+        ISED publishes federal corporations (CBCA business corporations, not-for-profits, cooperatives, boards of
+        trade) as a bulk ZIP on open.canada.ca under the Open Government Licence – Canada. Federal corporations
+        only: provincial registers are separate. Directors would not be used. The file layout reportedly changed
+        in April 2026 (unverified).
+      verified: false
+
+  - id: us-ia-sos
+    name: Iowa Secretary of State (open data)
+    country: US
+    access: open
+    method: api
+    licence: CC-BY-4.0
+    cadence: weekly
+    status: active
+    url: https://catalog.data.gov/dataset/active-iowa-business-entities
+    terms_url: https://creativecommons.org/licenses/by/4.0/
+    assessment:
+      risk: low
+      commercial: allowed
+      attribution: required (credit the Iowa Secretary of State)
+      summary: >-
+        "Active Iowa Business Entities" on data.iowa.gov (a Socrata portal, so it can share the Colorado, Oregon
+        and Connecticut job) is CC BY 4.0: legal name, type, effective date and principal office for active
+        entities. Its registered agent name and address columns would never be requested. Sole proprietorships
+        and partnerships generally don't register. About 335,000 entities (third-party figure, unverified).
+        Its host, data.iowa.gov, is not yet on the egress allow-list.
+      verified: false
+
+  - id: lv-ur
+    name: Latvia Register of Enterprises (open data)
+    country: LV
+    access: open
+    method: bulk
+    licence: CC0-1.0 (unverified)
+    cadence: daily
+    status: active
+    url: https://www.ur.gov.lv/en/specialized-information/open-data
+    terms_url: https://www.ur.gov.lv/en/specialized-information/open-data
+    assessment:
+      risk: medium
+      commercial: likely allowed (if CC0, as third parties say)
+      attribution: not required under CC0
+      summary: >-
+        The Register of Enterprises publishes basic data on legal entities as CSV and XLSX on data.gov.lv,
+        updated every 24 hours. Third-party pages say CC0; the register's own page found didn't state the
+        licence, so it needs checking. Individual merchants would be dropped.
+      verified: false
+
+  - id: ee-rik
+    name: Estonia e-Business Register (open data)
+    country: EE
+    access: open
+    method: bulk
+    licence: terms of use to accept (licence not found)
+    cadence: daily
+    status: active
+    url: https://avaandmed.ariregister.rik.ee/en/downloading-open-data
+    terms_url: https://avaandmed.ariregister.rik.ee/en
+    assessment:
+      risk: medium
+      commercial: unclear until the terms are read
+      attribution: unknown
+      summary: >-
+        Since October 2022 the e-Business Register publishes eight daily datasets free of charge. Terms of use
+        must be accepted before downloading, and the register warns that disclosure doesn't mean any use is
+        allowed. The licence wasn't found, so the terms need reading first. Sole proprietors (FIE) would be
+        dropped; beneficial owners are no longer open data (from 10 July 2026).
+      verified: false
+
+  - id: tw-gcis
+    name: Taiwan company registration (data.gov.tw)
+    country: TW
+    access: open
+    method: bulk
+    licence: Open Government Data License 1.0
+    cadence: yearly
+    status: active
+    url: https://data.gov.tw/en/datasets/6047
+    terms_url: https://data.gov.tw/license
+    assessment:
+      risk: medium
+      commercial: allowed
+      attribution: required
+      summary: >-
+        Company registration data is on data.gov.tw under the Open Government Data License 1.0, but split into
+        many datasets by region and industry, mostly refreshed once a year; no single national bulk file was
+        found. Usable, but assembling it is more work and the data is less current.
+      verified: false
+
+  - id: ca-qc-req
+    name: Québec enterprise register (Registre des entreprises)
+    country: CA
+    access: open
+    method: bulk
+    licence: CC-BY-NC-SA-4.0
+    cadence: monthly
+    status: active
+    url: https://www.donneesquebec.ca/recherche/fr/dataset/registre-des-entreprises
+    terms_url: https://creativecommons.org/licenses/by-nc-sa/4.0/
+    assessment:
+      risk: high
+      commercial: not allowed (NonCommercial)
+      attribution: required, and ShareAlike
+      summary: >-
+        Données Québec lists the Registre des entreprises under CC BY-NC-SA 4.0: no commercial use, and derivatives
+        under the same licence. That conflicts with an open directory anyone may reuse commercially. Listed so it
+        can be denied explicitly. It also includes sole proprietorships.
+      verified: false
+
+  - id: cz-justice
+    name: Czech Public Register (Ministry of Justice)
+    country: CZ
+    access: open
+    method: bulk
+    licence: restricts commercial use (unverified)
+    cadence: unknown
+    status: active
+    url: https://or.justice.cz
+    terms_url: https://or.justice.cz
+    assessment:
+      risk: high
+      commercial: restricted (per an older Open Knowledge review; unverified)
+      attribution: unknown
+      summary: >-
+        The register's published data licence was reported (2015) to restrict commercial use, and a third-party
+        guide says the public part and its open data were made inaccessible on 17 December 2025 after a court
+        ruling (unverified). Not usable until both are checked. The Ministry of Finance's ARES may be an
+        alternative route, to be researched.
+      verified: false
 
   - id: web
     name: Public web discovery (entity websites, schema.org, Common Crawl)
