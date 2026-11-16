@@ -3,7 +3,8 @@
 One profile per register: its portal and dataset, GLEIF's code for it (so a company with an LEI
 merges with its register record), the query, and the mapping. Only the columns a profile names
 are requested; registered agents, owners, officers, emails and mailing addresses are never
-downloaded. Each profile keeps an allow-list of entity types: general partnerships, sole
+downloaded. The company's own address (principal office or business address) keeps its street
+lines when the register has them (owner decision 2026-11-16), and city, region and postcode always. Each profile keeps an allow-list of entity types: general partnerships, sole
 proprietorships, assumed business names and name reservations are dropped (they are people, or
 not entities), and so is any type the register adds later until it is reviewed.
 
@@ -43,10 +44,22 @@ def us_jurisdiction(value) -> str | None:
     return f"US-{code}" if code else None
 
 
-def us_address(city, state, postal, country=None) -> dict:
-    state = _clean(state).upper()
-    country = _clean(country).upper()
-    address = {"city": _clean(city).upper(), "region": state, "postalCode": _clean(postal),
+PLACEHOLDERS = {"NO INFORMATION PROVIDED", "N/A", "NA", "NONE", "UNKNOWN", "NOT PROVIDED", "-", "."}
+
+
+def _real(value) -> str:
+    """The value, or '' if it is a register's placeholder for "nothing here"."""
+    value = _clean(value)
+    return "" if value.upper() in PLACEHOLDERS else value
+
+
+def us_address(city, state, postal, country=None, lines=()) -> dict:
+    """A company's address: street lines when given (optional), then city, state, ZIP and country."""
+    state = _real(state).upper()
+    country = _real(country).upper()
+    city, postal = _real(city), _real(postal)
+    address = {"addressLines": [line for line in (_real(x) for x in lines) if line],
+               "city": city.upper(), "region": state, "postalCode": postal,
                "country": "US" if (state in US_CODES and (not country or country in US_COUNTRY)) else ""}
     return {k: v for k, v in address.items() if v}
 
@@ -104,7 +117,7 @@ CO_FORMS = {
 }
 CO_PEOPLE = {"GP", "SP"}  # general partnerships and sole proprietorships: people's business names
 CO_COLUMNS = ["entityid", "entityname", "entitystatus", "jurisdictonofformation", "entitytype", "entityformdate",
-              "principalcity", "principalstate", "principalzipcode", "principalcountry"]
+              "principaladdress1", "principaladdress2", "principalcity", "principalstate", "principalzipcode", "principalcountry"]
 
 
 def co_record(row: dict) -> dict:
@@ -126,7 +139,7 @@ def co_record(row: dict) -> dict:
         "legalStatus": _clean(row.get("entitystatus")) or None,
         "incorporationDate": _date(row.get("entityformdate")),
         "legalAddress": us_address(row.get("principalcity"), row.get("principalstate"), row.get("principalzipcode"),
-                                   row.get("principalcountry")),
+                                   row.get("principalcountry"), (row.get("principaladdress1"), row.get("principaladdress2"))),
         "recordMode": "mirror",
     }
 
@@ -139,8 +152,8 @@ COLORADO = Profile(
 
 # ---- Oregon: Active Businesses - ALL (data.oregon.gov, tckn-sxa6), no licence stated ----
 # One row per associated name (registered agent, principal place of business, ...), so the query
-# groups by registry number: one row per business, with the principal place of business's city,
-# state and ZIP only. Names and addresses of agents and representatives are never requested.
+# groups by registry number: one row per business, with the principal place of business's address
+# only. Names and addresses of agents and representatives are never requested.
 
 OR_FORMS = {
     "DOMESTIC LIMITED LIABILITY COMPANY", "DOMESTIC BUSINESS CORPORATION", "DOMESTIC NONPROFIT CORPORATION",
@@ -154,6 +167,7 @@ OR_NOT_ENTITIES = {"ASSUMED BUSINESS NAME", "RESERVED NAME", "REGISTERED NAME"}
 _PPB = "associated_name_type='PRINCIPAL PLACE OF BUSINESS'"
 OR_SELECT = ["registry_number", "max(business_name) as entity_name", "max(entity_type) as entity_kind",
              "min(registry_date) as registered", "max(jurisdiction) as formed_in",
+             f"max(case({_PPB}, address, true, null)) as ppb_address", f"max(case({_PPB}, address_continued, true, null)) as ppb_address_2",
              f"max(case({_PPB}, city, true, null)) as ppb_city", f"max(case({_PPB}, state, true, null)) as ppb_state",
              f"max(case({_PPB}, zip, true, null)) as ppb_zip"]
 
@@ -176,7 +190,8 @@ def or_record(row: dict) -> dict:
         "registrationNumber": number,
         "legalStatus": "Active",  # the dataset lists active businesses only
         "incorporationDate": _date(row.get("registered")),
-        "legalAddress": us_address(row.get("ppb_city"), row.get("ppb_state"), row.get("ppb_zip")),
+        "legalAddress": us_address(row.get("ppb_city"), row.get("ppb_state"), row.get("ppb_zip"),
+                                   lines=(row.get("ppb_address"), row.get("ppb_address_2"))),
         "recordMode": "mirror",
     }
 
@@ -202,8 +217,8 @@ CT_FORMS = {
 }
 CT_NOT_ENTITIES = {"Reserved", "Expired Reservation", "Reserved Cancel", "Rejected", "Expired"}
 CT_COLUMNS = ["accountnumber", "name", "business_type", "status", "date_registration", "dissolution_date", "citizenship",
-              "state_or_territory_formation", "billingcity", "billingstate", "billingpostalcode", "billingcountry",
-              "naics_code"]
+              "state_or_territory_formation", "billingstreet", "billing_unit", "billingcity", "billingstate",
+              "billingpostalcode", "billingcountry", "naics_code"]
 
 
 def ct_record(row: dict) -> dict:
@@ -229,7 +244,7 @@ def ct_record(row: dict) -> dict:
         "incorporationDate": _date(row.get("date_registration")),
         "dissolutionDate": _date(row.get("dissolution_date")),
         "legalAddress": us_address(row.get("billingcity"), row.get("billingstate"), row.get("billingpostalcode"),
-                                   row.get("billingcountry")),
+                                   row.get("billingcountry"), (row.get("billingstreet"), row.get("billing_unit"))),
         "industryCodes": [naics] if naics.isdigit() else [],
         "recordMode": "mirror",
     }
