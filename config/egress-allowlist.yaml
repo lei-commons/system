@@ -20,7 +20,7 @@ registry_hosts:
   - nl-ams-1.linodeobjects.com
   # Owner approved 2026-11-16 for Finland's PRH open data (source fi-prh):
   - avoindata.prh.fi
-  # Australia ASIC company dataset (source au-asic, approved 2026-11-16; host to be confirmed by the owner):
+  # Owner approved 2026-11-16 for the ASIC company dataset (source au-asic):
   - data.gov.au
   - www.dos.pa.gov
   - dadosabertos.rfb.gov.br
