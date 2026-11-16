@@ -445,6 +445,7 @@ sources:
       verified: false
     pipeline: {job: ingest-ca, image: ingest-bulk, store: ca, records_as: ca-ised, label: Corporations Canada,
                refresh: weekly, dataset: "Federal Corporations (open.canada.ca)",
+               record_url: "https://ised-isde.canada.ca/cc/lgcy/fdrlCrpDtls.html?corpId={registrationNumber}",
                attribution: "Contains information licensed under the Open Government Licence – Canada."}
 
   - id: us-ia-sos
