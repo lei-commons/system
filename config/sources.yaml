@@ -438,6 +438,9 @@ sources:
         only: provincial registers are separate. Directors would not be used. The file layout reportedly changed
         in April 2026 (unverified).
       verified: false
+    pipeline: {job: ingest-ca, image: ingest-bulk, store: ca, records_as: ca-ised, label: Corporations Canada,
+               refresh: weekly, dataset: "Federal Corporations (open.canada.ca)",
+               attribution: "Contains information licensed under the Open Government Licence – Canada."}
 
   - id: us-ia-sos
     name: Iowa Secretary of State (open data)

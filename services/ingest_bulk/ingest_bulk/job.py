@@ -41,8 +41,12 @@ def gate_for(profile: Profile):
     return gate
 
 
-def find_for(profile: Profile, today: date):
+def find_for(profile: Profile, today: date, part=None):
     def find(gateway, manifest=None):
+        if part:  # one of a register's several files: its own key, so each is processed once a week
+            name, url = part
+            key = f"{profile.key(today)} {name}"
+            return key, url, f"{profile.filename}-{profile.key(today)}-{name}{profile.extension}"
         if profile.locate:  # the register's file moves with each publication: ask its catalogue where it is
             key, url = profile.locate(gateway)
         else:
@@ -52,9 +56,17 @@ def find_for(profile: Profile, today: date):
 
 
 def run(profile: Profile, gateway, store, today=None, gate=None, allowlist=None, log=log) -> str:
-    return run_ingest(gateway=gateway, store=store, gate=gate or gate_for(profile), find=find_for(profile, today or date.today()),
-                      read=profile.read, mapper=profile.record, source=profile.source, maker=f"ingestion@{profile.store}",
-                      allowlist=allowlist or AllowList.load(), log=log)
+    """Process the register's file, or each of its files in turn. The outcome of the first that isn't done stops the rest."""
+    today = today or date.today()
+    allowlist = allowlist or AllowList.load()
+    outcome = "already-done"
+    for part in profile.parts or (None,):
+        outcome = run_ingest(gateway=gateway, store=store, gate=gate or gate_for(profile), find=find_for(profile, today, part),
+                             read=profile.read, mapper=profile.record, source=profile.source,
+                             maker=f"ingestion@{profile.store}", allowlist=allowlist, log=log)
+        if outcome not in ("done", "already-done"):
+            break
+    return outcome
 
 
 def main() -> int:

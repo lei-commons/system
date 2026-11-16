@@ -17,6 +17,12 @@ Australia (ASIC company dataset, data.gov.au, CC BY 3.0 AU): a monthly ZIP of ta
 one row per name a company has had, in ACN order; located each run through data.gov.au's catalogue
 and processed once per publication. Companies only (business names, often sole traders, are a
 separate dataset); no addresses or officers. GLEIF RA000014 writes ACNs with spaces, which IDs ignore.
+
+Canada (Corporations Canada, open.canada.ca, OGL-Canada 2.0): four daily CSVs (active and inactive,
+business and other federal corporations), all processed each week, one after another. Only city,
+province and postal code are kept: a small corporation's registered office is often a director's
+home. GLEIF RA000072 writes numbers with a check digit the files lack ("1561061-3"), so about
+7,900 federal corporations with an LEI don't merge yet.
 """
 
 from __future__ import annotations
@@ -113,6 +119,7 @@ class Profile:
     read: object = None
     mapper: object = None
     locate: object = None  # gateway -> (key, url), for registers whose file moves with each publication
+    parts: tuple = ()      # (name, url) for registers published as several files, all processed each run
 
     def url(self) -> str:
         return self.file_url
@@ -317,4 +324,49 @@ AUSTRALIA = Profile(
     read=grouped_tsv("ACN"), mapper=au_record, locate=au_locate)
 
 
-PROFILES = {p.source: p for p in (IRELAND, FINLAND, AUSTRALIA)}
+# ---- Canada ----
+
+CA_FILES = "https://d4bf66bykfyaf.cloudfront.net/"
+CA_PARTS = tuple((name, CA_FILES + f"corporations-{name}-en.csv") for name in
+                 ("active-cbca", "active-non-cbca", "inactive-or-dissolved-cbca", "inactive-or-dissolved-non-cbca"))
+CA_PROVINCES = {"AB", "BC", "MB", "NB", "NL", "NS", "NT", "NU", "ON", "PE", "QC", "SK", "YT"}
+
+
+def plain_csv(encoding="utf-8-sig"):
+    """A reader for an uncompressed CSV file: rows as dicts."""
+    def read(binary_file):
+        yield from csv.DictReader(io.TextIOWrapper(binary_file, encoding=encoding, newline=""))
+    return read
+
+
+def ca_record(row: dict) -> dict:
+    number = _clean(row.get("Corporation number"))
+    name = _clean(row.get("Corporate name - form 1"))
+    if not number.isdigit() or not name:
+        raise Skip("no number or name")
+    province = _clean(row.get("Province/territory")).upper()
+    other = _clean(row.get("Corporate name - form 2"))
+    return {
+        "directoryId": mint("CA", "RA000072", number),
+        "legalName": name,
+        "otherNames": [other] if other and other != name else [],
+        "legalForm": _clean(row.get("Governing legislation")) or None,
+        "legalJurisdiction": "CA",
+        "registrationAuthority": "CA-CORPORATIONS-CANADA",
+        "registrationNumber": number,
+        "legalStatus": _clean(row.get("Status")) or None,
+        "incorporationDate": _date(row.get("Anniversary date")),
+        "legalAddress": {k: v for k, v in {"city": _clean(row.get("City/town")).upper(),
+                                           "region": province if province in CA_PROVINCES else "",
+                                           "postalCode": _clean(row.get("Postal code")).upper(),
+                                           "country": "CA" if _clean(row.get("Country")).upper() == "CA" else ""}.items() if v},
+        "recordMode": "mirror",
+    }
+
+
+CANADA = Profile(
+    source="ca-ised", job="ingest-ca", store="ca", filename="ca-corporations", extension=".csv", file_url="",
+    ra="RA000072", read=plain_csv(), mapper=ca_record, parts=CA_PARTS)
+
+
+PROFILES = {p.source: p for p in (IRELAND, FINLAND, AUSTRALIA, CANADA)}
