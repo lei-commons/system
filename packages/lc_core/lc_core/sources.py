@@ -44,8 +44,12 @@ def pipelines(path=None) -> list:
             if pipeline[key] in seen.get(key, set()):
                 raise ValueError(f"source {source['id']}: another source already uses {key} {pipeline[key]}")
             seen.setdefault(key, set()).add(pipeline[key])
+        record_url = pipeline.get("record_url")
+        if record_url and not record_url.startswith("https://"):
+            raise ValueError(f"source {source['id']}: record_url must be an https address")
         out.append({"id": source["id"], "name": source.get("name"), "country": source.get("country"),
                     "licence": source.get("licence"), "cadence": source.get("cadence"), "status": source.get("status"),
+                    "url": source.get("url"), "terms_url": source.get("terms_url"), "record_url": record_url,
                     **{k: pipeline[k] for k in REQUIRED}, "relationships": pipeline.get("relationships"), "role": role})
     return out
 

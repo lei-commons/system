@@ -69,7 +69,8 @@ def _steps(fetched, manifests):
 
 
 def _meta(manifest):
-    return {k: manifest[k] for k in ("date", "snapshotRoot", "records", "relationships", "stats")}
+    return {k: manifest[k] for k in ("date", "snapshotRoot", "records", "relationships", "stats")} | {
+        "sources": manifest.get("sources") or []}
 
 
 def run(*, bucket, connect, readers, gate=lambda: require_running(COMPONENT), log=log, settings=None) -> str:

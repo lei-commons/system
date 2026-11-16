@@ -93,3 +93,12 @@ def test_a_tampered_manifest_cannot_point_downloads_elsewhere(days):
         assert files.blob(m["date"], m["files"][0]["name"]) is None and files.blob(m["date"], m["files"][1]["name"]) is None
     finally:
         snapshots.objects[name]["data"] = original
+
+
+def test_the_fallback_credits_every_record_too(days):
+    snapshots, manifests, world = days
+    snap = load_from(snapshots, json.loads(snapshots.objects["latest.json"]["data"]))
+    some = next(iter(world.sources["gb-coh"]))
+    record = snap.entity(some)
+    assert record and record["registryUrl"] and record["credits"][0]["id"] == "gb-coh"
+    assert "Open Government Licence" in record["credits"][0]["attribution"] and record["credits"][0]["citation"]

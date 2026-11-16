@@ -53,6 +53,10 @@ CREATE TABLE {s}.relationships (
   relationship_id text PRIMARY KEY, start_node text, end_node text, start_id text, end_id text,
   relationship_type text, relationship_status text, percentage text, period_start text, period_end text
 );
+CREATE TABLE {s}.sources (
+  id text PRIMARY KEY, name text, publisher text, licence text, licence_url text, dataset_url text, record_url text,
+  attribution text NOT NULL DEFAULT '', citation text NOT NULL DEFAULT ''
+);
 CREATE TABLE {s}.meta (date text, snapshot_root text, records bigint, relationships bigint, stats jsonb,
   loaded_at timestamptz DEFAULT now(), load_version int, mode text, full_loaded_at timestamptz DEFAULT now());
 """
@@ -212,6 +216,21 @@ def apply_steps(cur, schema, steps) -> dict:
     return totals
 
 
+SOURCE_COLUMNS = [("id", "id"), ("name", "name"), ("publisher", "publisher"), ("licence", "licence"),
+                  ("licenceUrl", "licence_url"), ("datasetUrl", "dataset_url"), ("recordUrl", "record_url"),
+                  ("attribution", "attribution"), ("citation", "citation")]
+
+
+def _write_sources(cur, schema, sources):
+    """Each source's licence, attribution and citation, which every record references by its sources column."""
+    cur.execute(sql.SQL("DELETE FROM {}.sources").format(sql.Identifier(schema)))
+    for source in sources or ():
+        cur.execute(sql.SQL("INSERT INTO {}.sources ({}) VALUES ({})").format(
+            sql.Identifier(schema), sql.SQL(", ").join(sql.Identifier(c) for _, c in SOURCE_COLUMNS),
+            sql.SQL(", ").join(sql.Placeholder() * len(SOURCE_COLUMNS))),
+            [source.get(k) if k not in ("attribution", "citation") else (source.get(k) or "") for k, _ in SOURCE_COLUMNS])
+
+
 def _check_counts(cur, schema, meta):
     for table, key in (("entities", "records"), ("relationships", "relationships")):
         if not isinstance(meta.get(key), int) or isinstance(meta.get(key), bool):
@@ -244,6 +263,11 @@ def load_incremental(conn, steps, meta: dict, vacuum_after=True) -> dict:
             totals = apply_steps(cur, LIVE, steps)
             applied = time.monotonic()
             _check_counts(cur, LIVE, meta)
+            if meta.get("sources") is not None:
+                cur.execute("SELECT 1 FROM information_schema.tables WHERE table_schema = %s AND table_name = 'sources'", [LIVE])
+                if not cur.fetchone():
+                    raise LoadMismatch("the live directory has no sources table")
+                _write_sources(cur, LIVE, meta["sources"])
             cur.execute(sql.SQL("UPDATE {}.meta SET date = %s, snapshot_root = %s, records = %s, relationships = %s, "
                                 "stats = %s, load_version = %s, loaded_at = now(), mode = 'incremental'")
                         .format(sql.Identifier(LIVE)),
@@ -337,6 +361,7 @@ def load(conn, entity_files, relationship_files, meta: dict, readers=(), steps=(
     with conn.cursor() as cur:
         stats = meta.get("stats") or _stats(cur, schema)
         lap("stats")
+        _write_sources(cur, schema, meta.get("sources"))
         cur.execute(sql.SQL("INSERT INTO {}.meta (date, snapshot_root, records, relationships, stats, load_version, mode) "
                             "VALUES (%s, %s, %s, %s, %s, %s, 'full')")
                     .format(s), [meta["date"], meta["snapshotRoot"], records, relationships, json.dumps(stats), LOAD_VERSION])

@@ -27,7 +27,11 @@
 #   dataset: the dataset's name in the snapshot's NOTICE; attribution: the credit the licence asks
 #   for (empty if none); role: register (default) or lei (GLEIF): registers' values win in a
 #   merge, so LEI sources come last; relationships: an extra store of relationships, if any;
-#   image: the shared image the job runs, when several sources share one (ingest-socrata).
+#   image: the shared image the job runs, when several sources share one (ingest-socrata);
+#   record_url: where the source shows one record, with {registrationNumber}, {lei} or {directoryId}
+#   (optional; records without one link to the dataset, url). Every record carries its source URL
+#   (registryUrl), and the snapshot and database carry each source's licence, attribution and a
+#   citation (owner requirement 2026-11-16).
 #   The daily cycle's steps (Terraform), the snapshot, the site and the workflows all read these.
 
 version: 1
@@ -57,7 +61,7 @@ sources:
     approved_at: "2026-11-11"
     approval_note: In use before the approvals page; approved by the owner on 2026-11-11.
     pipeline: {job: ingest-gleif, store: gleif, records_as: gleif, label: GLEIF, refresh: new files daily, relationships: gleif-rr,
-               role: lei, dataset: GLEIF LEI golden copy, attribution: ""}
+               role: lei, dataset: GLEIF LEI golden copy, attribution: "", record_url: "https://search.gleif.org/#/record/{lei}"}
 
   - id: gb-coh
     name: UK Companies House
@@ -90,6 +94,7 @@ sources:
       status: awaiting-owner
     pipeline: {job: ingest-gb, store: gb, records_as: gb-coh, label: Companies House, refresh: monthly register,
                dataset: Companies House basic company data,
+               record_url: "https://find-and-update.company-information.service.gov.uk/company/{registrationNumber}",
                attribution: "Contains public sector information licensed under the Open Government Licence v3.0."}
 
   - id: us-ny-dos

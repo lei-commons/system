@@ -252,3 +252,35 @@ def test_old_format_snapshots_still_load(tmp_path):
     entities, _, meta = db_rows()
     assert outcome == "loaded" and entities == [("LECOZZ000000000000AA", "X LTD", None, "GB", "gb-coh", None)]
     assert meta[6] == "full" and meta[5] == 5
+
+
+def test_the_database_credits_every_record_through_its_sources(tmp_path):
+    import contextlib
+
+    from lc_directory.pg import Directory
+
+    env, world = Env(tmp_path), World(n=200)
+    m = env.publish(world)
+    env.load()
+    world.mutate()
+    m2 = env.publish(world)
+    assert env.load()[1][-1]["mode"] == "incremental"
+    with psycopg.connect(DSN) as conn:
+        rows = conn.execute("SELECT id, attribution, citation, licence FROM live.sources ORDER BY id").fetchall()
+        missing = conn.execute("SELECT count(*) FROM live.entities WHERE registry_url IS NULL OR registry_url = ''").fetchone()[0]
+        orphans = conn.execute("SELECT count(*) FROM live.entities e WHERE NOT EXISTS (SELECT 1 FROM live.sources s "
+                               "WHERE s.id = ANY(e.sources))").fetchone()[0]
+    assert {r[0] for r in rows} == {s["id"] for s in m2["sources"]} and all(r[2] for r in rows)
+    assert missing == 0 and orphans == 0  # every record has a source URL and a credited source
+
+    class Pool:
+        @contextlib.contextmanager
+        def connection(self):
+            with psycopg.connect(DSN) as conn:
+                yield conn
+
+    some = next(iter(world.sources["gb-coh"]))
+    record = Directory(Pool()).entity(some)
+    assert record["credits"][0]["id"] == "gb-coh" and record["credits"][0]["url"].endswith("/company/" + record["registrationNumber"]) \
+        if record.get("registrationNumber") else record["credits"][0]["url"]
+    assert "Open Government Licence" in record["credits"][0]["attribution"]

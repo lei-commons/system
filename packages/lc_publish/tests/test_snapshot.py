@@ -170,3 +170,16 @@ def test_snapshot_sources_come_from_the_registry():
     gb = next(s for s in got if s["id"] == "gb-coh")
     assert "Open Government Licence" in gb["attribution"] and gb["prefix"] == "gb"
     assert next(s for s in got if s["id"] == "gleif")["relationships"] == "gleif-rr"
+
+
+def test_every_record_carries_a_source_url_and_the_manifest_credits_each_source(tmp_path):
+    m = build(sources(), tmp_path, "2026-11-07")
+    rows = {r["directoryId"]: r for p in m["parts"] for r in pq.read_table(tmp_path / "parts" / p["name"]).to_pylist()}
+    assert rows[GB_ID]["registryUrl"] == "https://find-and-update.company-information.service.gov.uk/company/01234567"
+    assert rows[GLEIF_US["directoryId"]]["registryUrl"] == "https://search.gleif.org/#/record/529900T8BM49AURSDO55"
+    assert all(r["registryUrl"] for r in rows.values())
+    credited = {s["id"]: s for s in m["sources"]}
+    assert set(credited) == {"gb-coh", "gleif"}  # the sources this snapshot holds
+    gb = credited["gb-coh"]
+    assert "Open Government Licence" in gb["attribution"] and gb["citation"].startswith("UK Companies House:")
+    assert gb["licenceUrl"] and gb["datasetUrl"] and "{registrationNumber}" in gb["recordUrl"]
