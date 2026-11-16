@@ -11,7 +11,7 @@ numbers match the CRO's company numbers exactly.
 Finland (PRH open data, CC BY 4.0): every valid business as one JSON array in a ZIP (about 1.5 GB
 unzipped), read as a stream. Sole traders aren't in the open data; general partnerships, business
 partnerships and bankrupts' estates are dropped as people. The c/o line, which can name a person,
-and apartment numbers are never read. GLEIF RA000188 uses the same business IDs ("0245992-3").
+is never read. GLEIF RA000188 uses the same business IDs ("0245992-3").
 
 Australia (ASIC company dataset, data.gov.au, CC BY 3.0 AU): a monthly ZIP of tab-separated rows,
 one row per name a company has had, in ACN order; located each run through data.gov.au's catalogue
@@ -19,9 +19,8 @@ and processed once per publication. Companies only (business names, often sole t
 separate dataset); no addresses or officers. GLEIF RA000014 writes ACNs with spaces, which IDs ignore.
 
 Canada (Corporations Canada, open.canada.ca, OGL-Canada 2.0): four daily CSVs (active and inactive,
-business and other federal corporations), all processed each week, one after another. Only city,
-province and postal code are kept: a small corporation's registered office is often a director's
-home. GLEIF RA000072 writes numbers with a check digit the files lack ("1561061-3"), so about
+business and other federal corporations), all processed each week, one after another. The
+registered office's street lines are kept when given (owner decision 2026-11-16). GLEIF RA000072 writes numbers with a check digit the files lack ("1561061-3"), so about
 7,900 federal corporations with an LEI don't merge yet.
 """
 
@@ -205,7 +204,8 @@ def fi_record(company: dict) -> dict:
         next((a for a in company.get("addresses") or [] if a.get("type") == 2), None) or {}
     city = next((_clean(o.get("city")) for o in street.get("postOffices") or [] if o.get("languageCode") == "1"), "")
     line = " ".join(p for p in (_clean(street.get("street")), _clean(street.get("buildingNumber")),
-                                _clean(street.get("entrance"))) if p)
+                                _clean(street.get("entrance")), _clean(street.get("apartmentNumber")),
+                                _clean(street.get("apartmentIdSuffix"))) if p)
     line = line or (f"PL {_clean(street.get('postOfficeBox'))}" if _clean(street.get("postOfficeBox")) else "")
     line_of_business = _clean((company.get("mainBusinessLine") or {}).get("type"))
     website = _clean((company.get("website") or {}).get("url"))
@@ -356,7 +356,8 @@ def ca_record(row: dict) -> dict:
         "registrationNumber": number,
         "legalStatus": _clean(row.get("Status")) or None,
         "incorporationDate": _date(row.get("Anniversary date")),
-        "legalAddress": {k: v for k, v in {"city": _clean(row.get("City/town")).upper(),
+        "legalAddress": {k: v for k, v in {"addressLines": [x for x in (_clean(row.get("Street")), _clean(row.get("Street 2"))) if x],
+                                           "city": _clean(row.get("City/town")).upper(),
                                            "region": province if province in CA_PROVINCES else "",
                                            "postalCode": _clean(row.get("Postal code")).upper(),
                                            "country": "CA" if _clean(row.get("Country")).upper() == "CA" else ""}.items() if v},

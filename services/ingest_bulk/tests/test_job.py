@@ -140,12 +140,12 @@ def zipped_json(objects, text=None):
     return out.getvalue()
 
 
-def test_finland_mapping_never_keeps_the_care_of_line_or_apartment():
+def test_finland_keeps_the_street_but_never_the_care_of_line():
     r = FINLAND.record(FI)
     assert r["directoryId"] == mint("FI", "RA000188", "0184194-4") and r["legalForm"] == "Housing corporation"
-    assert r["legalAddress"] == {"addressLines": ["Rantakatu 13 V"], "city": "VAASA", "postalCode": "65100", "country": "FI"}
+    assert r["legalAddress"] == {"addressLines": ["Rantakatu 13 V 7"], "city": "VAASA", "postalCode": "65100", "country": "FI"}
     assert r["otherNames"] == ["Suvikartano Isännöinti"] and r["legalStatus"] == "Active" and r["industryCodes"] == ["68202"]
-    assert "Mäenpää" not in json.dumps(r) and "7" not in r["legalAddress"]["addressLines"][0].split()
+    assert "Mäenpää" not in json.dumps(r) and "c/o" not in json.dumps(r)
 
 
 def test_finland_status_codes_are_translated():

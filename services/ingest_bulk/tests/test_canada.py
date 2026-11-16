@@ -59,15 +59,18 @@ class MemStore:
         pass
 
 
-def test_canada_keeps_city_province_postcode_only():
+def test_canada_keeps_the_street_when_given_and_never_requires_it():
     import csv
     import io
 
     row = next(csv.DictReader(io.StringIO(HEADER + DISSOLVED)))
     r = CANADA.record(row)
     assert r["directoryId"] == mint("CA", "RA000072", "68217") and r["otherNames"] == ["X HOLDINGS INC."]
-    assert r["legalAddress"] == {"city": "TORONTO", "region": "ON", "postalCode": "M5J 3A4", "country": "CA"}
-    assert "Grand Trunk" not in json.dumps(r) and r["legalStatus"] == "Dissolved"
+    assert r["legalAddress"] == {"addressLines": ["Apt 2506, 30 Grand Trunk Cres"], "city": "TORONTO", "region": "ON",
+                                 "postalCode": "M5J 3A4", "country": "CA"}
+    assert r["legalStatus"] == "Dissolved"
+    bare = CANADA.record(dict(row, Street=""))
+    assert "addressLines" not in bare["legalAddress"] and bare["legalAddress"]["city"] == "TORONTO"  # optional
     with pytest.raises(Skip):
         ca_record(dict(row, **{"Corporation number": ""}))
 
