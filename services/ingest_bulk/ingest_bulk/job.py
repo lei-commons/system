@@ -43,8 +43,11 @@ def gate_for(profile: Profile):
 
 def find_for(profile: Profile, today: date):
     def find(gateway, manifest=None):
-        key = profile.key(today)
-        return key, profile.url(), f"{profile.filename}-{key}{profile.extension}"
+        if profile.locate:  # the register's file moves with each publication: ask its catalogue where it is
+            key, url = profile.locate(gateway)
+        else:
+            key, url = profile.key(today), profile.url()
+        return key, url, f"{profile.filename}-{key}{profile.extension}"
     return find
 
 

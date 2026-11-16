@@ -12,6 +12,11 @@ Finland (PRH open data, CC BY 4.0): every valid business as one JSON array in a 
 unzipped), read as a stream. Sole traders aren't in the open data; general partnerships, business
 partnerships and bankrupts' estates are dropped as people. The c/o line, which can name a person,
 and apartment numbers are never read. GLEIF RA000188 uses the same business IDs ("0245992-3").
+
+Australia (ASIC company dataset, data.gov.au, CC BY 3.0 AU): a monthly ZIP of tab-separated rows,
+one row per name a company has had, in ACN order; located each run through data.gov.au's catalogue
+and processed once per publication. Companies only (business names, often sole traders, are a
+separate dataset); no addresses or officers. GLEIF RA000014 writes ACNs with spaces, which IDs ignore.
 """
 
 from __future__ import annotations
@@ -107,6 +112,7 @@ class Profile:
     ra: str              # GLEIF's code for the register: directory IDs are minted with it
     read: object = None
     mapper: object = None
+    locate: object = None  # gateway -> (key, url), for registers whose file moves with each publication
 
     def url(self) -> str:
         return self.file_url
@@ -220,4 +226,95 @@ FINLAND = Profile(
     read=zipped_json_array(), mapper=fi_record)
 
 
-PROFILES = {p.source: p for p in (IRELAND, FINLAND)}
+# ---- Australia ----
+
+AU_TYPES = {"APTY": "Australian proprietary company", "APUB": "Australian public company", "FNOS": "Foreign company",
+            "RACN": "Registered Australian body"}
+AU_CLASSES = {"LMSH": "limited by shares", "LMGT": "limited by guarantee", "LMSG": "limited by shares and guarantee",
+              "UNLM": "unlimited", "NLIA": "no liability"}
+AU_STATUS = {"REGD": "Registered", "DRGD": "Deregistered", "SOFF": "Strike-off action in progress",
+             "EXAD": "External administration", "NOAC": "Not active", "CNCL": "Cancelled", "DISS": "Dissolved"}
+
+
+def grouped_tsv(key: str, encoding="utf-8-sig"):
+    """A reader for a ZIP holding one tab-separated file sorted by ``key``: one dict per key, with all its rows."""
+    def read(binary_file):
+        with zipfile.ZipFile(binary_file) as z:
+            names = [n for n in z.namelist() if n.lower().endswith((".csv", ".txt", ".tsv"))]
+            if len(names) != 1:
+                raise ValueError(f"expected one data file in the archive, found {names}")
+            with z.open(names[0]) as raw:
+                group, last = [], None
+                for row in csv.DictReader(io.TextIOWrapper(raw, encoding=encoding, newline=""), delimiter="\t"):
+                    k = _clean(row.get(key))
+                    if group and k != last:
+                        if k < last:
+                            raise ValueError(f"the file isn't in {key} order at {k}")
+                        yield {"key": last, "rows": group}
+                        group = []
+                    group.append(row)
+                    last = k
+                if group:
+                    yield {"key": last, "rows": group}
+    return read
+
+
+def _au_date(value) -> str | None:
+    value = _clean(value)
+    if len(value) == 10 and value[2] == "/" and value[5] == "/":
+        return f"{value[6:]}-{value[3:5]}-{value[:2]}"
+    return None
+
+
+def au_record(company: dict) -> dict:
+    rows = company["rows"]
+    current = next((r for r in rows if _clean(r.get("Current Name Indicator")) == "Y"), None)
+    acn = _clean(company["key"])
+    if current is None or not acn.isdigit():
+        raise Skip("no current name or number")
+    name = _clean(current.get("Company Name"))
+    if not name:
+        raise Skip("no number or name")
+    kind, klass = _clean(current.get("Type")), _clean(current.get("Class"))
+    form = AU_TYPES.get(kind, kind)
+    if klass in AU_CLASSES:
+        form = f"{form}, {AU_CLASSES[klass]}"
+    others = sorted({_clean(r.get("Company Name")) for r in rows if r is not current} - {name, ""})
+    status = _clean(current.get("Status"))
+    return {
+        "directoryId": mint("AU", "RA000014", acn),
+        "legalName": name,
+        "otherNames": others,
+        "legalForm": form or None,
+        "legalJurisdiction": None if kind == "FNOS" else "AU",
+        "registrationAuthority": "AU-ASIC",
+        "registrationNumber": acn,
+        "legalStatus": AU_STATUS.get(status, status) or None,
+        "incorporationDate": _au_date(current.get("Date of Registration")),
+        "dissolutionDate": _au_date(current.get("Date of Deregistration")),
+        "legalAddress": {"country": "AU"},
+        "recordMode": "mirror",
+    }
+
+
+AU_PACKAGE = "https://data.gov.au/data/api/3/action/package_show?id=asic-companies"
+
+
+def au_locate(gateway):
+    """The current extract, from the catalogue: (its name, e.g. company_202611, and its URL)."""
+    resources = gateway.get_json(AU_PACKAGE)["result"]["resources"]
+    zips = [r for r in resources if (r.get("format") or "").upper() == "ZIP" and "current" in (r.get("name") or "").lower()]
+    if len(zips) != 1:
+        raise ValueError(f"expected one current ZIP in the ASIC dataset, found {len(zips)}")
+    url = zips[0]["url"]
+    if not url.startswith("https://data.gov.au/"):
+        raise ValueError(f"the ASIC extract is served from an unexpected place: {url}")
+    return url.rsplit("/", 1)[-1].rsplit(".", 1)[0].lower(), url
+
+
+AUSTRALIA = Profile(
+    source="au-asic", job="ingest-au", store="au", filename="au-asic", extension=".zip", file_url="", ra="RA000014",
+    read=grouped_tsv("ACN"), mapper=au_record, locate=au_locate)
+
+
+PROFILES = {p.source: p for p in (IRELAND, FINLAND, AUSTRALIA)}

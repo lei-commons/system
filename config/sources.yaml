@@ -379,7 +379,7 @@ sources:
     access: open
     method: bulk
     licence: CC-BY-3.0-AU
-    cadence: weekly
+    cadence: monthly
     status: active
     url: https://www.data.gov.au/data/dataset/asic-companies
     terms_url: https://creativecommons.org/licenses/by/3.0/au/
@@ -393,6 +393,9 @@ sources:
         sole traders, are a separate dataset and would not be used. A third-party page puts it at about
         2.1 million companies (unverified).
       verified: false
+    pipeline: {job: ingest-au, image: ingest-bulk, store: au, records_as: au-asic, label: ASIC (Australia),
+               refresh: monthly extract, dataset: "ASIC Company Dataset (data.gov.au)",
+               attribution: "Contains data from the Australian Securities and Investments Commission (ASIC), licensed under CC BY 3.0 AU."}
 
   - id: jp-nta
     name: Japan National Tax Agency corporate numbers
