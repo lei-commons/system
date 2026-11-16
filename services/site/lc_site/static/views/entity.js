@@ -25,6 +25,21 @@ function relationshipList(rel) {
     rel.downTotal > rel.down.length ? h("li", { class: "muted" }, `…and ${fmt(rel.downTotal - rel.down.length)} more below. Explore the graph to see them.`) : null);
 }
 
+// Every record says where it came from: each source's page for it (or its dataset), the licence,
+// the attribution the licence asks for, and a citation to copy (owner requirement 2026-11-16).
+function creditsCard(credits) {
+  const link = (href, text) => (href ? h("a", { href, target: "_blank", rel: "noopener noreferrer" }, text, " ↗") : null);
+  return h("section", { class: "card card-pad credits", style: { marginTop: "18px" } }, h("h3", {}, "Sources and attribution"),
+    credits.length ? h("div", { class: "grid", style: { gap: "12px" } }, ...credits.map((c) => h("div", { class: "credit" },
+      h("div", { class: "credit-head" }, h("strong", {}, c.publisher || c.name || c.id),
+        c.name && c.publisher ? h("span", { class: "muted" }, ` · ${c.name}`) : null),
+      h("div", { class: "toolbar", style: { margin: "4px 0" } }, link(c.url, "This record at the source"),
+        c.licence ? (c.licenceUrl ? link(c.licenceUrl, `Licence: ${c.licence}`) : h("span", { class: "chip" }, `Licence: ${c.licence}`)) : null),
+      c.attribution ? h("p", { class: "credit-attribution" }, c.attribution) : null,
+      c.citation ? h("details", {}, h("summary", { class: "muted" }, "Citation"), h("p", { class: "mono credit-citation" }, c.citation)) : null)))
+      : h("p", { class: "muted" }, "No source details for this record."));
+}
+
 export async function render(root, id) {
   let record, rel;
   try {
@@ -52,7 +67,7 @@ export async function render(root, id) {
           fact("Registration number", record.registrationNumber, true), fact("Registration authority", record.registrationAuthority),
           fact("Legal form", record.legalForm), fact("Jurisdiction", record.legalJurisdiction),
           fact("Incorporated", record.incorporationDate), fact("Dissolved", record.dissolutionDate),
-          fact("Register", record.registryUrl ? h("a", { href: record.registryUrl, target: "_blank", rel: "noopener noreferrer" }, "View at the register") : null))),
+          fact("Source", record.registryUrl ? h("a", { href: record.registryUrl, target: "_blank", rel: "noopener noreferrer" }, "View at the source") : null))),
       h("section", { class: "card card-pad" }, h("h3", {}, "Ownership and funds"), mini,
         h("p", { class: "muted", style: { marginBottom: 0 } }, `${rel.up.length} above · ${fmt(rel.downTotal)} below`)),
       h("section", { class: "card card-pad" }, h("h3", {}, "Addresses"),
@@ -62,9 +77,10 @@ export async function render(root, id) {
       h("section", { class: "card card-pad" }, h("h3", {}, "Names and activity"),
         record.otherNames && record.otherNames.length ? [h("div", { class: "muted" }, "Other and previous names"),
           h("ul", {}, ...record.otherNames.map((n) => h("li", {}, n)))] : h("p", { class: "muted" }, "No other names recorded."),
-        record.industryCodes && record.industryCodes.length ? [h("div", { class: "muted" }, "Industry codes (SIC)"),
+        record.industryCodes && record.industryCodes.length ? [h("div", { class: "muted" }, "Industry codes (as the register classifies them)"),
           h("div", { class: "toolbar" }, ...record.industryCodes.map((c) => h("span", { class: "chip mono" }, c)))] : null)),
-    h("section", { class: "card card-pad", style: { marginTop: "18px" } }, h("h3", {}, "Relationships"), relationshipList(rel))));
+    h("section", { class: "card card-pad", style: { marginTop: "18px" } }, h("h3", {}, "Relationships"), relationshipList(rel)),
+    creditsCard(record.credits || [])));
 
   if (!rel.up.length && !rel.down.length) {
     mini.replaceChildren(h("div", { class: "empty" }, "No relationships recorded."));

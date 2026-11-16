@@ -25,15 +25,29 @@ from lc_core.snapshot_format import (CHANGES_KIND, ENTITY_KIND, RELATIONSHIP_CHA
                                      RELATIONSHIP_KIND, SCHEMA_VERSION, SHARDS, days_between, group_of, part_name,
                                      parts_for)
 
+from lc_core.attribution import record_url
+
 from .merkle import StreamingRoot, leaf, root
 
 def sources(path=None) -> list:
     """The built sources, in merge order (registers before GLEIF; earlier sources win on conflicting fields),
-    from config/sources.yaml: [{id (what records carry), prefix (store), name, licence, attribution, relationships}]."""
+    from config/sources.yaml, with what every record needs to credit them: [{id (what records carry), prefix
+    (store), name, publisher, licence, licenceUrl, datasetUrl, recordUrl (a template, or None), attribution,
+    citation, relationships}]."""
     from lc_core.sources import merge_order
 
-    return [{"id": p["records_as"], "prefix": p["store"], "name": p["dataset"], "licence": p["licence"] or "unstated",
-             "attribution": p["attribution"] or "", "relationships": p.get("relationships")} for p in merge_order(path)]
+    out = []
+    for p in merge_order(path):
+        licence = p["licence"] or "unstated"
+        citation = " ".join(part for part in (
+            f"{p['name']}: {p['dataset']}.", f"{p['url']}." if p.get("url") else "",
+            f"Licence: {licence}" + (f" ({p['terms_url']})." if p.get("terms_url") else "."),
+            p["attribution"] or "", "Retrieved and processed by lei-commons (records merged and normalised).") if part)
+        out.append({"id": p["records_as"], "prefix": p["store"], "name": p["dataset"], "publisher": p["name"],
+                    "licence": licence, "licenceUrl": p.get("terms_url"), "datasetUrl": p.get("url"),
+                    "recordUrl": p.get("record_url"), "attribution": p["attribution"] or "", "citation": citation,
+                    "relationships": p.get("relationships")})
+    return out
 
 
 SCALARS = ["directoryId", "lei", "legalName", "legalForm", "legalJurisdiction", "registrationAuthority",
@@ -86,12 +100,17 @@ def normalise_status(value):
     return STATUS_SPELLINGS.get(value, value) if isinstance(value, str) else value
 
 
-def entity_row(record: dict) -> dict:
-    """The published row: exactly the Parquet columns, all strings. A record's leaf is the hash of this."""
+def entity_row(record: dict, by_id: dict = None) -> dict:
+    """The published row: exactly the Parquet columns, all strings. A record's leaf is the hash of this.
+
+    ``by_id`` (source id -> source, from ``sources()``) fills registryUrl, when the record has none, with
+    where its first source shows it: every record carries a URL for its source."""
     row = {}
     for c in SCALARS:
         value = record.get(c)
         row[c] = None if value is None else str(value)
+    if not row["registryUrl"] and by_id and record.get("sources"):
+        row["registryUrl"] = record_url(record, by_id.get(record["sources"][0]) or {})
     row["legalStatus"] = normalise_status(row["legalStatus"])
     for c in NESTED:
         value = record.get(c)
@@ -249,6 +268,7 @@ def build_sharded(readers: dict, out: Path, date: str, *, settings, previous: di
     counted = Counter()
     registered = sources()
     order = [s["id"] for s in registered]
+    by_id = {s["id"]: s for s in registered}
     per_source = {s["id"]: 0 for s in registered}
     stats = {"byCountry": Counter(), "bySources": Counter(), "byStatus": Counter(), "relationshipTypes": Counter()}
     lei_to_id = {}
@@ -286,7 +306,7 @@ def build_sharded(readers: dict, out: Path, date: str, *, settings, previous: di
             for sid, records in shard.items():
                 per_source[sid] += len(records)
             merged = merge(shard, order)
-            rows = [entity_row(merged[d]) for d in sorted(merged)]
+            rows = [entity_row(merged[d], by_id) for d in sorted(merged)]
             leaves = [leaf(r) for r in rows]
             part_rows, part_leaves, part_info = defaultdict(list), defaultdict(list), {}
             for row, h in zip(rows, leaves):
@@ -374,7 +394,8 @@ def build_sharded(readers: dict, out: Path, date: str, *, settings, previous: di
                    "groups": {p["group"]: p["of"] for p in part_entries}},
         "stats": {k: _top(v, STATS_TOP.get(k)) for k, v in stats.items()},
         "settings": {"fullEveryDays": settings.full_every_days, "fullWhenChangesExceed": settings.full_when_changes_exceed},
-        "sources": [{k: s[k] for k in ("id", "name", "licence", "attribution")} for s in registered if per_source[s["id"]]],
+        "sources": [{k: s[k] for k in ("id", "name", "publisher", "licence", "licenceUrl", "datasetUrl", "recordUrl",
+                                        "attribution", "citation")} for s in registered if per_source[s["id"]]],
     }
     if decision_log:  # the seal of the decision log up to yesterday, anchored with the manifest
         manifest["decisionLog"] = decision_log

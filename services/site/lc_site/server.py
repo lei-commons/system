@@ -262,7 +262,8 @@ def load_from(bucket, latest: dict):
             changes = [([fetch(f["object"], f["sha256"]) for f in m["files"] if f["kind"] == "changes"],
                         [fetch(f["object"], f["sha256"]) for f in m["files"] if f["kind"] == "relationship-changes"])
                        for m in steps]
-            return Snapshot(files, {k: manifest[k] for k in ("date", "snapshotRoot")}, rels, changes=changes)
+            return Snapshot(files, {k: manifest[k] for k in ("date", "snapshotRoot")}, rels, changes=changes,
+                            sources=manifest.get("sources") or ())
         files = [fetch(f"{latest['prefix']}/{name}") for name in latest.get("files", [])]
         rels = [fetch(f"{latest['prefix']}/{name}") for name in latest.get("relationships", [])]
         return Snapshot(files, {k: latest[k] for k in ("date", "snapshotRoot")}, rels)
