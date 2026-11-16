@@ -332,7 +332,7 @@ sources:
     access: open
     method: bulk
     licence: CC-BY-4.0
-    cadence: daily
+    cadence: weekly
     status: active
     url: https://avoindata.prh.fi/en
     terms_url: https://prh.fi/en/companiesandorganisations/tietopalvelut/prhopendata.html
@@ -345,6 +345,9 @@ sources:
         updated daily, with a single compressed download of all valid businesses (YTJ API v3). Sole traders
         (toiminimi) are people and would be dropped.
       verified: false
+    pipeline: {job: ingest-fi, image: ingest-bulk, store: fi, records_as: fi-prh, label: Finnish Trade Register (PRH),
+               refresh: weekly, dataset: "PRH open data: all companies (avoindata.prh.fi)",
+               attribution: "Source: Finnish Patent and Registration Office (PRH), open data, licensed under CC BY 4.0."}
 
   - id: ie-cro
     name: Ireland Companies Registration Office (open data)

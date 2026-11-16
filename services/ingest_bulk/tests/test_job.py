@@ -115,3 +115,65 @@ def test_a_weekly_run():
     assert store.manifest["processed"] == ["2026-W47"]
     assert run(IRELAND, FakeGateway(b""), store, today=date(2026, 11, 19), gate=lambda: None, allowlist=AllowList.load(),
                log=lambda r: None) == "already-done"
+
+
+# ---- Finland ----
+
+from lc_ingest.bulk import FINLAND, fi_record, zipped_json_array  # noqa: E402
+
+FI = {"businessId": {"value": "0184194-4", "registrationDate": "1978-03-15"},
+      "names": [{"name": "Asunto Oy Vaasan Suvikartano", "type": "1", "endDate": None},
+                {"name": "Old Name Oy", "type": "1", "endDate": "2001-01-01"},
+                {"name": "Suvikartano Isännöinti", "type": "3", "endDate": None}],
+      "mainBusinessLine": {"type": "68202"}, "website": {"url": "www.example.fi"},
+      "companyForms": [{"type": "2", "descriptions": [{"languageCode": "3", "description": "Housing corporation"}], "endDate": None}],
+      "companySituations": [],
+      "addresses": [{"type": 1, "street": "Rantakatu", "buildingNumber": "13", "entrance": "V", "apartmentNumber": "7",
+                     "co": "c/o Markku Mäenpää", "postCode": "65100",
+                     "postOffices": [{"city": "VAASA", "languageCode": "1"}, {"city": "VASA", "languageCode": "2"}]}]}
+
+
+def zipped_json(objects, text=None):
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as z:
+        z.writestr("data_20261116.json", text if text is not None else json.dumps(objects, ensure_ascii=False))
+    return out.getvalue()
+
+
+def test_finland_mapping_never_keeps_the_care_of_line_or_apartment():
+    r = FINLAND.record(FI)
+    assert r["directoryId"] == mint("FI", "RA000188", "0184194-4") and r["legalForm"] == "Housing corporation"
+    assert r["legalAddress"] == {"addressLines": ["Rantakatu 13 V"], "city": "VAASA", "postalCode": "65100", "country": "FI"}
+    assert r["otherNames"] == ["Suvikartano Isännöinti"] and r["legalStatus"] == "Active" and r["industryCodes"] == ["68202"]
+    assert "Mäenpää" not in json.dumps(r) and "7" not in r["legalAddress"]["addressLines"][0].split()
+
+
+def test_finland_status_codes_are_translated():
+    r = FINLAND.record({**FI, "companySituations": [{"type": "KONK", "endDate": None}]})
+    assert r["legalStatus"] == "Bankruptcy"
+
+
+@pytest.mark.parametrize("change,why", [
+    ({"companyForms": [{"type": "5", "endDate": None}]}, "natural person"),
+    ({"companyForms": [{"type": "54", "endDate": None}]}, "natural person"),
+    ({"companyForms": [{"type": "16", "endDate": "2020-01-01"}]}, "no current company form"),
+    ({"names": [{"name": "Old", "type": "1", "endDate": "2020-01-01"}]}, "no number or name"),
+])
+def test_finland_drops_people_and_unusable_records(change, why):
+    with pytest.raises(Skip, match=why):
+        fi_record({**FI, **change})
+
+
+@pytest.mark.parametrize("chunk", [1, 7, 64, 1 << 20])
+def test_the_json_stream_is_exact_whatever_the_chunk_size(chunk):
+    objects = [{**FI, "businessId": {"value": f"{i:07d}-{i % 10}"}, "names": [{"name": f"Öljy-yhtiö {i} äö 🚢", "type": "1"}]}
+               for i in range(40)]
+    got = list(zipped_json_array(chunk=chunk)(io.BytesIO(zipped_json(objects))))
+    assert got == objects
+
+
+@pytest.mark.parametrize("text,why", [('{"a": 1}', "not a JSON array"), ('[{"a": 1}, {"b": ', "ends part-way|isn't closed"),
+                                      ('[{"a": 1}', "isn't closed")])
+def test_a_broken_file_is_an_error_not_a_short_read(text, why):
+    with pytest.raises(ValueError, match=why):
+        list(zipped_json_array(chunk=4)(io.BytesIO(zipped_json(None, text=text))))
