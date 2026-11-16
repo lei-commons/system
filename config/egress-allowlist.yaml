@@ -18,7 +18,7 @@ registry_hosts:
   # opendata.cro.ie redirects the download to a signed link on its object storage.
   - opendata.cro.ie
   - nl-ams-1.linodeobjects.com
-  # Finland PRH open data (source fi-prh, approved 2026-11-16; host to be confirmed by the owner):
+  # Owner approved 2026-11-16 for Finland's PRH open data (source fi-prh):
   - avoindata.prh.fi
   - www.dos.pa.gov
   - dadosabertos.rfb.gov.br
