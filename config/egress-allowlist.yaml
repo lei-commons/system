@@ -22,7 +22,7 @@ registry_hosts:
   - avoindata.prh.fi
   # Owner approved 2026-11-16 for the ASIC company dataset (source au-asic):
   - data.gov.au
-  # Canada federal corporations (source ca-ised, approved 2026-11-16; host to be confirmed by the owner):
+  # Owner approved 2026-11-16 for Canada's federal corporations (source ca-ised):
   # open.canada.ca's dataset links its files on ISED's CloudFront distribution.
   - d4bf66bykfyaf.cloudfront.net
   - www.dos.pa.gov
