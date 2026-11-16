@@ -352,7 +352,7 @@ sources:
     access: open
     method: bulk
     licence: CC-BY-4.0
-    cadence: daily
+    cadence: weekly
     status: active
     url: https://opendata.cro.ie/dataset/companies
     terms_url: https://opendata.cro.ie/dataset/companies
@@ -366,6 +366,9 @@ sources:
         is only in the CRO's separate paid bulk licence, which is not needed). Business names (often people) are a
         separate register and would not be used.
       verified: false
+    pipeline: {job: ingest-ie, image: ingest-bulk, store: ie, records_as: ie-cro, label: Companies Registration Office (Ireland),
+               refresh: weekly, dataset: "Company Records (opendata.cro.ie)",
+               attribution: "Contains Irish Public Sector Data (Companies Registration Office) licensed under a Creative Commons Attribution 4.0 International (CC BY 4.0) licence."}
 
   - id: au-asic
     name: Australia ASIC company dataset
