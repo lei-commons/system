@@ -14,7 +14,7 @@ registry_hosts:
   - data.colorado.gov
   - data.oregon.gov
   - data.ct.gov
-  # Ireland CRO open data (source ie-cro, approved 2026-11-16; hosts to be confirmed by the owner):
+  # Owner approved 2026-11-16 for Ireland's CRO open data (source ie-cro):
   # opendata.cro.ie redirects the download to a signed link on its object storage.
   - opendata.cro.ie
   - nl-ams-1.linodeobjects.com
