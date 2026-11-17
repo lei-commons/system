@@ -75,11 +75,20 @@ def latest_month(gateway, today: date) -> str:
     raise FetchError("no CNPJ release in the last three months")
 
 
-def _download(gateway, url, work):
+def _download(gateway, url, work, log=log, attempts: int = None):
+    """Download a ZIP, checking it is one: a cut-short download or an error page is fetched again, up to
+    DOWNLOAD_ATTEMPTS times (2026-11-17: one bad Empresas download failed the whole cycle)."""
+    attempts = attempts or DOWNLOAD_ATTEMPTS
     path = os.path.join(work, url.rsplit("/", 1)[-1])
-    with open(path, "wb") as f:
-        gateway.download(url, f)
-    return path
+    for attempt in range(1, attempts + 1):
+        with open(path, "wb") as f:
+            gateway.download(url, f)
+        if zipfile.is_zipfile(path):
+            return path
+        log({"event": "bad-download", "source": "br", "publish": url.rsplit("/", 2)[-2] + " " + url.rsplit("/", 1)[-1],
+             "attempt": attempt})
+    os.remove(path)
+    raise zipfile.BadZipFile(f"{url.rsplit('/', 1)[-1]} isn't a valid ZIP after {attempts} downloads")
 
 
 class Lookup:
@@ -105,7 +114,7 @@ def build(gateway, lookup, month, log=log) -> dict:
     with tempfile.TemporaryDirectory(prefix="br-lookup-") as work:
         def companies():
             for k in range(FILES):
-                path = _download(gateway, f"{SHARE}/{month}/Empresas{k}.zip", work)
+                path = _download(gateway, f"{SHARE}/{month}/Empresas{k}.zip", work, log=log)
                 with open(path, "rb") as f:
                     yield f
                 os.remove(path)  # the disk is memory on Cloud Run
@@ -133,7 +142,7 @@ def run(gateway, store, lookup_for, today=None, gate=gate, allowlist=None, log=l
     if not lookup.ready():
         build(gateway, lookup, month, log=log)
     with tempfile.TemporaryDirectory(prefix="br-mun-") as work:
-        with open(_download(gateway, f"{SHARE}/{month}/Municipios.zip", work), "rb") as f:
+        with open(_download(gateway, f"{SHARE}/{month}/Municipios.zip", work, log=log), "rb") as f:
             municipalities = read_municipalities(f)
     to_record = mapper(municipalities)
     allowlist = allowlist or AllowList.load()
