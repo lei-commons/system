@@ -1,3 +1,4 @@
+import pytest
 import gzip
 import io
 import json
@@ -164,3 +165,38 @@ def test_a_bad_download_is_fetched_again():
                log=events.append) == "done"
     assert [e["attempt"] for e in events if e["event"] == "bad-download"] == [1]
     assert "2026-10 estab1" in store.manifest["processed"]
+
+
+def test_a_bad_company_file_is_fetched_again_before_the_lookup_is_built():
+    """2026-11-17: one bad Empresas download failed the whole daily cycle; it is now checked and fetched again."""
+    MemLookup.built, MemLookup.shards = 0, {}
+    store, events = MemStore(), []
+    gw = FakeGateway()
+    target = f"{SHARE}/2026-10/Empresas3.zip"
+    good = gw.files[target]
+    gw.files[target] = b"<html>busy</html>"
+    original = gw.download
+
+    def download(t, file):
+        n = original(t, file)
+        if t == target:
+            gw.files[t] = good  # the second attempt gets the real file
+        return n
+
+    gw.download = download
+    assert run(gw, store, lambda m: MemLookup(), today=date(2026, 11, 9), gate=lambda: None, allowlist=AllowList.load(),
+               log=events.append) == "done"
+    assert [(e["publish"], e["attempt"]) for e in events if e["event"] == "bad-download"] == [("2026-10 Empresas3.zip", 1)]
+    assert any(e["event"] == "lookup-built" for e in events)
+
+
+def test_a_company_file_that_stays_bad_stops_the_run_after_three_tries():
+    import zipfile
+
+    MemLookup.built, MemLookup.shards = 0, {}
+    gw, events = FakeGateway(), []
+    gw.files[f"{SHARE}/2026-10/Empresas0.zip"] = b"not a zip"
+    with pytest.raises(zipfile.BadZipFile, match="after 3 downloads"):
+        run(gw, MemStore(), lambda m: MemLookup(), today=date(2026, 11, 9), gate=lambda: None, allowlist=AllowList.load(),
+            log=events.append)
+    assert [e["attempt"] for e in events if e["event"] == "bad-download"] == [1, 2, 3]
