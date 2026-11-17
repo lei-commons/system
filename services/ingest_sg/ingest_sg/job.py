@@ -77,7 +77,7 @@ def fetch_all(sleep=time.sleep):
 def run(gateway, store, gate=gate, allowlist=None, log=log, sleep=time.sleep) -> str:
     return run_ingest(gateway=gateway, store=store, gate=gate, find=find, read=read_csv, mapper=sg_record,
                       source="sg-acra", maker="ingestion@sg", allowlist=allowlist or AllowList.load(), log=log,
-                      fetch=fetch_all(sleep))
+                      fetch=fetch_all(sleep), sleep=sleep)
 
 
 def main() -> int:

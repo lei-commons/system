@@ -68,7 +68,11 @@ def test_joins_all_datasets_and_drops_sole_proprietors():
 def test_a_short_collection_fails_rather_than_loading_part_of_the_register():
     import pytest
     from lc_core.fetch import FetchError
+    from lc_ingest.filecheck import BadFile
 
-    with pytest.raises(FetchError):
-        run(FakeGateway(datasets=["d_0"]), MemStore(), gate=lambda: None, allowlist=AllowList.load(), log=lambda r: None,
+    events = []
+    with pytest.raises(BadFile, match="lists only 1 datasets") as raised:
+        run(FakeGateway(datasets=["d_0"]), MemStore(), gate=lambda: None, allowlist=AllowList.load(), log=events.append,
             sleep=lambda s: None)
+    assert isinstance(raised.value.__cause__, FetchError)  # tried again (it may be passing), then reported clearly
+    assert [e["event"] for e in events if "download" in e["event"]] == ["bad-download", "bad-download", "download-failed"]

@@ -45,6 +45,10 @@ class _Busy(Exception):
         self.error, self.retry_after = error, retry_after
 
 
+class IncompleteDownload(FetchError):
+    """The server declared a length and less arrived, or the transfer broke off."""
+
+
 def _seconds(value):
     try:
         return max(0, int(value)) if value else None
@@ -118,19 +122,35 @@ class Gateway:
             return conn, resp
         raise FetchError(f"more than {MAX_REDIRECTS} redirects")
 
-    def get_json(self, target: str):
-        conn, resp = self.open(target, headers={"Accept": "application/json"})
-        try:
-            return json.loads(resp.read())
-        finally:
-            conn.close()
+    def get_json(self, target: str, attempts: int = 3):
+        """A JSON document; an answer that isn't JSON (cut short, an error page) is fetched again."""
+        for attempt in range(1, attempts + 1):
+            conn, resp = self.open(target, headers={"Accept": "application/json"})
+            try:
+                return json.loads(resp.read())
+            except (ValueError, OSError) as exc:
+                if attempt == attempts:
+                    raise FetchError(f"{target} didn't answer with JSON after {attempts} tries ({type(exc).__name__})") from exc
+                self._sleep(2 * attempt)
+            finally:
+                conn.close()
 
     def download(self, target: str, file) -> int:
-        """Stream ``target`` into an open binary file. Returns the bytes written."""
+        """Stream ``target`` into an open binary file. Returns the bytes written.
+
+        Raises IncompleteDownload if the transfer ends before the length the server declared."""
         conn, resp = self.open(target)
         try:
             start = file.tell()
-            shutil.copyfileobj(resp, file, CHUNK)
-            return file.tell() - start
+            declared = resp.getheader("Content-Length")
+            encoded = (resp.getheader("Content-Encoding") or "identity").lower() != "identity"
+            try:
+                shutil.copyfileobj(resp, file, CHUNK)
+            except (OSError, http.client.HTTPException) as exc:
+                raise IncompleteDownload(f"{target}: the transfer broke off ({type(exc).__name__})") from exc
+            written = file.tell() - start
+            if declared and declared.isdigit() and not encoded and written != int(declared):
+                raise IncompleteDownload(f"{target}: {written} of {declared} bytes arrived")
+            return written
         finally:
             conn.close()
