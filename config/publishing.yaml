@@ -1,0 +1,30 @@
+# How snapshots are published, kept and loaded (docs/snapshots-v2.md).
+# Every setting is required and checked when read (lc_core.publishing): a missing, unknown
+# or out-of-range value stops the job before it writes anything.
+# Changes take effect at the next deploy, except noncurrent_retain_days, a bucket lifecycle
+# rule applied by Terraform (owner's bootstrap rerun).
+
+version: 1
+
+snapshots:
+  full_every_days: 7            # x: a full snapshot at least every x days; changes only in between (1 = full every day)
+  retain_days: 30               # y: day folders older than this are deleted, unless a kept day still needs them
+  noncurrent_retain_days: 7     # z: old versions of overwritten or deleted objects are deleted after this many days (Terraform)
+  part_target_records: 2000000  # records per part file, roughly (a group splits into 2, 4, 8... parts)
+  change_file_max_rows: 1000000 # rows per change file
+  full_when_changes_exceed: 0.25  # a day changing more than this share of records becomes a full snapshot
+  state_kept: 3                 # days of build state kept in the data bucket
+  prune_grace_days: 2           # a part is deleted only after being unreferenced this long
+  prune_dry_run: false          # true: log what pruning would delete, delete nothing
+
+storage:
+  # The data bucket is versioned too: every overwrite of an ingestion shard keeps the old
+  # copy. Old versions older than this are deleted (Terraform). The ledgers keep the history.
+  data_noncurrent_retain_days: 30
+
+load:
+  incremental: true             # apply each day's changes instead of reloading everything
+  incremental_max_days: 14      # further behind than this: reload in full
+  incremental_max_fraction: 0.2 # changes above this share of records: reload in full
+  fallback_to_full: true        # an incremental load that fails a check is rolled back and loaded in full
+  vacuum_after_incremental: true

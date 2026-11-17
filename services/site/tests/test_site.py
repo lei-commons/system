@@ -6,8 +6,13 @@ from types import SimpleNamespace as NS
 
 import pytest
 
-from lc_publish.snapshot import build
+from lc_core.publishing import load as load_settings
+from lc_publish.snapshot import build as build_snapshot
 from lc_site.data import MAX_LIMIT, Snapshot
+
+
+def build(recs, out, date, **kw):
+    return build_snapshot(recs, out, date, settings=load_settings().snapshots, **kw)
 from lc_site.server import make_server
 
 OWNER = "owner@nfh.test"
@@ -35,15 +40,11 @@ RELS = {"REL1": {"directoryId": "REL1", "startNode": "529900T8BM49AURSDO55", "en
 
 @pytest.fixture(scope="module")
 def snap(tmp_path_factory):
-    from lc_publish.shards import shard_of
-    from lc_publish.snapshot import build_sharded
-
     out = tmp_path_factory.mktemp("snap")
-    recs = records()
-    readers = {sid: (lambda n, r=r: {k: v for k, v in r.items() if shard_of(k) == n}) for sid, r in recs.items()}
-    m = build_sharded(readers, out, "2026-11-07", relationships=lambda n: {k: v for k, v in RELS.items() if shard_of(k) == n})
-    entity_files = [str(out / f["name"]) for f in m["files"] if f.get("kind") != "relationships"]
-    return Snapshot(entity_files, {"date": m["date"], "snapshotRoot": m["snapshotRoot"]}, [str(out / "relationships.parquet")])
+    m = build(records(), out, "2026-11-07", relationships=RELS)
+    entity_files = [str(out / "parts" / f["name"]) for f in m["parts"] if f["kind"] == "entities"]
+    rel_files = [str(out / "parts" / f["name"]) for f in m["parts"] if f["kind"] == "relationships"]
+    return Snapshot(entity_files, {"date": m["date"], "snapshotRoot": m["snapshotRoot"]}, rel_files)
 
 
 def ids(found):

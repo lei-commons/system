@@ -5,7 +5,7 @@ name: deploy-load-db
 on:
   push:
     branches: [main]
-    paths: ["services/load_db/**", "packages/lc_core/**", "packages/lc_directory/**", "services/load_db/Dockerfile", ".github/workflows/deploy-load-db.yml"]
+    paths: ["services/load_db/**", "packages/lc_core/**", "packages/lc_directory/**", "services/load_db/Dockerfile", ".github/workflows/deploy-load-db.yml", "config/publishing.yaml"]
   workflow_dispatch:
 
 permissions:

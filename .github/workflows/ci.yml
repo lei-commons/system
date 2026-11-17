@@ -78,8 +78,12 @@ jobs:
       - run: pytest -q packages/lc_directory
       - run: pip install -e "services/load_db[test]"
       - run: pytest -q services/load_db
-      - name: Loader image builds
-        run: docker build -f services/load_db/Dockerfile -t load-db .
+      - name: Loader and snapshot images build and read the publishing settings
+        run: |
+          docker build -f services/load_db/Dockerfile -t load-db .
+          docker run --rm load-db python -c "from lc_core.publishing import load; print(load().load)"
+          docker build -f services/build_snapshot/Dockerfile -t build-snapshot .
+          docker run --rm build-snapshot python -c "from lc_core.publishing import load; import lc_publish.job; print(load().snapshots)"
       - run: pip install -e services/site
       - run: pytest -q services/site
       - name: Front-end modules parse
