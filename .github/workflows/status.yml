@@ -30,6 +30,19 @@ jobs:
       - uses: google-github-actions/setup-gcloud@v2
       - name: Daily cycle, last five runs
         run: gcloud workflows executions list daily-cycle --location "$REGION" --limit 5 --format='table(name.basename(),state,startTime,endTime)' || true
+      - name: Daily cycle's deployed steps (compare with the registry above; a missing job means a bootstrap rerun is due)
+        run: |
+          gcloud workflows describe daily-cycle --location "$REGION" --format='value(sourceContents)' \
+            | grep -oE '(ingest-[a-z0-9-]+|build-snapshot|load-db)' | awk '!seen[$0]++' | tr '\n' ' ' || true
+          echo
+      - name: Bucket lifecycle rules (actions and ages only)
+        run: |
+          for b in snapshots data; do
+            printf '%s: ' "$b"
+            gcloud storage buckets describe "gs://${{ vars.GCP_PROJECT_ID }}-$b" --format=json 2>/dev/null \
+              | jq -c '[.lifecycle_config.rule[]? | {action: .action.type, age: .condition.age, noncurrentDays: .condition.daysSinceNoncurrentTime, prefix: .condition.matchesPrefix}]' \
+              || echo "not readable by this identity"
+          done
       - name: Jobs, last execution of each
         run: |
           for job in $CYCLE_JOBS egress-check; do
