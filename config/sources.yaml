@@ -23,8 +23,16 @@
 #   System page and the status views are drawn from these entries, so adding a source
 #   here (with its job and store) is all they need.
 #   job: Cloud Run job; store: prefix in the data bucket; records_as: the id records carry;
-#   label: short name; refresh: how often the source publishes something new;
-#   relationships: an extra store of relationships, if any.
+#   label: the name shown everywhere; refresh: how often the source publishes something new;
+#   dataset: the dataset's name in the snapshot's NOTICE; attribution: the credit the licence asks
+#   for (empty if none); role: register (default) or lei (GLEIF): registers' values win in a
+#   merge, so LEI sources come last; relationships: an extra store of relationships, if any;
+#   image: the shared image the job runs, when several sources share one (ingest-socrata);
+#   record_url: where the source shows one record, with {registrationNumber}, {lei} or {directoryId}
+#   (optional; records without one link to the dataset, url). Every record carries its source URL
+#   (registryUrl), and the snapshot and database carry each source's licence, attribution and a
+#   citation (owner requirement 2026-11-16).
+#   The daily cycle's steps (Terraform), the snapshot, the site and the workflows all read these.
 
 version: 1
 
@@ -52,7 +60,8 @@ sources:
     approved_by: owner
     approved_at: "2026-11-11"
     approval_note: In use before the approvals page; approved by the owner on 2026-11-11.
-    pipeline: {job: ingest-gleif, store: gleif, records_as: gleif, label: GLEIF, refresh: new files daily, relationships: gleif-rr}
+    pipeline: {job: ingest-gleif, store: gleif, records_as: gleif, label: GLEIF, refresh: new files daily, relationships: gleif-rr,
+               role: lei, dataset: GLEIF LEI golden copy, attribution: "", record_url: "https://search.gleif.org/#/record/{lei}"}
 
   - id: gb-coh
     name: UK Companies House
@@ -83,7 +92,10 @@ sources:
       access: owner-key    # streaming API for daily changes
       secret: sources/gb-coh/api-key
       status: awaiting-owner
-    pipeline: {job: ingest-gb, store: gb, records_as: gb-coh, label: Companies House, refresh: monthly register}
+    pipeline: {job: ingest-gb, store: gb, records_as: gb-coh, label: Companies House, refresh: monthly register,
+               dataset: Companies House basic company data,
+               record_url: "https://find-and-update.company-information.service.gov.uk/company/{registrationNumber}",
+               attribution: "Contains public sector information licensed under the Open Government Licence v3.0."}
 
   - id: us-ny-dos
     name: New York Department of State (open data)
@@ -110,7 +122,9 @@ sources:
     approved_by: owner
     approved_at: "2026-11-11"
     approval_note: In use before the approvals page; approved by the owner on 2026-11-11.
-    pipeline: {job: ingest-ny, store: us-ny, records_as: us-ny-dos, label: New York DOS, refresh: weekly}
+    pipeline: {job: ingest-ny, store: us-ny, records_as: us-ny-dos, label: New York Department of State, refresh: weekly,
+               dataset: "New York Department of State, active corporations (data.ny.gov)",
+               attribution: "Source: New York State Department of State, via data.ny.gov."}
 
   - id: us-co-sos
     name: Colorado Secretary of State (open data)
@@ -133,6 +147,9 @@ sources:
         addresses are never downloaded. General partnerships and sole proprietorships are dropped as people;
         any entity type not yet reviewed is dropped too.
       verified: false
+    pipeline: {job: ingest-co, image: ingest-socrata, store: us-co, records_as: us-co-sos, label: Colorado Secretary of State, refresh: weekly,
+               dataset: "Business Entities in Colorado (data.colorado.gov)",
+               attribution: "Source: Colorado Department of State, via data.colorado.gov."}
 
   - id: us-pa-dos
     name: Pennsylvania Department of State
@@ -169,6 +186,9 @@ sources:
         names (often people) and name reservations are dropped. GLEIF writes Oregon numbers with a two-digit
         suffix ("115676-17") the dataset lacks, so about 1,600 Oregon companies with an LEI don't merge yet.
       verified: false
+    pipeline: {job: ingest-or, image: ingest-socrata, store: us-or, records_as: us-or-sos, label: Oregon Secretary of State, refresh: weekly,
+               dataset: "Active Businesses - ALL (data.oregon.gov)",
+               attribution: "Source: Oregon Secretary of State, Corporation Division, via data.oregon.gov."}
 
   - id: us-ct-sots
     name: Connecticut Secretary of the State (open data)
@@ -191,6 +211,9 @@ sources:
         owner characteristics (woman-, veteran-, minority-, disability- or LGBTQI-owned) are never downloaded.
         General partnerships, unknown types, name reservations and rejected filings are dropped.
       verified: false
+    pipeline: {job: ingest-ct, image: ingest-socrata, store: us-ct, records_as: us-ct-sots, label: Connecticut Secretary of the State, refresh: weekly,
+               dataset: "Connecticut Business Registry - Business Master (data.ct.gov)",
+               attribution: "Source: Connecticut Secretary of the State, via data.ct.gov."}
 
   - id: br-rfb-cnpj
     name: Receita Federal CNPJ open data
@@ -217,7 +240,9 @@ sources:
     approved_by: owner
     approved_at: "2026-11-11"
     approval_note: In use before the approvals page; approved by the owner on 2026-11-11.
-    pipeline: {job: ingest-br, store: br, records_as: br-rfb, label: Receita Federal, refresh: monthly release}
+    pipeline: {job: ingest-br, store: br, records_as: br-rfb, label: Receita Federal (Brazil), refresh: monthly release,
+               dataset: "Receita Federal do Brasil, dados abertos do CNPJ",
+               attribution: "Source: Receita Federal do Brasil, Cadastro Nacional da Pessoa Jurídica (open data)."}
 
   - id: in-mca
     name: India Ministry of Corporate Affairs
@@ -255,7 +280,9 @@ sources:
     approved_by: owner
     approved_at: "2026-11-11"
     approval_note: In use before the approvals page; approved by the owner on 2026-11-11.
-    pipeline: {job: ingest-sg, store: sg, records_as: sg-acra, label: ACRA Singapore, refresh: monthly}
+    pipeline: {job: ingest-sg, store: sg, records_as: sg-acra, label: ACRA (Singapore), refresh: monthly,
+               dataset: ACRA Information on Corporate Entities (data.gov.sg),
+               attribution: "Contains information from ACRA Information on Corporate Entities accessed from data.gov.sg, made available under the Singapore Open Data Licence version 1.0."}
 
   # ---- Candidates found 2026-11-15, for the owner to approve, deny or keep pending. Not built yet:
   # approving one only permits it; it is fetched once it is built. Claims marked "unverified" come
@@ -310,7 +337,7 @@ sources:
     access: open
     method: bulk
     licence: CC-BY-4.0
-    cadence: daily
+    cadence: weekly
     status: active
     url: https://avoindata.prh.fi/en
     terms_url: https://prh.fi/en/companiesandorganisations/tietopalvelut/prhopendata.html
@@ -323,6 +350,9 @@ sources:
         updated daily, with a single compressed download of all valid businesses (YTJ API v3). Sole traders
         (toiminimi) are people and would be dropped.
       verified: false
+    pipeline: {job: ingest-fi, image: ingest-bulk, store: fi, records_as: fi-prh, label: Finnish Trade Register (PRH),
+               refresh: weekly, dataset: "PRH open data: all companies (avoindata.prh.fi)",
+               attribution: "Source: Finnish Patent and Registration Office (PRH), open data, licensed under CC BY 4.0."}
 
   - id: ie-cro
     name: Ireland Companies Registration Office (open data)
@@ -330,7 +360,7 @@ sources:
     access: open
     method: bulk
     licence: CC-BY-4.0
-    cadence: daily
+    cadence: weekly
     status: active
     url: https://opendata.cro.ie/dataset/companies
     terms_url: https://opendata.cro.ie/dataset/companies
@@ -344,6 +374,9 @@ sources:
         is only in the CRO's separate paid bulk licence, which is not needed). Business names (often people) are a
         separate register and would not be used.
       verified: false
+    pipeline: {job: ingest-ie, image: ingest-bulk, store: ie, records_as: ie-cro, label: Companies Registration Office (Ireland),
+               refresh: weekly, dataset: "Company Records (opendata.cro.ie)",
+               attribution: "Contains Irish Public Sector Data (Companies Registration Office) licensed under a Creative Commons Attribution 4.0 International (CC BY 4.0) licence."}
 
   - id: au-asic
     name: Australia ASIC company dataset
@@ -351,7 +384,7 @@ sources:
     access: open
     method: bulk
     licence: CC-BY-3.0-AU
-    cadence: weekly
+    cadence: monthly
     status: active
     url: https://www.data.gov.au/data/dataset/asic-companies
     terms_url: https://creativecommons.org/licenses/by/3.0/au/
@@ -365,6 +398,9 @@ sources:
         sole traders, are a separate dataset and would not be used. A third-party page puts it at about
         2.1 million companies (unverified).
       verified: false
+    pipeline: {job: ingest-au, image: ingest-bulk, store: au, records_as: au-asic, label: ASIC (Australia),
+               refresh: monthly extract, dataset: "ASIC Company Dataset (data.gov.au)",
+               attribution: "Contains data from the Australian Securities and Investments Commission (ASIC), licensed under CC BY 3.0 AU."}
 
   - id: jp-nta
     name: Japan National Tax Agency corporate numbers
@@ -407,6 +443,10 @@ sources:
         only: provincial registers are separate. Directors would not be used. The file layout reportedly changed
         in April 2026 (unverified).
       verified: false
+    pipeline: {job: ingest-ca, image: ingest-bulk, store: ca, records_as: ca-ised, label: Corporations Canada,
+               refresh: weekly, dataset: "Federal Corporations (open.canada.ca)",
+               record_url: "https://ised-isde.canada.ca/cc/lgcy/fdrlCrpDtls.html?corpId={registrationNumber}",
+               attribution: "Contains information licensed under the Open Government Licence – Canada."}
 
   - id: us-ia-sos
     name: Iowa Secretary of State (open data)

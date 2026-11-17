@@ -177,4 +177,7 @@ class World:
         from .snapshot import entity_row, merge
 
         merged = merge(copy.deepcopy(self.sources))
-        return sorted(json.dumps(entity_row(merged[d]), sort_keys=True) for d in merged)
+        from .snapshot import sources
+
+        by_id = {x["id"]: x for x in sources()}
+        return sorted(json.dumps(entity_row(merged[d], by_id), sort_keys=True) for d in merged)

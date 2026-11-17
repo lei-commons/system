@@ -31,6 +31,7 @@ from lc_core.approvals import require_approved
 from lc_core.decisions import Recorder, log_bucket_name
 from lc_core.fetch import FetchError, Gateway
 from lc_core.lease import Busy, lease
+from lc_ingest import filecheck
 from lc_ingest.receita import Join, build_lookup, mapper, read_lookup, read_municipalities, rows
 from lc_ingest.runner import run_ingest
 from lc_ingest.store import SHARDS, GcsStore
@@ -75,20 +76,32 @@ def latest_month(gateway, today: date) -> str:
     raise FetchError("no CNPJ release in the last three months")
 
 
-def _download(gateway, url, work, log=log, attempts: int = None):
-    """Download a ZIP, checking it is one: a cut-short download or an error page is fetched again, up to
-    DOWNLOAD_ATTEMPTS times (2026-11-17: one bad Empresas download failed the whole cycle)."""
+def _download(gateway, url, work, log=log, attempts: int = None, sleep=time.sleep):
+    """Download a ZIP and check it (lc_ingest.filecheck: complete, an archive, every member's checksum): a
+    cut-short download, an error page or a corrupt file is fetched again, up to DOWNLOAD_ATTEMPTS times, each
+    logged (2026-11-17: one bad Empresas download failed the whole cycle)."""
     attempts = attempts or DOWNLOAD_ATTEMPTS
     path = os.path.join(work, url.rsplit("/", 1)[-1])
+    what = url.rsplit("/", 2)[-2] + " " + url.rsplit("/", 1)[-1]
     for attempt in range(1, attempts + 1):
-        with open(path, "wb") as f:
-            gateway.download(url, f)
-        if zipfile.is_zipfile(path):
+        try:
+            with open(path, "wb") as f:
+                gateway.download(url, f)
+            filecheck.check(path, "zip")
+            if attempt > 1:
+                log({"event": "download-recovered", "source": "br", "publish": what, "attempt": attempt})
             return path
-        log({"event": "bad-download", "source": "br", "publish": url.rsplit("/", 2)[-2] + " " + url.rsplit("/", 1)[-1],
-             "attempt": attempt})
-    os.remove(path)
-    raise zipfile.BadZipFile(f"{url.rsplit('/', 1)[-1]} isn't a valid ZIP after {attempts} downloads")
+        except (filecheck.BadFile, FetchError) as exc:
+            if isinstance(exc, FetchError) and "answered 4" in str(exc):
+                raise  # not there, or refused: fetching again won't help
+            reason = f"{type(exc).__name__}: {str(exc)[:160]}"
+            if attempt == attempts:
+                log({"event": "download-failed", "source": "br", "publish": what, "attempts": attempts, "reason": reason})
+                if os.path.exists(path):
+                    os.remove(path)
+                raise zipfile.BadZipFile(f"{url.rsplit('/', 1)[-1]} isn't a valid ZIP after {attempts} downloads ({reason})") from exc
+            log({"event": "bad-download", "source": "br", "publish": what, "attempt": attempt, "reason": reason})
+            sleep(10 * attempt)
 
 
 class Lookup:
@@ -109,12 +122,12 @@ class Lookup:
         return read_lookup(self._bucket.blob(f"{self._prefix}/{n:03d}.tsv.gz").download_as_bytes())
 
 
-def build(gateway, lookup, month, log=log) -> dict:
+def build(gateway, lookup, month, log=log, sleep=time.sleep) -> dict:
     counts = Counter()
     with tempfile.TemporaryDirectory(prefix="br-lookup-") as work:
         def companies():
             for k in range(FILES):
-                path = _download(gateway, f"{SHARE}/{month}/Empresas{k}.zip", work, log=log)
+                path = _download(gateway, f"{SHARE}/{month}/Empresas{k}.zip", work, log=log, sleep=sleep)
                 with open(path, "rb") as f:
                     yield f
                 os.remove(path)  # the disk is memory on Cloud Run
@@ -129,7 +142,7 @@ def build(gateway, lookup, month, log=log) -> dict:
 
 
 def run(gateway, store, lookup_for, today=None, gate=gate, allowlist=None, log=log,
-        budget=BUDGET_SECONDS, clock=time.monotonic) -> str:
+        budget=BUDGET_SECONDS, clock=time.monotonic, sleep=time.sleep) -> str:
     """Return the outcome: halted, done, already-done, held or denied."""
     try:
         gate()
@@ -140,9 +153,9 @@ def run(gateway, store, lookup_for, today=None, gate=gate, allowlist=None, log=l
     month = latest_month(gateway, today or date.today())
     lookup = lookup_for(month)
     if not lookup.ready():
-        build(gateway, lookup, month, log=log)
+        build(gateway, lookup, month, log=log, sleep=sleep)
     with tempfile.TemporaryDirectory(prefix="br-mun-") as work:
-        with open(_download(gateway, f"{SHARE}/{month}/Municipios.zip", work, log=log), "rb") as f:
+        with open(_download(gateway, f"{SHARE}/{month}/Municipios.zip", work, log=log, sleep=sleep), "rb") as f:
             municipalities = read_municipalities(f)
     to_record = mapper(municipalities)
     allowlist = allowlist or AllowList.load()
@@ -159,16 +172,10 @@ def run(gateway, store, lookup_for, today=None, gate=gate, allowlist=None, log=l
             name = f"Estabelecimentos{k}.zip"
             return key, f"{SHARE}/{month}/{name}", f"{month}-{name}"
 
-        for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
-            try:
-                outcome = run_ingest(gateway=gateway, store=store, gate=lambda: None, find=find, read=rows,
-                                     mapper=to_record, source="br-rfb", maker="ingestion@br", allowlist=allowlist,
-                                     log=log, prepare=Join(lookup.read))
-                break
-            except zipfile.BadZipFile:  # a cut-short download or an error page: nothing was stored, so fetch it again
-                log({"event": "bad-download", "source": "br", "publish": key, "attempt": attempt})
-                if attempt == DOWNLOAD_ATTEMPTS:
-                    raise
+        # The runner checks the file and fetches it again if it is bad (lc_ingest.filecheck).
+        outcome = run_ingest(gateway=gateway, store=store, gate=lambda: None, find=find, read=rows,
+                             mapper=to_record, source="br-rfb", maker="ingestion@br", allowlist=allowlist,
+                             log=log, prepare=Join(lookup.read), attempts=DOWNLOAD_ATTEMPTS, sleep=sleep)
         if outcome not in ("done", "already-done"):
             break
     return outcome

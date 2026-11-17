@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import re
 
+from lc_core.attribution import credits
 from psycopg.rows import dict_row
 
 MAX_LIMIT = 100
@@ -240,7 +241,16 @@ class Directory:
         if not row:
             return None
         record = {CAMEL.get(k, k): v for k, v in row.items() if v is not None and k not in ("search", "names_text")}
+        record["credits"] = credits(record, self.sources())
         return record
+
+    def sources(self) -> dict:
+        """{source id: its name, licence, attribution, citation and URLs}, from the live directory's sources table."""
+        if not self._one("SELECT 1 AS ok FROM information_schema.tables WHERE table_schema = 'live' AND table_name = 'sources'", []):
+            return {}
+        rows = self._rows("SELECT id, name, publisher, licence, licence_url AS \"licenceUrl\", dataset_url AS \"datasetUrl\", "
+                          "record_url AS \"recordUrl\", attribution, citation FROM live.sources", [])
+        return {r["id"]: r for r in rows}
 
     def relationships(self, directory_id: str):
         directory_id = directory_id.strip().upper()

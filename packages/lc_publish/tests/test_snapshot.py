@@ -154,3 +154,32 @@ def test_a_records_leaf_is_its_published_row(tmp_path):
         rows = pq.read_table(tmp_path / "parts" / part["name"]).to_pylist()
         assert root([leaf(r) for r in rows]) == part["root"] and len(rows) == part["records"]
     assert root([bytes.fromhex(p["root"][7:]) for p in sorted(m["parts"], key=lambda p: p["name"])]) == m["snapshotRoot"]
+
+
+def test_a_source_the_registry_doesnt_list_is_never_merged():
+    with pytest.raises(ValueError, match="not in the registry"):
+        merge({"gb-coh": {}, "somewhere-else": {"X": {"directoryId": "X"}}})
+
+
+def test_snapshot_sources_come_from_the_registry():
+    from lc_core.sources import merge_order
+    from lc_publish.snapshot import sources
+
+    got = sources()
+    assert [s["id"] for s in got] == [p["records_as"] for p in merge_order()]
+    gb = next(s for s in got if s["id"] == "gb-coh")
+    assert "Open Government Licence" in gb["attribution"] and gb["prefix"] == "gb"
+    assert next(s for s in got if s["id"] == "gleif")["relationships"] == "gleif-rr"
+
+
+def test_every_record_carries_a_source_url_and_the_manifest_credits_each_source(tmp_path):
+    m = build(sources(), tmp_path, "2026-11-07")
+    rows = {r["directoryId"]: r for p in m["parts"] for r in pq.read_table(tmp_path / "parts" / p["name"]).to_pylist()}
+    assert rows[GB_ID]["registryUrl"] == "https://find-and-update.company-information.service.gov.uk/company/01234567"
+    assert rows[GLEIF_US["directoryId"]]["registryUrl"] == "https://search.gleif.org/#/record/529900T8BM49AURSDO55"
+    assert all(r["registryUrl"] for r in rows.values())
+    credited = {s["id"]: s for s in m["sources"]}
+    assert set(credited) == {"gb-coh", "gleif"}  # the sources this snapshot holds
+    gb = credited["gb-coh"]
+    assert "Open Government Licence" in gb["attribution"] and gb["citation"].startswith("UK Companies House:")
+    assert gb["licenceUrl"] and gb["datasetUrl"] and "{registrationNumber}" in gb["recordUrl"]

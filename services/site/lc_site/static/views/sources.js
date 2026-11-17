@@ -221,7 +221,7 @@ function row(s, d, reload) {
 
 const CHANGE = { add: "added", edit: "edited", remove: "removed", hint: "suggestion for Claude" };
 
-export async function render(root, arg) {
+export async function render(root, arg, params) {
   let d;
   try {
     d = await api("/api/v1/sources");
@@ -229,10 +229,14 @@ export async function render(root, arg) {
     root.replaceChildren(h("div", { class: "wrap" }, errorBox(error)));
     return;
   }
-  const reload = () => render(root, arg);
+  const reload = () => render(root, arg, params);
   const filter = FILTERS.some(([k]) => k === arg) ? arg : "all";
-  const shown = d.sources.filter((s) => filter === "all" || (filter === "built" ? s.built : filter === "unbuilt" ? !s.built
-    : filter === "yours" ? !!(s.owner && (s.owner.edited_at || s.owner.hint)) : s.approval.status === filter));
+  const query = (params && params.get("q")) || "";
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const matches = (s) => words.every((w) => [s.name, s.id, s.country, s.licence, (s.assessment || {}).risk]
+    .some((v) => String(v || "").toLowerCase().includes(w)));
+  const shown = d.sources.filter((s) => (filter === "all" || (filter === "built" ? s.built : filter === "unbuilt" ? !s.built
+    : filter === "yours" ? !!(s.owner && (s.owner.edited_at || s.owner.hint)) : s.approval.status === filter)) && matches(s));
   const review = d.review ?? d.sources.filter((s) => s.approval.status === "pending"
     || (s.approval.status === "approved" && !(s.assessment || {}).verified)).length;
   const add = d.editable ? addPanel(d, reload) : null;
@@ -251,6 +255,14 @@ export async function render(root, arg) {
     d.changes && d.changes.length ? h("details", { class: "history changes" }, h("summary", {}, `Your recent edits (${d.changes.length})`),
       h("ul", {}, ...d.changes.map((c) => h("li", {}, `${when(c.at)} · ${names[c.source] || c.source} · ${CHANGE[c.change] || c.change}`
         + (c.change === "edit" && c.fields.length ? `: ${c.fields.join(", ")}` : ""))))) : null,
-    h("div", { class: "toolbar" }, ...FILTERS.map(([k, label]) => h("a", { class: `chip${k === filter ? " on" : ""}`, href: `#/sources/${k}` }, label))),
+    h("div", { class: "toolbar" }, ...FILTERS.map(([k, label]) => h("a", { class: `chip${k === filter ? " on" : ""}`,
+      href: `#/sources/${k}${query ? "?q=" + encodeURIComponent(query) : ""}` }, label)),
+      h("form", { class: "source-search", role: "search", onsubmit: (e) => {
+        e.preventDefault();
+        const q = e.target.elements.q.value.trim();
+        location.hash = `#/sources/${filter}${q ? "?q=" + encodeURIComponent(q) : ""}`;
+      } }, h("input", { name: "q", type: "search", value: query, placeholder: "Find a source: name, country, licence…",
+        "aria-label": "Find a source" }))),
+    words.length ? h("p", { class: "muted" }, `${shown.length} of ${d.sources.length} match “${query}”.`) : null,
     h("div", { class: "grid", style: { gap: "14px" } }, ...shown.map((s) => row(s, d, reload)))));
 }

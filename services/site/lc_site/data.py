@@ -18,6 +18,7 @@ import tempfile
 import threading
 
 import duckdb
+from lc_core.attribution import credits
 
 MAX_LIMIT = 100
 MAX_PAGE = 100
@@ -52,8 +53,10 @@ class Snapshot:
     """``entity_files`` are a full snapshot's parts (v2, with a country column) or per-country files (v1, named
     after their country). ``changes`` are later days' (entity change files, relationship change files), in order."""
 
-    def __init__(self, entity_files: list, meta: dict, relationship_files: list = (), path: str = None, changes=()):
+    def __init__(self, entity_files: list, meta: dict, relationship_files: list = (), path: str = None, changes=(),
+                 sources=()):
         self.meta = meta
+        self._sources = {x["id"]: x for x in sources or ()}  # from the manifest: each source's licence and attribution
         path = path or os.path.join(tempfile.mkdtemp(prefix="site-db-"), "snapshot.duckdb")
         self._con = duckdb.connect(path)
         settings = ["SET memory_limit='2GB'", "SET threads=2", "SET preserve_insertion_order=false"]
@@ -147,6 +150,7 @@ class Snapshot:
             if field in record:
                 record[field] = json.loads(record[field])
         record["sources"] = record["sources"].split(",")
+        record["credits"] = credits(record, self._sources)
         return record
 
     def relationships(self, directory_id: str):

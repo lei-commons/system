@@ -296,3 +296,11 @@ dl.mini.wide { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
   background: color-mix(in srgb, var(--accent) 5%, transparent); }
 .hint-box .hint-text { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 4px; }
 .changes li { margin: 2px 0; }
+
+.kpi-flags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; font-size: 15px; line-height: 1; }
+.source-search { margin-left: auto; }
+.source-search input { border: 1px solid var(--hairline); border-radius: 999px; padding: 6px 12px; background: var(--surface); color: var(--ink); font: inherit; min-width: 260px; }
+.credit { border-top: 1px solid var(--hairline); padding-top: 10px; }
+.credit:first-child { border-top: 0; padding-top: 0; }
+.credit-attribution { margin: 4px 0; }
+.credit-citation { font-size: 12px; white-space: normal; overflow-wrap: anywhere; }

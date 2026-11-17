@@ -123,6 +123,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(b"0\r\n\r\n")
 
     def _api(self, path, query):
+        if path == "/api/v1/source-names":
+            return self._json(200, source_names())
         if path == "/api/v1/snapshots":
             if self.downloads is None:
                 return self._json(503, {"error": "downloads aren't configured"})
@@ -205,6 +207,13 @@ class Handler(BaseHTTPRequestHandler):
     do_PUT = do_PATCH = do_DELETE = do_OPTIONS = do_TRACE = do_CONNECT = do_HEAD
 
 
+def source_names() -> dict:
+    """{id records carry: the name shown}, from the sources registry."""
+    from lc_core.sources import names
+
+    return names(os.environ.get("LC_SOURCES_CONFIG"))
+
+
 def load_latest(bucket_name: str):
     """Download the latest snapshot's files and load them. Returns None if there isn't one.
 
@@ -253,7 +262,8 @@ def load_from(bucket, latest: dict):
             changes = [([fetch(f["object"], f["sha256"]) for f in m["files"] if f["kind"] == "changes"],
                         [fetch(f["object"], f["sha256"]) for f in m["files"] if f["kind"] == "relationship-changes"])
                        for m in steps]
-            return Snapshot(files, {k: manifest[k] for k in ("date", "snapshotRoot")}, rels, changes=changes)
+            return Snapshot(files, {k: manifest[k] for k in ("date", "snapshotRoot")}, rels, changes=changes,
+                            sources=manifest.get("sources") or ())
         files = [fetch(f"{latest['prefix']}/{name}") for name in latest.get("files", [])]
         rels = [fetch(f"{latest['prefix']}/{name}") for name in latest.get("relationships", [])]
         return Snapshot(files, {k: latest[k] for k in ("date", "snapshotRoot")}, rels)

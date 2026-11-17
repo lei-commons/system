@@ -1,0 +1,68 @@
+# Builds the shared image for the US state registers on Socrata portals (lc_ingest.socrata) and deploys
+# one job per source that uses it in config/sources.yaml (pipeline.image: ingest-socrata), each told its
+# source by LC_SOURCE. The daily cycle runs them; each also runs once now. While the system is paused, or
+# a source isn't approved, every run stops at its first check.
+name: deploy-ingest-socrata
+
+on:
+  push:
+    branches: [main]
+    paths: ["services/ingest_socrata/**", "packages/lc_ingest/**", "packages/lc_core/**", "config/fields.yaml", ".github/workflows/deploy-ingest-socrata.yml", "config/sources.yaml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-ingest-socrata
+  cancel-in-progress: false
+
+env:
+  REGION: ${{ vars.GCP_REGION }}
+  PROJECT: ${{ vars.GCP_PROJECT_ID }}
+  IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/lei-commons/ingest-socrata
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The jobs, from the sources registry
+        run: |
+          pip install -q pyyaml
+          python3 - <<'PY' > jobs.txt
+          import yaml
+          for s in yaml.safe_load(open("config/sources.yaml"))["sources"]:
+              p = s.get("pipeline") or {}
+              if p.get("image") == "ingest-socrata":
+                  print(p["job"], s["id"])
+          PY
+          cat jobs.txt
+          [ -s jobs.txt ] || { echo "::error::no source uses ingest-socrata"; exit 1; }
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Build and push
+        run: |
+          gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+          docker build -f services/ingest_socrata/Dockerfile -t "$IMAGE:$GITHUB_SHA" .
+          docker push "$IMAGE:$GITHUB_SHA"
+      - name: Deploy the jobs
+        run: |
+          GATEWAY="$(gcloud run services describe conduct-gateway --region "$REGION" --format='value(status.url)')"
+          while read -r job source; do
+            gcloud run jobs deploy "$job" --region "$REGION" --image "$IMAGE:$GITHUB_SHA" \
+              --service-account "lc-ingest@$PROJECT.iam.gserviceaccount.com" \
+              --network lc-jobs --subnet "lc-jobs-$REGION" --vpc-egress all-traffic \
+              --set-env-vars "LC_SOURCE=$source,LC_GATEWAY_URL=$GATEWAY,LC_DATA_BUCKET=$PROJECT-data,LC_CONTROL_STATE_URI=gs://$PROJECT-control/state.json" \
+              --max-retries 0 --task-timeout 10800 --memory 8Gi --cpu 2
+          done < jobs.txt
+      # Safe to repeat: a week already processed is skipped, and a paused system or an unapproved source stops at the gate.
+      - name: Run each once now
+        run: |
+          while read -r job source; do
+            gcloud run jobs execute "$job" --region "$REGION" --async
+          done < jobs.txt

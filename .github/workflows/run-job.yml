@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       job:
-        description: "Job to run"
-        type: choice
-        options: [load-db, build-snapshot, ingest-gleif, ingest-gb, ingest-br, ingest-ny, ingest-sg]
+        description: "Job to run: an ingest job from config/sources.yaml, build-snapshot or load-db"
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -28,6 +28,17 @@ jobs:
       REGION: ${{ vars.GCP_REGION }}
       JOB: ${{ inputs.job }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: config/sources.yaml
+          sparse-checkout-cone-mode: false
+      - name: The cycle's jobs, from the sources registry
+        run: |
+          pip install -q pyyaml
+          python3 -c "import yaml; s = yaml.safe_load(open('config/sources.yaml'))['sources']; print('CYCLE_JOBS=' + ' '.join([x['pipeline']['job'] for x in s if x.get('pipeline')] + ['build-snapshot', 'load-db']))" >> "$GITHUB_ENV"
+      - name: Only a job of the cycle
+        run: |
+          case " $CYCLE_JOBS " in *" $JOB "*) echo "running $JOB" ;; *) echo "::error::$JOB isn't a job of the daily cycle ($CYCLE_JOBS)"; exit 1 ;; esac
       - uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}

@@ -14,7 +14,7 @@ from pathlib import Path
 from lc_core.control import SystemHalted, require_running
 from lc_core.publishing import load as load_settings
 
-from .snapshot import SOURCES, build_sharded
+from .snapshot import build_sharded, sources
 
 
 def shard_reader(bucket, prefix: str):
@@ -47,8 +47,11 @@ def main(argv=None) -> int:
     from google.cloud import storage
 
     bucket = storage.Client().bucket(a.bucket)
-    manifest = build_sharded({s["id"]: shard_reader(bucket, s["prefix"]) for s in SOURCES}, Path(a.out), a.date,
-                             settings=load_settings().snapshots, relationships=shard_reader(bucket, "gleif-rr"))
+    registered = sources()
+    rel = [s["relationships"] for s in registered if s.get("relationships")]
+    manifest = build_sharded({s["id"]: shard_reader(bucket, s["prefix"]) for s in registered}, Path(a.out), a.date,
+                             settings=load_settings().snapshots,
+                             relationships=shard_reader(bucket, rel[0]) if len(rel) == 1 else None)
     print(json.dumps({k: manifest[k] for k in ("date", "kind", "records", "recordsPerSource", "inMoreThanOneSource",
                                                "relationships", "snapshotRoot")}))
     return 0

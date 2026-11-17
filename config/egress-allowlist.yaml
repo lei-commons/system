@@ -14,6 +14,17 @@ registry_hosts:
   - data.colorado.gov
   - data.oregon.gov
   - data.ct.gov
+  # Owner approved 2026-11-16 for Ireland's CRO open data (source ie-cro):
+  # opendata.cro.ie redirects the download to a signed link on its object storage.
+  - opendata.cro.ie
+  - nl-ams-1.linodeobjects.com
+  # Owner approved 2026-11-16 for Finland's PRH open data (source fi-prh):
+  - avoindata.prh.fi
+  # Owner approved 2026-11-16 for the ASIC company dataset (source au-asic):
+  - data.gov.au
+  # Owner approved 2026-11-16 for Canada's federal corporations (source ca-ised):
+  # open.canada.ca's dataset links its files on ISED's CloudFront distribution.
+  - d4bf66bykfyaf.cloudfront.net
   - www.dos.pa.gov
   - dadosabertos.rfb.gov.br
   - arquivos.receitafederal.gov.br

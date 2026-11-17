@@ -162,7 +162,7 @@ def test_a_bad_download_is_fetched_again():
 
     gw.download = download
     assert run(gw, store, lambda m: MemLookup(), today=date(2026, 11, 9), gate=lambda: None, allowlist=AllowList.load(),
-               log=events.append) == "done"
+               log=events.append, sleep=lambda s: None) == "done"
     assert [e["attempt"] for e in events if e["event"] == "bad-download"] == [1]
     assert "2026-10 estab1" in store.manifest["processed"]
 
@@ -185,7 +185,7 @@ def test_a_bad_company_file_is_fetched_again_before_the_lookup_is_built():
 
     gw.download = download
     assert run(gw, store, lambda m: MemLookup(), today=date(2026, 11, 9), gate=lambda: None, allowlist=AllowList.load(),
-               log=events.append) == "done"
+               log=events.append, sleep=lambda s: None) == "done"
     assert [(e["publish"], e["attempt"]) for e in events if e["event"] == "bad-download"] == [("2026-10 Empresas3.zip", 1)]
     assert any(e["event"] == "lookup-built" for e in events)
 
@@ -198,5 +198,6 @@ def test_a_company_file_that_stays_bad_stops_the_run_after_three_tries():
     gw.files[f"{SHARE}/2026-10/Empresas0.zip"] = b"not a zip"
     with pytest.raises(zipfile.BadZipFile, match="after 3 downloads"):
         run(gw, MemStore(), lambda m: MemLookup(), today=date(2026, 11, 9), gate=lambda: None, allowlist=AllowList.load(),
-            log=events.append)
-    assert [e["attempt"] for e in events if e["event"] == "bad-download"] == [1, 2, 3]
+            log=events.append, sleep=lambda s: None)
+    assert [e["attempt"] for e in events if e["event"] == "bad-download"] == [1, 2]
+    assert [e["attempts"] for e in events if e["event"] == "download-failed"] == [3]

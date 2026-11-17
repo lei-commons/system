@@ -5,7 +5,12 @@
 # running, so a paused system makes the cycle a quick no-op.
 
 locals {
-  cycle_steps = ["ingest-gleif", "ingest-gb", "ingest-br", "ingest-ny", "ingest-sg", "build-snapshot", "load-db"]
+  # One ingestion step per built source, in the registry's order (config/sources.yaml, the
+  # entries with a pipeline), then the snapshot and the database load. A new source's job must
+  # be deployed (its deploy workflow) before this is applied, or its step would fail the cycle.
+  sources_registry = yamldecode(file("${path.module}/../../config/sources.yaml"))
+  ingest_steps     = [for s in local.sources_registry.sources : s.pipeline.job if try(s.pipeline.job, null) != null]
+  cycle_steps      = concat(local.ingest_steps, ["build-snapshot", "load-db"])
 }
 
 resource "google_workflows_workflow" "daily_cycle" {

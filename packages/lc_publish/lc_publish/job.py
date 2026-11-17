@@ -27,7 +27,7 @@ from lc_core.snapshot_format import is_v2
 
 from .__main__ import shard_reader
 from .prune import prune
-from .snapshot import SOURCES, STATE_FILES, StateReader, build_sharded, sha256_file
+from .snapshot import STATE_FILES, StateReader, build_sharded, sha256_file, sources
 from .upload import STATE_PREFIX, point_latest, upload_day, upload_state
 
 COMPONENT = "job:build-snapshot"
@@ -76,6 +76,16 @@ def previous_state(snapshots, data, today: str, work: Path):
             return None, None, f"the build state for {previous['date']} is damaged"
         readers[kind] = StateReader(local)
     return previous, readers, None
+
+
+def combined(readers):
+    """One relationship reader from several stores (today only GLEIF's)."""
+    def read(n):
+        out = {}
+        for reader in readers:
+            out.update(reader(n))
+        return out
+    return read
 
 
 def publish(snapshots, data, date: str, readers: dict, relationships, settings, work: Path, record,
@@ -132,11 +142,14 @@ def main() -> int:
             # Only sources the owner has approved reach the snapshot, and so the database and site
             # (config/sources.yaml and the Data sources page). Unreadable approvals stop the build.
             approved = approved_record_sources()
-            included = [s for s in SOURCES if s["id"] in approved]
+            registered = sources()
+            included = [s for s in registered if s["id"] in approved]
             record({"event": "sources-included", "included": ",".join(s["id"] for s in included),
-                    "excluded": ",".join(s["id"] for s in SOURCES if s["id"] not in approved)})
+                    "excluded": ",".join(s["id"] for s in registered if s["id"] not in approved)})
+            relationship_stores = [s["relationships"] for s in included if s.get("relationships")]
             publish(snapshots, data, date, {s["id"]: shard_reader(data, s["prefix"]) for s in included},
-                    shard_reader(data, "gleif-rr") if "gleif" in approved else None, settings, work, record,
+                    combined([shard_reader(data, store) for store in relationship_stores]) if relationship_stores else None,
+                    settings, work, record,
                     decision_log=seal)
     except Busy as exc:
         record({"event": "busy", "reason": str(exc)})  # another run is building it

@@ -14,21 +14,27 @@
 
 from __future__ import annotations
 
+import csv
 import gzip
 import json
 import os
 import tempfile
+import time
 from collections import Counter, defaultdict
 
 from lc_core.allowlist import AllowList
 from lc_core.control import SystemHalted
-from lc_core.fetch import Denied
+from lc_core.fetch import Denied, FetchError
 
+from . import filecheck
 from .ledger import VolumeGuardTripped, diff, volume_guard
 from .pipeline import map_records, separate_collision
 from .store import decode_records, encode_records, shard_of
 
 KEEP_PROCESSED = 100
+DOWNLOAD_ATTEMPTS = 3
+# A bad file (cut short, an error page, corrupt), a broken transfer, or a file that can't be read: fetch it again.
+RETRYABLE = filecheck.FILE_ERRORS + (FetchError, csv.Error, json.JSONDecodeError, ValueError, OSError)
 
 
 class _Partitions:
@@ -55,7 +61,8 @@ class _Partitions:
 
 
 def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: str, allowlist: AllowList, log,
-               kind: str = "entity", seen: bool = False, prepare=None, fetch=None) -> str:
+               kind: str = "entity", seen: bool = False, prepare=None, fetch=None, attempts: int = DOWNLOAD_ATTEMPTS,
+               check_as: str = None, sleep=time.sleep, backoff: float = 30.0) -> str:
     """Return the outcome: halted, denied, already-done, held or done.
 
     ``find(gateway, manifest)`` returns (key, url, filename). ``key`` identifies
@@ -95,19 +102,36 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
         for sub in ("in", "stage"):
             os.mkdir(os.path.join(work, sub))
         download = os.path.join(work, filename)
-        with open(download, "wb") as f:
+        for attempt in range(1, attempts + 1):
+            # Download, check and read are one step: a file cut short, an error page or a corrupt archive
+            # is fetched again, every time logged, and nothing from it is kept (lc_ingest.filecheck).
+            counts.clear()
+            partitions = _Partitions(os.path.join(work, f"in-{attempt}"))
+            os.makedirs(os.path.join(work, f"in-{attempt}"), exist_ok=True)
             try:
-                size = (fetch or (lambda g, u, out: g.download(u, out)))(gateway, url, f)
+                with open(download, "wb") as f:
+                    size = (fetch or (lambda g, u, out: g.download(u, out)))(gateway, url, f)
+                filecheck.check(download, check_as or filecheck.kind_for(filename))
+                with open(download, "rb") as f:
+                    for record in map_records(read(f), counts, allowlist, mapper=mapper, kind=kind):
+                        partitions.add(record)
+                shards = partitions.close()
+                break
             except Denied as exc:
+                partitions.close()
                 log({"event": "denied", "rule": exc.rule, "reason": exc.reason})
                 return "denied"
-        store.keep_source(filename, download)
-
-        partitions = _Partitions(os.path.join(work, "in"))
-        with open(download, "rb") as f:
-            for record in map_records(read(f), counts, allowlist, mapper=mapper, kind=kind):
-                partitions.add(record)
-        shards = partitions.close()
+            except RETRYABLE as exc:
+                partitions.close()
+                reason = f"{type(exc).__name__}: {str(exc).splitlines()[0][:160] if str(exc) else ''}"
+                if attempt == attempts:
+                    log({"event": "download-failed", "source": source, "publish": key, "attempts": attempts, "reason": reason})
+                    raise filecheck.BadFile(f"{filename}: still bad after {attempts} downloads ({reason})") from exc
+                log({"event": "bad-download", "source": source, "publish": key, "attempt": attempt, "reason": reason})
+                sleep(backoff * attempt)
+        if attempt > 1:
+            log({"event": "download-recovered", "source": source, "publish": key, "attempt": attempt})
+        store.keep_source(filename, download)  # only a file that checked and read cleanly is kept
         os.remove(download)  # the disk is memory on Cloud Run
 
         changes_path = os.path.join(work, "changes.jsonl.gz")

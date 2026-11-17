@@ -25,22 +25,31 @@ from lc_core.snapshot_format import (CHANGES_KIND, ENTITY_KIND, RELATIONSHIP_CHA
                                      RELATIONSHIP_KIND, SCHEMA_VERSION, SHARDS, days_between, group_of, part_name,
                                      parts_for)
 
+from lc_core.attribution import record_url
+
 from .merkle import StreamingRoot, leaf, root
 
-# Earlier sources win on conflicting fields: registers before GLEIF.
-SOURCES = [
-    {"id": "gb-coh", "prefix": "gb", "name": "Companies House basic company data", "licence": "OGL-UK-3.0",
-     "attribution": "Contains public sector information licensed under the Open Government Licence v3.0."},
-    # Licences marked to-be-verified: the owner verifies them before anything goes public.
-    {"id": "br-rfb", "prefix": "br", "name": "Receita Federal do Brasil, dados abertos do CNPJ", "licence": "to-be-verified",
-     "attribution": "Source: Receita Federal do Brasil, Cadastro Nacional da Pessoa Jurídica (open data)."},
-    {"id": "us-ny-dos", "prefix": "us-ny", "name": "New York Department of State, active corporations (data.ny.gov)",
-     "licence": "to-be-verified", "attribution": "Source: New York State Department of State, via data.ny.gov."},
-    {"id": "sg-acra", "prefix": "sg", "name": "ACRA Information on Corporate Entities (data.gov.sg)",
-     "licence": "SG-Open-Data-1.0", "attribution": "Contains information from ACRA Information on Corporate Entities accessed "
-     "from data.gov.sg, made available under the Singapore Open Data Licence version 1.0."},
-    {"id": "gleif", "prefix": "gleif", "name": "GLEIF LEI golden copy", "licence": "CC0-1.0", "attribution": ""},
-]
+def sources(path=None) -> list:
+    """The built sources, in merge order (registers before GLEIF; earlier sources win on conflicting fields),
+    from config/sources.yaml, with what every record needs to credit them: [{id (what records carry), prefix
+    (store), name, publisher, licence, licenceUrl, datasetUrl, recordUrl (a template, or None), attribution,
+    citation, relationships}]."""
+    from lc_core.sources import merge_order
+
+    out = []
+    for p in merge_order(path):
+        licence = p["licence"] or "unstated"
+        citation = " ".join(part for part in (
+            f"{p['name']}: {p['dataset']}.", f"{p['url']}." if p.get("url") else "",
+            f"Licence: {licence}" + (f" ({p['terms_url']})." if p.get("terms_url") else "."),
+            p["attribution"] or "", "Retrieved and processed by lei-commons (records merged and normalised).") if part)
+        out.append({"id": p["records_as"], "prefix": p["store"], "name": p["dataset"], "publisher": p["name"],
+                    "licence": licence, "licenceUrl": p.get("terms_url"), "datasetUrl": p.get("url"),
+                    "recordUrl": p.get("record_url"), "attribution": p["attribution"] or "", "citation": citation,
+                    "relationships": p.get("relationships")})
+    return out
+
+
 SCALARS = ["directoryId", "lei", "legalName", "legalForm", "legalJurisdiction", "registrationAuthority",
            "registrationNumber", "legalStatus", "incorporationDate", "dissolutionDate", "recordMode", "registryUrl"]
 NESTED = ["otherNames", "legalAddress", "headquartersAddress", "industryCodes", "labels"]
@@ -56,10 +65,14 @@ STATE_FILES = {ENTITY_KIND: "entities.parquet", RELATIONSHIP_KIND: "relationship
 STATS_TOP = {"byCountry": 30, "bySources": 10, "byStatus": 15}
 
 
-def merge(records_by_source: dict) -> dict:
-    """{source id: {directory id: record}} to {directory id: record}, in SOURCES order."""
+def merge(records_by_source: dict, order: list = None) -> dict:
+    """{source id: {directory id: record}} to {directory id: record}, in merge order (``order``: source ids)."""
     merged = {}
-    for source in SOURCES:
+    order = order or [s["id"] for s in sources()]
+    unknown = set(records_by_source) - set(order)
+    if unknown:  # a source the registry doesn't list must never be merged in an arbitrary order
+        raise ValueError(f"sources not in the registry: {sorted(unknown)}")
+    for source in ({"id": sid} for sid in order):
         for directory_id, record in records_by_source.get(source["id"], {}).items():
             current = merged.get(directory_id)
             if current is None:
@@ -87,12 +100,17 @@ def normalise_status(value):
     return STATUS_SPELLINGS.get(value, value) if isinstance(value, str) else value
 
 
-def entity_row(record: dict) -> dict:
-    """The published row: exactly the Parquet columns, all strings. A record's leaf is the hash of this."""
+def entity_row(record: dict, by_id: dict = None) -> dict:
+    """The published row: exactly the Parquet columns, all strings. A record's leaf is the hash of this.
+
+    ``by_id`` (source id -> source, from ``sources()``) fills registryUrl, when the record has none, with
+    where its first source shows it: every record carries a URL for its source."""
     row = {}
     for c in SCALARS:
         value = record.get(c)
         row[c] = None if value is None else str(value)
+    if not row["registryUrl"] and by_id and record.get("sources"):
+        row["registryUrl"] = record_url(record, by_id.get(record["sources"][0]) or {})
     row["legalStatus"] = normalise_status(row["legalStatus"])
     for c in NESTED:
         value = record.get(c)
@@ -248,7 +266,10 @@ def build_sharded(readers: dict, out: Path, date: str, *, settings, previous: di
     state_writers = {kind: pq.ParquetWriter(out / "state" / name, STATE_SCHEMA, compression="zstd")
                      for kind, name in STATE_FILES.items()}
     counted = Counter()
-    per_source = {s["id"]: 0 for s in SOURCES}
+    registered = sources()
+    order = [s["id"] for s in registered]
+    by_id = {s["id"]: s for s in registered}
+    per_source = {s["id"]: 0 for s in registered}
     stats = {"byCountry": Counter(), "bySources": Counter(), "byStatus": Counter(), "relationshipTypes": Counter()}
     lei_to_id = {}
     total = shared = resolved = 0
@@ -284,8 +305,8 @@ def build_sharded(readers: dict, out: Path, date: str, *, settings, previous: di
             shard = {sid: readers[sid](n) for sid in readers}
             for sid, records in shard.items():
                 per_source[sid] += len(records)
-            merged = merge(shard)
-            rows = [entity_row(merged[d]) for d in sorted(merged)]
+            merged = merge(shard, order)
+            rows = [entity_row(merged[d], by_id) for d in sorted(merged)]
             leaves = [leaf(r) for r in rows]
             part_rows, part_leaves, part_info = defaultdict(list), defaultdict(list), {}
             for row, h in zip(rows, leaves):
@@ -373,7 +394,8 @@ def build_sharded(readers: dict, out: Path, date: str, *, settings, previous: di
                    "groups": {p["group"]: p["of"] for p in part_entries}},
         "stats": {k: _top(v, STATS_TOP.get(k)) for k, v in stats.items()},
         "settings": {"fullEveryDays": settings.full_every_days, "fullWhenChangesExceed": settings.full_when_changes_exceed},
-        "sources": [{k: s[k] for k in ("id", "name", "licence", "attribution")} for s in SOURCES],
+        "sources": [{k: s[k] for k in ("id", "name", "publisher", "licence", "licenceUrl", "datasetUrl", "recordUrl",
+                                        "attribution", "citation")} for s in registered if per_source[s["id"]]],
     }
     if decision_log:  # the seal of the decision log up to yesterday, anchored with the manifest
         manifest["decisionLog"] = decision_log
@@ -383,7 +405,7 @@ def build_sharded(readers: dict, out: Path, date: str, *, settings, previous: di
               ("A full snapshot." if kind == "full" else
                f"Changes since {decided['base']['date']}. The whole state is the full snapshot of {manifest['anchor']} "
                "plus each day's changes since; python -m lc_publish.rebuild rebuilds and checks it."), ""]
-    notice += [f"{s['name']} ({s['licence']}). {s['attribution']}".strip() for s in SOURCES]
+    notice += [f"{s['name']} ({s['licence']}). {s['attribution']}".strip() for s in registered if per_source[s["id"]]]
     (out / "NOTICE.txt").write_text("\n".join(notice) + "\n", encoding="utf-8")
     (out / "state" / "state.json").write_text(json.dumps(
         {"date": date, "snapshotRoot": manifest["snapshotRoot"], "schemaVersion": SCHEMA_VERSION,

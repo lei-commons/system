@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from lc_site.system import BAD, BUSY, OK, UNKNOWN, SystemView, diagram, node_statuses
+from lc_site.system import BAD, BUSY, OK, SystemView
 
 P, R = "lei-commons-prod", "us-central1"
 BASE = f"https://run.googleapis.com/v2/projects/{P}/locations/{R}"
@@ -65,15 +65,13 @@ def test_collects_everything_with_statuses():
     assert {j["name"]: j["status"] for j in data["jobs"]} == {"ingest-gleif": OK, "ingest-gb": BAD, "egress-check": BUSY}
     assert data["control"]["state"] == "running" and data["stores"]["gleif"]["records"] == 3355011
     assert data["decisions"][0]["action"] == "pause" and data["schedules"][0]["status"] == OK
-    s = node_statuses(data)
-    assert (s["ingest-gleif"], s["ingest-gb"], s["gateway"], s["control"], s["agents"]) == (OK, BAD, OK, OK, "idle")
+    assert {s["name"]: s["status"] for s in data["services"]}["conduct-gateway"] == OK
 
 
 def test_missing_permissions_show_as_unavailable_never_as_healthy():
     data = SystemView(Reader(fail={"api", "storage"})).collect()
     assert data["jobs"] == [] and data["jobsError"] == "PermissionError" and data["control"]["error"] == "PermissionError"
-    s = node_statuses(data)
-    assert OK not in (s["ingest-gleif"], s["gateway"], s["control"], s["data"])
+    assert data["services"] == [] and all(not v.get("records") for v in data["stores"].values())
 
 
 def test_results_are_cached_briefly():
@@ -87,13 +85,6 @@ def test_results_are_cached_briefly():
     clock[0] += 31
     view.collect()
     assert reader.calls > calls
-
-
-def test_diagram_escapes_and_draws_every_node():
-    import html
-
-    svg = diagram(SystemView(Reader()).collect(), html.escape)
-    assert svg.count("<rect") == 13 and "Conduct gateway" in svg and "<b>" not in svg
 
 
 def test_system_page_through_the_server(tmp_path):
@@ -183,7 +174,9 @@ def test_the_data_sources_page_shows_the_owners_edits():
     by = {s["id"]: s for s in page["sources"]}
     assert "us-pa-dos" not in by and "gleif" in by and by["us-de-corporations"]["approval"]["status"] == "pending"
     co = by["us-co-sos"]
-    assert co["name"] == "Colorado SOS" and co["owner"]["hint"] == "Try <the bulk CSV> first" and co["removable"]
+    assert co["name"] == "Colorado SOS" and co["owner"]["hint"] == "Try <the bulk CSV> first"
+    assert not co["removable"] and "deny it instead" in co["removeBlocked"]  # Colorado is built now
+    assert by["in-mca"]["removable"]  # not built, not approved
     assert not by["gleif"]["removable"] and "deny it instead" in by["gleif"]["removeBlocked"]
     assert by["gleif"]["pipeline"] == {"job": "ingest-gleif", "store": "gleif", "records_as": "gleif"}
     assert {a["id"] for a in by["us-de-corporations"]["actions"]} == {"source-approve:us-de-corporations",
