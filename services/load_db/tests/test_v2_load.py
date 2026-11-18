@@ -31,8 +31,11 @@ START = Date(2026, 11, 18)
 
 def settings(**snap):
     base = load_settings()
+    # These worlds are a few hundred records, so a handful of changes is a large share: the incremental
+    # threshold is set for them here (the repository's 4% is for tens of millions of records).
     return replace(base, snapshots=replace(base.snapshots, **{"full_every_days": 3, "part_target_records": 300,
-                                                              "change_file_max_rows": 40, "prune_grace_days": 0, **snap}))
+                                                              "change_file_max_rows": 40, "prune_grace_days": 0, **snap}),
+                   load=replace(base.load, incremental_max_fraction=0.2))
 
 
 class Env:

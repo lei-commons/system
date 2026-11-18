@@ -25,6 +25,9 @@ storage:
 load:
   incremental: true             # apply each day's changes instead of reloading everything
   incremental_max_days: 14      # further behind than this: reload in full
-  incremental_max_fraction: 0.2 # changes above this share of records: reload in full
+  # Changes above this share of records: reload in full. Measured 2026-11-18 at 36M records: an
+  # incremental load applies about 2.4 ms a change, a full load about 0.1 ms a record, so a full
+  # reload is quicker once more than about 4% of records change in a day.
+  incremental_max_fraction: 0.04
   fallback_to_full: true        # an incremental load that fails a check is rolled back and loaded in full
   vacuum_after_incremental: true
