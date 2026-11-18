@@ -46,9 +46,9 @@ resource "google_monitoring_alert_policy" "job_failed" {
 }
 
 # Every request the conduct gateway refuses by policy, except while the system is paused.
+# Policy refusals only: not a site timing out (upstream-error) or a request waiting its turn (rate-limited).
 resource "google_logging_metric" "gateway_denials" {
   name   = "lc_gateway_denials"
-  # Policy refusals only: not a site timing out (upstream-error) or a request waiting its turn (rate-limited).
   filter = "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"conduct-gateway\" AND jsonPayload.allowed=false AND NOT jsonPayload.rule=\"system-not-running\" AND NOT jsonPayload.rule=\"upstream-error\" AND NOT jsonPayload.rule=\"rate-limited\""
 
   metric_descriptor {
