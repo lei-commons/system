@@ -2,7 +2,8 @@
 #   docker build -f services/ingest_browser/Dockerfile -t ingest-browser .
 # Chromium and its system libraries are installed at build time (Playwright), so the running job never
 # downloads code; every request it makes at run time goes through the conduct gateway (lc_browser).
-FROM python:3.12-slim
+# Debian 12 (bookworm): a base Playwright's Chromium supports; pinned so a new default base can't break it.
+FROM python:3.12-slim-bookworm
 
 RUN useradd --create-home --uid 10001 ingest
 WORKDIR /app
