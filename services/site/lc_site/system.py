@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 
 from lc_core.actions import catalogue, source_catalogue
 from lc_core.approvals import effective as effective_approvals
@@ -22,6 +24,7 @@ AFTER_INGEST = ["build-snapshot", "load-db"]  # the cycle's last steps, after ev
 AGENT_ROLES = ["engineering"]  # agents/roles; none runs until the owner switches agents on
 
 OK, BAD, BUSY, IDLE, UNKNOWN = "ok", "failed", "running", "idle", "unknown"
+DETAILS_SHOWN = 30  # events shown under a source's error details
 
 
 class GoogleReader:
@@ -76,12 +79,16 @@ def _execution_status(job: dict) -> str:
 class SystemView:
     """Everything the System page shows. Sources come from the registry (config/sources.yaml)."""
 
-    def __init__(self, reader, clock=time.time, sources=None):
+    def __init__(self, reader, clock=time.time, sources=None, cycle_settings=None):
         from lc_core.sources import pipelines
+
+        from lc_core import cycle
 
         self._reader, self._clock = reader, clock
         self._sources = sources if sources is not None else pipelines(os.environ.get("LC_SOURCES_CONFIG")
                                                                          or _default_sources_path())
+        # The cycle's settings (config/cycle.yaml): the clean-days gate, the schedule, the retries.
+        self._cycle = cycle_settings if cycle_settings is not None else cycle.load()
         self._cached, self._at = None, -1e9
         self._lock = threading.Lock()
 
@@ -177,7 +184,7 @@ class SystemView:
             lambda: r.api(f"https://cloudscheduler.googleapis.com/v1/projects/{r.project}/locations/{r.region}/jobs").get("jobs", []), [])
         cycles, cycles_error = _try(lambda: r.api(
             f"https://workflowexecutions.googleapis.com/v1/projects/{r.project}/locations/{r.region}/workflows/daily-cycle"
-            "/executions?pageSize=14").get("executions", []), [])
+            f"/executions?pageSize={min(100, max(14, 2 * self._cycle['clean_days']))}").get("executions", []), [])
         control, control_error = _try(lambda: r.bucket_json("control", "state.json"))
 
         def store(prefix, label):
@@ -187,6 +194,9 @@ class SystemView:
                     "error": error}
 
         job_rows = {j["name"].rsplit("/", 1)[1]: j for j in jobs}
+        today = datetime.fromtimestamp(self._clock(), timezone.utc).date()
+        run_names, runs_error = _try(lambda: [n for day in (today, today - timedelta(days=1))
+                                              for n in r.bucket_names("decision_log", f"runs/{day.isoformat()}/")], [])
         stores, sources = {}, []
         for src in self._sources:
             entities = store(src["store"], src["label"])
@@ -202,7 +212,8 @@ class SystemView:
                            | {"records": entities["records"], "last": entities["last"], "error": entities["error"],
                               "relationships": (relationships or {}).get("records"),
                               "jobStatus": _execution_status(row) if row else UNKNOWN,
-                              "lastRun": latest.get("createTime"), "finished": latest.get("completionTime")})
+                              "lastRun": latest.get("createTime"), "finished": latest.get("completionTime"),
+                              "health": None if runs_error else source_health(r, run_names, src["job"], today.isoformat())})
         steps = [src["job"] for src in self._sources] + AFTER_INGEST
         feed, feed_error = _try(lambda: self._feed(r), [])
         names, decisions_error = _try(lambda: sorted(r.bucket_names("decision_log", "owner-control/")
@@ -236,6 +247,9 @@ class SystemView:
                         "status": {"SUCCEEDED": OK, "FAILED": BAD, "CANCELLED": BAD, "ACTIVE": BUSY}.get(c.get("state"), UNKNOWN)}
                        for c in cycles],
             "cleanStreak": clean_streak(cycles),
+            "cycle": {"cleanDays": self._cycle["clean_days"], "scheduleUtc": self._cycle["schedule_utc"],
+                      "retries": self._cycle["retries"], "retryWaitMinutes": self._cycle["retry_wait_minutes"]},
+            "healthError": runs_error,
             "cyclesError": cycles_error,
             "stores": stores,
             "sources": sources,
@@ -262,6 +276,52 @@ def _default_sources_path():
         if candidate.exists():
             return candidate
     return here.parent / "sources.yaml"
+
+
+def _job_runs(names: list, job: str) -> list:
+    """This job's run objects (runs/<day>/<time>-job-<job>-<execution>.jsonl), oldest first."""
+    mine = re.compile(rf"-job-{re.escape(job)}-(?:{re.escape(job)}-[a-z0-9]+|local)\.jsonl$")
+    return sorted(n for n in names if mine.search(n))
+
+
+def _events(reader, name: str) -> list:
+    out = []
+    for line in (reader.bucket_text("decision_log", name) or "").splitlines():
+        if line.strip():
+            e = json.loads(line)
+            out.append({k: e.get(k) for k in ("ts", "action", "subject", "decision", "reason", "run_id")})
+    return out
+
+
+def source_health(reader, names: list, job: str, today: str):
+    """How a source's job is doing, from its run objects in the decision log (today's and yesterday's).
+
+    state is "failed" if its newest run failed, else "ok". With a failure: the error, when, and the newest
+    failed run's events (attempts, reasons) for the details view. ``failedRunsToday`` counts today's runs
+    that failed, so a source that recovered after retries still shows it struggled."""
+    runs = _job_runs(names, job)
+    if not runs:
+        return None
+    newest_events = _events(reader, runs[-1])
+    todays = [n for n in runs if n.startswith(f"runs/{today}/")]
+    failed_today, last_failed = 0, None
+    for name in todays:
+        events = newest_events if name == runs[-1] else _events(reader, name)
+        if any(e["decision"] == "failed" for e in events):
+            failed_today += 1
+            last_failed = (name, events)
+    if last_failed is None and any(e["decision"] == "failed" for e in newest_events):
+        last_failed = (runs[-1], newest_events)  # yesterday's newest run failed and nothing ran today
+    newest_failed = any(e["decision"] == "failed" for e in newest_events)
+    health = {"state": BAD if newest_failed else OK, "lastRunAt": (newest_events[-1]["ts"] if newest_events else None),
+              "failedRunsToday": failed_today, "runsToday": len(todays)}
+    if last_failed:
+        name, events = last_failed
+        final = next((e for e in reversed(events) if e["action"] == "ran" and e["decision"] == "failed"), None) \
+            or next(e for e in reversed(events) if e["decision"] == "failed")
+        health["problem"] = {"at": final["ts"], "error": final["reason"], "run": final.get("run_id") or name.rsplit("/", 1)[-1],
+                             "recovered": not newest_failed, "events": events[-DETAILS_SHOWN:]}
+    return health
 
 
 def last_cycle(executions: list, job_rows: dict, steps: list):

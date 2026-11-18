@@ -1,0 +1,26 @@
+# The daily cycle's settings: the one place for these numbers. The cycle (Cloud Workflows), its
+# schedule (Terraform) and the site's System page all read them; nothing hard-codes them.
+#
+# Each source is independent (owner decision 2026-11-18). A source whose job fails doesn't stop the
+# cycle: the failure is logged, the other sources carry on, and the failed ones are tried again after
+# a wait, up to `retries` more rounds. The snapshot and the database load then run with every source's
+# newest good data (a source that still fails keeps its last good data). The cycle still ends as
+# failed, so the owner is alerted and the day doesn't count as clean, and the next day's cycle tries
+# every source again (each source catches up on what it missed).
+#
+# After changing this file, run `python scripts/render_cycle.py` and commit the result
+# (infra/workflows/daily-cycle.yaml); CI checks they agree, and deploy-cycle.yml deploys it.
+# A new schedule time takes effect with the next bootstrap rerun (Terraform owns the scheduler).
+
+# When the cycle starts each day, HH:MM in UTC.
+schedule_utc: "02:00"
+
+sources:
+  # Minutes to wait before each retry round. 1 to 120.
+  retry_wait_minutes: 10
+  # Retry rounds after the first try. 0 to 12. Each round retries every source still failing.
+  retries: 5
+
+gate:
+  # Clean daily cycles in a row that a phase gate needs (owner decision 2026-11-17: 4). 1 to 30.
+  clean_days: 4

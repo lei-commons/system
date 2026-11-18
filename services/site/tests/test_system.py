@@ -196,3 +196,66 @@ def test_unreadable_edits_show_the_registry_and_offer_no_edits():
     page = SystemView(Broken()).sources_page()
     assert page["editsError"] == "PermissionError" and not page["editable"]
     assert "us-pa-dos" in {s["id"] for s in page["sources"]} and not any(s["removable"] for s in page["sources"])
+
+
+# ---- each source's health, from its runs in the decision log (owner request 2026-11-18) ----
+
+from lc_site.system import source_health  # noqa: E402
+
+
+def _line(ts, action, decision, reason, run="ingest-gleif-ab12c"):
+    return json.dumps({"ts": ts, "actor": "job:ingest-gleif", "action": action, "subject": "gleif 2026-11-18",
+                       "decision": decision, "reason": reason, "run_id": run})
+
+
+class RunsReader:
+    def __init__(self, objects):
+        self.objects = objects
+
+    def bucket_text(self, bucket, name):
+        return "\n".join(self.objects[name]) + "\n"
+
+
+def test_a_failing_source_shows_its_error_and_attempts():
+    a = "runs/2026-11-18/2026-11-18T020300Z-job-ingest-gleif-ingest-gleif-ab12c.jsonl"
+    b = "runs/2026-11-18/2026-11-18T022900Z-job-ingest-gleif-ingest-gleif-cd34e.jsonl"
+    other = "runs/2026-11-18/2026-11-18T023000Z-job-ingest-gb-ingest-gb-zz999.jsonl"
+    reader = RunsReader({
+        a: [_line("2026-11-18T02:03:00Z", "downloaded", "failed", "attempt 1 was bad, fetching again: FetchError: answered 403"),
+            _line("2026-11-18T02:04:00Z", "ran", "failed", "stopped with BadFile: still bad after 3 downloads")],
+        b: [_line("2026-11-18T02:29:00Z", "downloaded", "failed", "attempt 1 was bad", "ingest-gleif-cd34e"),
+            _line("2026-11-18T02:30:00Z", "ran", "failed", "stopped with BadFile: 403 again", "ingest-gleif-cd34e")],
+        other: [_line("t", "ingested", "done", "ok")]})
+    h = source_health(reader, [a, b, other], "ingest-gleif", "2026-11-18")
+    assert h["state"] == BAD and h["failedRunsToday"] == 2 and h["runsToday"] == 2
+    p = h["problem"]
+    assert p["error"] == "stopped with BadFile: 403 again" and p["run"] == "ingest-gleif-cd34e" and not p["recovered"]
+    assert [e["decision"] for e in p["events"]] == ["failed", "failed"]
+
+
+def test_a_source_that_recovered_after_retries_is_ok_but_says_so():
+    a = "runs/2026-11-18/2026-11-18T020300Z-job-ingest-gleif-ingest-gleif-ab12c.jsonl"
+    b = "runs/2026-11-18/2026-11-18T024000Z-job-ingest-gleif-ingest-gleif-cd34e.jsonl"
+    reader = RunsReader({a: [_line("2026-11-18T02:04:00Z", "ran", "failed", "stopped with BadFile")],
+                         b: [_line("2026-11-18T02:41:00Z", "ingested", "done", "17,000 changes", "ingest-gleif-cd34e")]})
+    h = source_health(reader, [a, b], "ingest-gleif", "2026-11-18")
+    assert h["state"] == OK and h["failedRunsToday"] == 1 and h["problem"]["recovered"]
+
+
+def test_a_healthy_source_has_no_problem_and_a_source_without_runs_has_no_health():
+    a = "runs/2026-11-18/2026-11-18T020300Z-job-ingest-gleif-ingest-gleif-ab12c.jsonl"
+    h = source_health(RunsReader({a: [_line("t", "ingested", "done", "ok")]}), [a], "ingest-gleif", "2026-11-18")
+    assert h["state"] == OK and "problem" not in h
+    assert source_health(RunsReader({}), [], "ingest-gleif", "2026-11-18") is None
+
+
+def test_one_jobs_runs_never_match_anothers_with_a_longer_name():
+    a = "runs/2026-11-18/2026-11-18T020300Z-job-ingest-us-ia-ingest-us-ia-ab12c.jsonl"
+    assert source_health(RunsReader({a: [_line("t", "ran", "failed", "x")]}), [a], "ingest-us", "2026-11-18") is None
+
+
+def test_the_page_gets_the_gate_and_schedule_from_the_cycle_settings():
+    settings = {"clean_days": 9, "schedule_utc": "03:30", "retries": 2, "retry_wait_minutes": 7, "cron": "30 3 * * *"}
+    data = SystemView(Reader(), cycle_settings=settings).collect({})
+    assert data["cycle"] == {"cleanDays": 9, "scheduleUtc": "03:30", "retries": 2, "retryWaitMinutes": 7}
+    assert SystemView(Reader()).collect({})["cycle"]["cleanDays"] == 4  # config/cycle.yaml

@@ -27,7 +27,7 @@ import tempfile
 from lc_core.allowlist import AllowList
 from lc_core.control import require_running
 from lc_core.approvals import require_approved
-from lc_core.decisions import Recorder, log_bucket_name
+from lc_core.decisions import Recorder, failure, log_bucket_name
 from lc_core.lease import Busy, lease
 from lc_core.fetch import FetchError, Gateway
 from lc_ingest.companies_house import read_zip, to_record
@@ -166,7 +166,7 @@ def main() -> int:
         record({"event": "busy", "reason": str(exc)})  # another run is doing this work
         outcome = "busy"
     except Exception as exc:
-        record({"event": "failed", "error": type(exc).__name__})
+        record(failure(exc))
         raise
     finally:
         record.write(client.bucket(log_bucket_name(bucket)))

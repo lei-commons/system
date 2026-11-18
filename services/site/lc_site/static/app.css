@@ -226,6 +226,17 @@ table.data td.n { text-align: right; font-variant-numeric: tabular-nums; }
 .source-records { font-size: 28px; font-weight: 650; letter-spacing: -.02em; margin-top: 6px; }
 .share { height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
 .share-bar { height: 100%; border-radius: 999px; background: var(--accent); }
+.source-problem { margin: 8px 0 0; font-size: 12.5px; }
+.source-problem summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.source-problem summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.source-problem.failing { border-left: 3px solid var(--critical); padding-left: 8px; }
+.source-problem.recovered { border-left: 3px solid var(--warning); padding-left: 8px; }
+.source-problem dl.problem { display: grid; grid-template-columns: max-content 1fr; gap: 4px 10px; margin: 8px 0; }
+.source-problem dl.problem dt { color: var(--muted); }
+.source-problem dl.problem dd { margin: 0; overflow-wrap: anywhere; }
+.source-problem ol.attempts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.source-problem .attempt-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--ink-2); }
+.source-problem .attempt-reason { overflow-wrap: anywhere; margin-top: 2px; }
 dl.mini { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; margin: 8px 0 0; font-size: 12.5px; }
 dl.mini dt { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; }
 dl.mini dd { margin: 2px 0 0; word-break: break-word; }

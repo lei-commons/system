@@ -20,7 +20,7 @@ from pathlib import Path
 
 from lc_core.control import SystemHalted, require_running
 from lc_core.approvals import approved_record_sources
-from lc_core.decisions import Recorder, log_bucket_name, seal_through, yesterday
+from lc_core.decisions import Recorder, failure, log_bucket_name, seal_through, yesterday
 from lc_core.lease import Busy, lease
 from lc_core.publishing import load as load_settings
 from lc_core.snapshot_format import is_v2
@@ -156,7 +156,7 @@ def main() -> int:
         record.write(decisions)
         return 0
     except Exception as exc:
-        record({"event": "failed", "error": type(exc).__name__})
+        record(failure(exc))
         record.write(decisions)
         raise
     finally:
