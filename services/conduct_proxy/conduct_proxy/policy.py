@@ -85,6 +85,32 @@ def normalise_path(path: str) -> str:
     return "/" + "/".join(segments)
 
 
+PACING_LIMITS = {  # name: (lowest, highest)
+    "min_seconds_between_requests": (1, 600),
+    "extra_random_seconds": (0, 600),
+    "seconds_after_an_error": (0, 3600),
+    "max_queue_seconds": (30, 3000),  # under Cloud Run's 3600 s request limit
+}
+
+
+def _pacing(cfg, min_interval: float) -> dict:
+    """The ``pacing`` section, checked: every number present and in range, one request at a time, and never
+    faster than Article 2.4 allows."""
+    if not isinstance(cfg, dict):
+        raise ConfigError("egress config needs a pacing section (a person's pace per host)")
+    if cfg.get("one_request_at_a_time") is not True:
+        raise ConfigError("pacing.one_request_at_a_time must be true")
+    out = {"one_request_at_a_time": True}
+    for name, (low, high) in PACING_LIMITS.items():
+        value = cfg.get(name)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not low <= value <= high:
+            raise ConfigError(f"pacing.{name} must be a number from {low} to {high}")
+        out[name] = float(value)
+    if out["min_seconds_between_requests"] < min_interval:
+        raise ConfigError("pacing.min_seconds_between_requests can't be faster than max_rps_per_host (Article 2.4)")
+    return out
+
+
 class Policy:
     def __init__(self, cfg: dict, approved_sources: frozenset = frozenset()):
         try:
@@ -108,6 +134,7 @@ class Policy:
             raise ConfigError("crawler must honour robots.txt and send no cookies or auth (Article 2)")
         self.approved = frozenset(approved_sources)
         self.min_interval = 1.0 / self.max_rps
+        self.pacing = _pacing(cfg.get("pacing"), self.min_interval)
         try:
             self.deny_paths = [re.compile(p) for p in (*BUILTIN_DENY_PATHS, *deny)]
         except re.error as exc:
@@ -131,6 +158,10 @@ class Policy:
         if host in self.registry:
             return REGISTRY
         return CRAWLER
+
+    def paced(self, profile: str) -> bool:
+        """Registry and owner-key hosts go at a person's pace, one request at a time (``pacing``)."""
+        return profile in (REGISTRY, OWNER_KEY)
 
     def rate_limited(self, profile: str) -> bool:
         # Vertex AI is our own paid API with its own quotas, not a third party's site.

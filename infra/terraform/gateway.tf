@@ -1,5 +1,5 @@
-# The conduct gateway (services/conduct_proxy). It has no VPC attachment, so it
-# keeps normal internet egress; everything else reaches it from the jobs network.
+# The conduct gateway (services/conduct_proxy). All its traffic leaves through its own network
+# (egress.tf): Cloud NAT on one fixed address. Everything else reaches it from the jobs network.
 # Created once gateway_image is set: see "Deploy the gateway" in docs/day-zero.md.
 
 locals {
@@ -26,6 +26,15 @@ resource "google_cloud_run_v2_service" "gateway" {
       max_instance_count = 1
     }
 
+    # Every request out leaves from the one fixed address (egress.tf).
+    vpc_access {
+      egress = "ALL_TRAFFIC"
+      network_interfaces {
+        network    = google_compute_network.egress.id
+        subnetwork = google_compute_subnetwork.egress.id
+      }
+    }
+
     containers {
       image = var.gateway_image
 
@@ -43,7 +52,7 @@ resource "google_cloud_run_v2_service" "gateway" {
     }
   }
 
-  depends_on = [google_project_service.apis]
+  depends_on = [google_project_service.apis, google_compute_router_nat.egress]
 }
 
 resource "google_cloud_run_v2_service_iam_member" "gateway_callers" {

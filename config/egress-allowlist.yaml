@@ -46,6 +46,21 @@ model_hosts:
   - us-central1-aiplatform.googleapis.com
   - aiplatform.googleapis.com
 
+# How the registry hosts above are asked (owner decision 2026-11-18): at a person's pace in a web browser,
+# never continuously. Much stricter than Article 2.4's one request per second. Per host: one request at a
+# time (the next waits until the last has finished, whole download included), then a pause of
+# min_seconds_between_requests plus a random 0 to extra_random_seconds, so requests don't come like
+# clockwork. After a 403, 429 or 5xx (or a failed connection) the host is left alone for
+# seconds_after_an_error, or its Retry-After if longer (up to an hour), so a retry never hammers a site
+# that is refusing us. A request waits up to max_queue_seconds for its turn, then gets 429 with the time
+# to come back (the job's gateway client waits and tries again).
+pacing:
+  one_request_at_a_time: true
+  min_seconds_between_requests: 5
+  extra_random_seconds: 10
+  seconds_after_an_error: 120
+  max_queue_seconds: 900
+
 crawler_policy:
   methods: [GET, HEAD]
   max_rps_per_host: 1

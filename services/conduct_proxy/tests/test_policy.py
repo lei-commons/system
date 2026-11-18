@@ -149,7 +149,32 @@ def good_cfg():
         "registry_hosts": ["r.test"], "model_hosts": ["m.test"], "owner_key_hosts": [{"host": "k.test", "source": "s"}],
         "crawler_policy": {"methods": ["GET", "HEAD"], "max_rps_per_host": 1, "honour_robots_txt": True,
                            "send_cookies": False, "send_auth_headers": False, "user_agent": "ua"},
+        "pacing": {"one_request_at_a_time": True, "min_seconds_between_requests": 5, "extra_random_seconds": 10,
+                   "seconds_after_an_error": 120, "max_queue_seconds": 900},
     }
+
+
+def test_the_good_config_loads_with_its_pacing():
+    assert Policy(good_cfg()).pacing["min_seconds_between_requests"] == 5.0
+
+
+@pytest.mark.parametrize("change", [
+    {"one_request_at_a_time": False}, {"min_seconds_between_requests": 0.5}, {"min_seconds_between_requests": "5"},
+    {"extra_random_seconds": -1}, {"seconds_after_an_error": 4000}, {"max_queue_seconds": 10}, {"max_queue_seconds": 3600},
+    {"min_seconds_between_requests": None},
+])
+def test_bad_or_faster_pacing_refuses_to_load(change):
+    cfg = good_cfg()
+    cfg["pacing"].update(change)
+    with pytest.raises(ConfigError):
+        Policy(cfg)
+
+
+def test_pacing_is_required():
+    cfg = good_cfg()
+    del cfg["pacing"]
+    with pytest.raises(ConfigError):
+        Policy(cfg)
 
 
 @pytest.mark.parametrize("change", [

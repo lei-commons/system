@@ -197,10 +197,38 @@ def test_crawl_delay_slows_host_beyond_one_second(env):
     assert max(sleeps) > 5
 
 
-def test_queue_overflow_returns_429(env):
+def test_registry_hosts_go_at_a_persons_pace(env):
+    """Each request after the first waits 5 to 15 seconds (config pacing), never back to back."""
+    port, up, _, sleeps, _ = env
+    for _ in range(4):
+        assert call(port, "https://api.gleif.org/x")[0] == 200
+    assert len(sleeps) == 3 and all(4.9 <= s <= 15.1 for s in sleeps), sleeps
+
+
+def test_after_an_error_the_host_is_left_alone_for_longer(env):
+    port, up, _, sleeps, _ = env
+    up.routes[("api.gleif.org", "/x")] = FakeResponse(403, b"no", {"Content-Length": "2"})
+    assert call(port, "https://api.gleif.org/x")[0] == 403
+    up.routes[("api.gleif.org", "/x")] = FakeResponse(200, b"ok", {"Content-Length": "2"})
+    assert call(port, "https://api.gleif.org/x")[0] == 200
+    assert sleeps and sleeps[-1] >= 119
+
+
+def test_a_long_retry_after_from_the_host_is_honoured_and_the_job_told_when_to_come_back(env):
     port, up, _, _, _ = env
-    statuses = [call(port, "https://api.gleif.org/x")[0] for _ in range(35)]
-    assert 429 in statuses
+    up.routes[("api.gleif.org", "/x")] = FakeResponse(429, b"slow down", {"Content-Length": "9", "Retry-After": "2000"})
+    assert call(port, "https://api.gleif.org/x")[0] == 429  # the host's own answer
+    status, headers, _ = call(port, "https://api.gleif.org/x")
+    assert status == 429 and headers["X-LC-Denied"] == "rate-limited"
+    assert 1990 <= int(headers["Retry-After"]) <= 2001  # longer than the queue: come back then
+
+
+def test_hosts_are_paced_separately(env):
+    port, up, _, sleeps, _ = env
+    up.routes[("api.gleif.org", "/x")] = FakeResponse(403, b"no", {"Content-Length": "2"})
+    assert call(port, "https://api.gleif.org/x")[0] == 403
+    assert call(port, "https://goldencopy.gleif.org/x")[0] in (200, 404)
+    assert not sleeps  # a different host isn't held back by api.gleif.org's pause
 
 
 def test_redirects_are_returned_not_followed(env):
