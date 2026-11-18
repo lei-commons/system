@@ -28,7 +28,7 @@ from urllib.parse import urljoin
 
 from lc_core.control import SystemHalted, require_running
 
-from .limits import ROBOTS_MAX_BYTES, RateLimiter, RobotsCache
+from .limits import ROBOTS_MAX_BYTES, HostPacer, RateLimiter, RobotsCache
 from .policy import CRAWLER, ConfigError, Decision, Policy
 from .upstream import BlockedAddress, Upstream
 
@@ -46,6 +46,14 @@ RETURN_HEADERS = (
     "content-type", "content-encoding", "content-range", "accept-ranges",
     "etag", "last-modified", "cache-control", "location", "retry-after",
 )
+
+
+def _seconds(value):
+    """A Retry-After header in seconds (the date form counts as none)."""
+    try:
+        return max(0.0, float(value)) if value is not None else None
+    except ValueError:
+        return None
 
 
 class Gate:
@@ -77,6 +85,7 @@ class Gateway:
         self.upstream = upstream or Upstream()
         self.gate = gate or Gate()
         self.limiter = RateLimiter()
+        self.pacer = HostPacer(sleep=sleep)
         self.robots = RobotsCache(self._get_robots)
         self.log = log or _log_stdout
         self.sleep = sleep
@@ -102,11 +111,21 @@ class Gateway:
                 conn.close()
         return 0, b""
 
+    def finished(self, d: Decision, status: int, retry_after=None) -> None:
+        """A paced request has finished (answered, streamed or failed): free the host and set its pause."""
+        if self.policy.paced(d.profile):
+            self.pacer.release(d.host, self.pacer.pause_after(self.policy.pacing, status, _seconds(retry_after)))
+
     def pace(self, d: Decision):
         """Apply robots.txt and per-host pacing. Returns (status, rule, reason, retry_after)."""
         if d.profile == CRAWLER and not self.robots.allowed(d.scheme, d.host, d.target):
             return 403, "robots-disallowed", "robots.txt does not allow this path (Article 2.4)", None
         if not self.policy.rate_limited(d.profile):
+            return None
+        if self.policy.paced(d.profile):
+            come_back = self.pacer.acquire(d.host, self.policy.pacing["max_queue_seconds"])
+            if come_back is not None:
+                return 429, "rate-limited", "waiting for this host's turn: one request at a time, at a person's pace", come_back
             return None
         interval = self.policy.min_interval
         if d.profile == CRAWLER:
@@ -190,15 +209,18 @@ class Handler(BaseHTTPRequestHandler):
             if body is None:
                 return self._refuse(413, "bad-body", "POST needs a Content-Length within the limit", d)
 
+        refused = gw.pace(d)
+        if refused:
+            status, rule, reason, retry = refused
+            return self._refuse(status, rule, reason, d, retry)
+        # From here this request holds the host's turn (paced hosts) until finished() below.
         try:
-            refused = gw.pace(d)
-            if refused:
-                status, rule, reason, retry = refused
-                return self._refuse(status, rule, reason, d, retry)
             conn, resp = gw.upstream.open(d.scheme, d.host, d.port, self.command, d.target, d.headers, body)
         except BlockedAddress as exc:
+            gw.finished(d, 0)
             return self._refuse(403, "non-public-address", str(exc), d)
         except (OSError, http.client.HTTPException) as exc:
+            gw.finished(d, 0)
             return self._refuse(502, "upstream-error", type(exc).__name__, d)
 
         try:
@@ -228,6 +250,7 @@ class Handler(BaseHTTPRequestHandler):
             self._record(d, resp.status, "stream-failed")
         finally:
             conn.close()
+            gw.finished(d, resp.status, resp.getheader("retry-after"))
 
     do_GET = do_HEAD = do_POST = do_PUT = do_PATCH = do_DELETE = _handle
     do_OPTIONS = do_TRACE = do_CONNECT = _handle

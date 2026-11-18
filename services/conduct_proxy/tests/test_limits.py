@@ -103,3 +103,66 @@ def test_resolution_failure_blocks():
 
     with pytest.raises(BlockedAddress):
         resolve_public("e.test", 443, fail)
+
+
+# ---- a person's pace per host (HostPacer) ----
+
+import threading as _threading
+
+from conduct_proxy.limits import HostPacer
+
+PACING = {"min_seconds_between_requests": 5.0, "extra_random_seconds": 10.0, "seconds_after_an_error": 120.0,
+          "max_queue_seconds": 900.0}
+
+
+class Clock:
+    def __init__(self):
+        self.t = 1000.0
+
+    def __call__(self):
+        return self.t
+
+    def sleep(self, s):
+        self.t += s
+
+
+def test_the_next_request_waits_for_the_pause():
+    c = Clock()
+    p = HostPacer(clock=c, sleep=c.sleep, rand=lambda: 0.5)
+    assert p.acquire("h", 900) is None
+    p.release("h", p.pause_after(PACING, 200))  # 5 + 0.5 * 10 = 10 s
+    start = c.t
+    assert p.acquire("h", 900) is None and c.t - start == 10
+
+
+def test_errors_and_retry_after_lengthen_the_pause_up_to_an_hour():
+    p = HostPacer(rand=lambda: 0.0)
+    assert p.pause_after(PACING, 200) == 5
+    assert p.pause_after(PACING, 404) == 5  # not an error about us
+    assert p.pause_after(PACING, 403) == 120 and p.pause_after(PACING, 503) == 120 and p.pause_after(PACING, 0) == 120
+    assert p.pause_after(PACING, 429, retry_after=600) == 600
+    assert p.pause_after(PACING, 429, retry_after=99999) == 3600
+    assert p.pause_after(PACING, 200, crawl_delay=30) == 30
+
+
+def test_a_wait_longer_than_the_queue_says_when_to_come_back():
+    c = Clock()
+    p = HostPacer(clock=c, sleep=c.sleep)
+    assert p.acquire("h", 900) is None
+    p.release("h", 2000)
+    assert p.acquire("h", 900) == 2000
+    assert p.acquire("other", 900) is None  # other hosts aren't held back
+
+
+def test_one_request_at_a_time_per_host():
+    p = HostPacer(rand=lambda: 0.0, sleep=lambda s: None)
+    assert p.acquire("h", 900) is None
+    got = []
+    t = _threading.Thread(target=lambda: got.append(p.acquire("h", 5)))
+    t.start()
+    t.join(0.3)
+    assert t.is_alive() and not got  # waiting while the first request is still going
+    p.release("h", 0)
+    t.join(2)
+    assert got == [None]
+    assert p.acquire("h", 0.2) == 1  # still busy (the second holds it): come back later
