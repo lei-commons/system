@@ -38,3 +38,35 @@ def test_download_events_and_failures_become_decisions_with_their_reasons():
         ("downloaded", "failed", "still bad after 3 attempts: BadFile: not a ZIP"),
         ("ran", "failed", "stopped with RuntimeError: x.zip: still bad after 3 downloads"),
     ]
+
+
+def test_a_source_refusing_us_is_told_apart_from_our_own_failures():
+    from lc_core.decisions import refusal_status
+    from lc_core.fetch import FetchError
+
+    def wrapped(inner):
+        try:
+            try:
+                raise inner
+            except Exception as exc:
+                raise RuntimeError("x.zip: still bad after 3 downloads") from exc
+        except RuntimeError as outer:
+            return outer
+
+    assert refusal_status(wrapped(FetchError("https://a/x answered 403", 403))) == 403
+    assert failure(wrapped(FetchError("answered 451", 451)))["refused"] is True
+    for inner in (FetchError("answered 404", 404), FetchError("answered 503", 503), FetchError("gateway unreachable"),
+                  ValueError("bad row")):
+        assert refusal_status(wrapped(inner)) is None and "refused" not in failure(wrapped(inner))
+
+
+def test_a_refusal_becomes_a_refused_decision():
+    from lc_core.fetch import FetchError
+
+    r = Recorder("job:ingest-gleif", log=lambda record: None)
+    try:
+        raise RuntimeError("still bad") from FetchError("answered 403", 403)
+    except RuntimeError as exc:
+        r(failure(exc))
+    (e,) = r.events
+    assert (e.action, e.decision) == ("refused", "failed") and "refused us (HTTP 403)" in e.reason

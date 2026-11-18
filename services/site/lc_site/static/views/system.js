@@ -148,7 +148,7 @@ function health(s) {
   const p = hl.problem;
   const summary = p.recovered
     ? `Recovered: ${hl.failedRunsToday} of ${hl.runsToday} runs today failed first`
-    : `Failing${hl.failedRunsToday ? `: ${hl.failedRunsToday} ${hl.failedRunsToday === 1 ? "run" : "runs"} failed today` : ""}`;
+    : `${p.refused ? "Refused by the source (an outside block, not a fault here)" : "Failing"}${hl.failedRunsToday ? `: ${hl.failedRunsToday} ${hl.failedRunsToday === 1 ? "run" : "runs"} failed today` : ""}`;
   const details = h("details", { class: `source-problem ${p.recovered ? "recovered" : "failing"}` },
     h("summary", {}, p.recovered ? pill("ok") : pill("failed"), " ", summary, h("span", { class: "muted" }, " · error details")),
     h("dl", { class: "problem" },
@@ -236,7 +236,13 @@ function page(d, meta, updated, reload) {
     h("div", { class: "grid cols-3", style: { marginTop: "18px" } },
       h("section", { class: "card card-pad" }, h("h3", {}, "Recent cycles"),
         table(["Started", "Took", "Status"], d.cycles.map((x) => h("tr", {}, h("td", {}, when(x.started)),
-          h("td", { class: "num" }, x.ended ? `${minutes(x.started, x.ended)} min` : "–"), h("td", {}, pill(x.status)))))),
+          h("td", { class: "num" }, x.ended ? `${minutes(x.started, x.ended)} min` : "–"),
+          h("td", {}, x.refusedOnly
+            ? h("span", { class: "pill warn", title: "Every failure was a source refusing us, not a fault in our system, so the day counts as clean" },
+                "⚠ clean, refused by ", x.failedSources.map((j) => j.replace(/^ingest-/, "")).join(", "))
+            : pill(x.status)))))),
+        h("p", { class: "muted", style: { marginBottom: 0 } },
+          "A day counts as clean when its cycle succeeded, or when every failure was a source refusing us (an outside block, not a fault here)."),
       h("section", { class: "card card-pad" }, h("h3", {}, "Services"),
         table(["Service", "Access", "Status"], d.services.map((s) => h("tr", {}, h("td", { class: "mono" }, s.name),
           h("td", {}, s.iap ? "owner login" : s.ingress), h("td", {}, pill(s.status))))), unavailable(d.servicesError)),
