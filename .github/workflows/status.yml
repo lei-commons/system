@@ -78,6 +78,10 @@ jobs:
         run: gcloud scheduler jobs list --location "$REGION" --format='table(name.basename(),schedule,state,lastAttemptTime,status.code)' || true
       - name: Services
         run: gcloud run services list --region "$REGION" --format='table(metadata.name,status.conditions[0].status,status.latestReadyRevisionName)' || true
+      - name: Cloud NAT for the gateway, last 24 hours (dropped connections, counts only)
+        run: |
+          gcloud logging read 'resource.type="nat_gateway" AND jsonPayload.allocation_status="DROPPED"' --freshness=1d \
+            --limit 1000 --format=json | jq -c '{dropped: length, latest: (.[0].timestamp // null)}' || true
       - name: The gateway's way out (network and egress setting; lc-egress means the one fixed address)
         run: |
           gcloud run services describe conduct-gateway --region "$REGION" --format=json \

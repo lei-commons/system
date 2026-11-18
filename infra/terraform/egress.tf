@@ -50,6 +50,13 @@ resource "google_compute_router_nat" "egress" {
   nat_ips                            = [google_compute_address.gateway_egress.self_link]
   source_subnetwork_ip_ranges_to_nat = "LIST_OF_SUBNETWORKS"
 
+  # Enough ports for every job at once (a deploy starts them all; the default 64 per instance ran out on
+  # 2026-11-18 and connections timed out). Dynamic allocation grows an instance's ports as it needs them.
+  enable_dynamic_port_allocation      = true
+  enable_endpoint_independent_mapping = false
+  min_ports_per_vm                    = 1024
+  max_ports_per_vm                    = 8192
+
   subnetwork {
     name                    = google_compute_subnetwork.egress.id
     source_ip_ranges_to_nat = ["ALL_IP_RANGES"]
