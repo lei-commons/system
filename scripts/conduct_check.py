@@ -102,6 +102,18 @@ RULES = [
 ]
 
 
+# Narrow exceptions, each an owner decision, each limited to the paths named (rule id: path prefixes).
+# 2026-11-18, browser downloads: for official sources whose public data is offered only through a web page
+# or form, and whose hosts the owner approved as browser hosts, a real browser fetches the file (no login,
+# no CAPTCHA, never around a refusal). Only these packages may drive a browser; every request still goes
+# through the conduct gateway, which names lei-commons in the User-Agent (docs/browser-downloads.md).
+# The gateway's tests send a browser's User-Agent to check that our name is appended.
+ALLOWED = {
+    "no-headless-browser": ("packages/lc_browser/", "services/ingest_browser/"),
+    "no-ua-spoofing": ("services/conduct_proxy/tests/",),
+}
+
+
 @dataclass
 class Finding:
     rule: str
@@ -133,6 +145,8 @@ def scan(root: Path) -> list[Finding]:
             continue
         for n, line in enumerate(text.splitlines(), 1):
             for rule in RULES:
+                if rel.startswith(ALLOWED.get(rule.id, ())):
+                    continue
                 if rule.pattern.search(line):
                     findings.append(Finding(rule.id, rule.article, rel, n, line.strip()[:160], rule.message))
     findings += check_fields(root)

@@ -76,6 +76,13 @@ jobs:
       - run: pytest -q services/ingest_socrata
       - run: pip install -e services/ingest_bulk
       - run: pytest -q services/ingest_bulk
+      - name: Browser downloads (lc_browser) with a real headless Chromium
+        run: |
+          pip install -e packages/lc_browser "playwright==1.60.0"
+          python -m playwright install --with-deps chromium
+          pytest -q packages/lc_browser
+      - run: pip install -e services/ingest_browser
+      - run: pytest -q services/ingest_browser
       - run: pip install -e packages/lc_publish
       - run: pytest -q packages/lc_publish
       - run: pip install -e packages/lc_directory
@@ -119,6 +126,10 @@ jobs:
           docker build -f services/ingest_bulk/Dockerfile -t ingest-bulk .
           docker run --rm ingest-bulk python -c "from lc_ingest.bulk import PROFILES; from lc_core.sources import pipelines; assert set(PROFILES) <= {p['id'] for p in pipelines()}"
           docker build -f services/ingest_socrata/Dockerfile -t ingest-socrata .
+      - name: The browser image starts Chromium as its own (non-root) user
+        run: |
+          docker build -f services/ingest_browser/Dockerfile -t ingest-browser .
+          docker run --rm ingest-browser python -m ingest_browser.check_chromium
           docker run --rm -e LC_SOURCE=us-co-sos ingest-socrata python -c "from lc_ingest.socrata import PROFILES; from lc_core.sources import pipelines; assert {p['id'] for p in pipelines() if p['job'].startswith('ingest-')} >= set(PROFILES)"
       - name: Site image builds and contains the app
         run: |

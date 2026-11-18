@@ -10,6 +10,10 @@ The profile comes from the target host, never from the caller:
   owner-key  Registry APIs needing an owner-entered credential. Denied outright
              until the owner has approved that source.
   registry   Open official sources. GET/HEAD, no credentials.
+  browser    Open official sources whose data is offered only through a web page or form (no login,
+             no CAPTCHA), fetched by a real browser (lc_browser). Approved by the owner per host and
+             source. GET/HEAD/POST, the site's own session cookies both ways, no credentials,
+             robots.txt, login paths refused, an honest User-Agent naming lei-commons.
   crawler    Any other public host. GET/HEAD, no credentials, robots.txt.
 """
 
@@ -23,7 +27,7 @@ from urllib.parse import unquote, urlsplit
 
 import yaml
 
-MODEL, OWNER_KEY, REGISTRY, CRAWLER = "model", "owner-key", "registry", "crawler"
+MODEL, OWNER_KEY, REGISTRY, BROWSER, CRAWLER = "model", "owner-key", "registry", "browser", "crawler"
 
 ARTICLE_MAX_RPS = 1  # Article 2.4: at most one request per second per host.
 
@@ -34,6 +38,11 @@ FORWARD_HEADERS = {
     "accept", "accept-encoding", "accept-language", "if-modified-since",
     "if-none-match", "range", "content-type",
 }
+
+# A browser (browser profile) also sends the site's own cookies and the page's origin; the response's
+# cookies go back to it (server.py). Never credentials.
+BROWSER_HEADERS = {"cookie", "referer", "origin"}
+BROWSER_UA_TOKEN = "lei-commons-browser"
 
 # A floor that config can add to but never remove.
 BUILTIN_DENY_PATHS = (
@@ -111,6 +120,26 @@ def _pacing(cfg, min_interval: float) -> dict:
     return out
 
 
+def _browser(cfg: dict, min_interval: float):
+    """``browser_hosts`` (host: source, each with the owner's approval noted) and ``browser_policy``."""
+    hosts = {}
+    for entry in cfg.get("browser_hosts") or []:
+        if not isinstance(entry, dict) or not entry.get("host") or not entry.get("source") or not entry.get("approved"):
+            raise ConfigError("each browser host needs host, source and approved (the owner's approval)")
+        hosts[str(entry["host"]).lower()] = str(entry["source"])
+    policy = cfg.get("browser_policy")
+    if hosts and not isinstance(policy, dict):
+        raise ConfigError("browser hosts need a browser_policy")
+    if not hosts:
+        return {}, None, None
+    if policy.get("honour_robots_txt") is not True:
+        raise ConfigError("browser_policy must honour robots.txt (Article 2.4)")
+    ua = str(policy.get("user_agent", ""))
+    if BROWSER_UA_TOKEN not in ua or "+http" not in ua:
+        raise ConfigError(f"browser_policy.user_agent must name {BROWSER_UA_TOKEN} and a URL about us")
+    return hosts, _pacing(policy.get("pacing"), min_interval), ua
+
+
 class Policy:
     def __init__(self, cfg: dict, approved_sources: frozenset = frozenset()):
         try:
@@ -135,6 +164,10 @@ class Policy:
         self.approved = frozenset(approved_sources)
         self.min_interval = 1.0 / self.max_rps
         self.pacing = _pacing(cfg.get("pacing"), self.min_interval)
+        self.browser, self.browser_pacing, self.browser_ua = _browser(cfg, self.min_interval)
+        overlap = self.browser.keys() & (self.registry | self.model | set(self.owner_key))
+        if overlap:
+            raise ConfigError(f"{sorted(overlap)[0]} is listed both as a browser host and in another profile")
         try:
             self.deny_paths = [re.compile(p) for p in (*BUILTIN_DENY_PATHS, *deny)]
         except re.error as exc:
@@ -157,11 +190,18 @@ class Policy:
             return OWNER_KEY
         if host in self.registry:
             return REGISTRY
+        if host in self.browser:
+            return BROWSER
         return CRAWLER
 
+    def pacing_for(self, profile: str) -> dict:
+        """The browser's requests within a page (its scripts, the form post) come closer together; the human
+        think time between steps is the flow's own (lc_browser)."""
+        return self.browser_pacing if profile == BROWSER else self.pacing
+
     def paced(self, profile: str) -> bool:
-        """Registry and owner-key hosts go at a person's pace, one request at a time (``pacing``)."""
-        return profile in (REGISTRY, OWNER_KEY)
+        """Registry, owner-key and browser hosts go at a person's pace, one request at a time (``pacing``)."""
+        return profile in (REGISTRY, OWNER_KEY, BROWSER)
 
     def rate_limited(self, profile: str) -> bool:
         # Vertex AI is our own paid API with its own quotas, not a third party's site.
@@ -199,12 +239,12 @@ class Policy:
         if profile != CRAWLER and parts.scheme != "https":
             return _deny("https-required", "official APIs are reached over https only", **ctx)
 
-        allowed = {MODEL: {"POST"}, OWNER_KEY: {"GET", "HEAD", "POST"}}.get(profile, self.methods)
+        allowed = {MODEL: {"POST"}, OWNER_KEY: {"GET", "HEAD", "POST"}, BROWSER: {"GET", "HEAD", "POST"}}.get(profile, self.methods)
         if method not in allowed:
             return _deny("method-not-allowed", f"{method} is not allowed for {profile} traffic", **ctx)
 
         lowered = {k.lower(): v for k, v in headers.items()}
-        if profile in (REGISTRY, CRAWLER):
+        if profile in (REGISTRY, BROWSER, CRAWLER):
             sent = sorted(CREDENTIAL_HEADERS & set(lowered))
             if sent:
                 return _deny("credentials-not-allowed", f"{sent[0]} header sent to {profile} host (Article 2.2)", **ctx)
@@ -216,8 +256,14 @@ class Policy:
                 return _deny("denied-path", "login, account and similar paths are off limits (Article 2.1)", **ctx)
 
         keep = FORWARD_HEADERS | (CREDENTIAL_HEADERS - {"proxy-authorization"} if profile in (MODEL, OWNER_KEY) else set())
+        if profile == BROWSER:
+            keep = keep | BROWSER_HEADERS
         forward = {k: v for k, v in lowered.items() if k in keep}
         forward["user-agent"] = self.user_agent
+        if profile == BROWSER:
+            # The browser's own User-Agent, so the page works as it would for a person, always naming us.
+            agent = " ".join(str(lowered.get("user-agent", "")).split())[:300]
+            forward["user-agent"] = f"{agent} {self.browser_ua}".strip() if agent.startswith("Mozilla/") else self.browser_ua
         target = (parts.path or "/") + (f"?{parts.query}" if parts.query else "")
         return Decision(True, "allowed", "within policy", target=target, headers=forward, **ctx)
 

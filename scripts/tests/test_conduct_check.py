@@ -53,3 +53,24 @@ def test_repo_itself_is_clean():
     root = Path(__file__).resolve().parents[2]
     findings = cc.scan(root)
     assert findings == [], "\n".join(f"{f.path}:{f.line} {f.rule}" for f in findings)
+
+
+def test_the_browser_exception_is_limited_to_the_browser_download_packages(tmp_path):
+    """Owner decision 2026-11-18: only lc_browser and ingest_browser may drive a browser."""
+    for rel in ("packages/lc_browser/lc_browser/runner.py", "services/ingest_browser/ingest_browser/check_chromium.py",
+                "agents/harness/tools.py", "packages/lc_ingest/lc_ingest/crawl.py"):
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("from playwright.sync_api import sync_playwright\n")
+    found = {(f.path, f.rule) for f in cc.scan(tmp_path)}
+    assert ("agents/harness/tools.py", "no-headless-browser") in found
+    assert ("packages/lc_ingest/lc_ingest/crawl.py", "no-headless-browser") in found
+    assert not any(p.startswith(("packages/lc_browser/", "services/ingest_browser/")) for p, _ in found)
+
+
+def test_the_browser_exception_never_covers_other_rules(tmp_path):
+    path = tmp_path / "packages/lc_browser/lc_browser/x.py"
+    path.parent.mkdir(parents=True)
+    path.write_text("import twilio\nsolver = capsolver\nverify = False\nua = 'Mozilla/5.0 (X11)'\n")
+    rules = {f.rule for f in cc.scan(tmp_path)}
+    assert {"no-messaging", "no-captcha-bypass", "no-tls-bypass", "no-ua-spoofing"} <= rules
