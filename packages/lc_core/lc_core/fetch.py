@@ -34,7 +34,11 @@ class Denied(Exception):
 
 
 class FetchError(Exception):
-    """The target answered with an error, or could not be reached."""
+    """The target answered with an error (``status``), or could not be reached (``status`` None)."""
+
+    def __init__(self, message: str = "", status: int = None):
+        super().__init__(message)
+        self.status = status
 
 
 class _Busy(Exception):
@@ -115,10 +119,10 @@ class Gateway:
                 continue
             if resp.status in RETRY_STATUSES:
                 conn.close()
-                raise _Busy(FetchError(f"{target} answered {resp.status}"), retry_after)
+                raise _Busy(FetchError(f"{target} answered {resp.status}", resp.status), retry_after)
             if resp.status >= 400:
                 conn.close()
-                raise FetchError(f"{target} answered {resp.status}")
+                raise FetchError(f"{target} answered {resp.status}", resp.status)
             return conn, resp
         raise FetchError(f"more than {MAX_REDIRECTS} redirects")
 

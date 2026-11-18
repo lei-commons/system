@@ -259,3 +259,55 @@ def test_the_page_gets_the_gate_and_schedule_from_the_cycle_settings():
     data = SystemView(Reader(), cycle_settings=settings).collect({})
     assert data["cycle"] == {"cleanDays": 9, "scheduleUtc": "03:30", "retries": 2, "retryWaitMinutes": 7}
     assert SystemView(Reader()).collect({})["cycle"]["cleanDays"] == 4  # config/cycle.yaml
+
+
+# ---- a day whose only failures were sources refusing us counts as clean (owner decision 2026-11-18) ----
+
+from lc_site.system import clean_streak, failed_sources, judge_cycles  # noqa: E402
+
+
+def _cycle(day, state, failed=None):
+    c = {"state": state, "startTime": f"{day}T02:00:00Z", "endTime": f"{day}T03:40:00Z"}
+    if failed is not None:
+        c["error"] = {"payload": json.dumps({"code": "sources-failed", "message": "m", "failed": failed})}
+    return c
+
+
+def test_refusal_only_days_count_as_clean_and_are_marked():
+    cycles = [_cycle("2026-11-21", "FAILED", ["ingest-gleif"]), _cycle("2026-11-20", "SUCCEEDED"),
+              _cycle("2026-11-19", "FAILED", ["ingest-gleif", "ingest-br"]), _cycle("2026-11-18", "SUCCEEDED")]
+    refused = {("2026-11-21", ("ingest-gleif",)): True, ("2026-11-19", ("ingest-gleif", "ingest-br")): False}
+    judged = judge_cycles(cycles, lambda day, jobs, until: refused[(day, tuple(jobs))])
+    assert [(c["clean"], c["refusedOnly"]) for c in judged] == [(True, True), (True, False), (False, False), (True, False)]
+    assert judged[0]["failedSources"] == ["ingest-gleif"] and judged[0]["status"] == BAD  # still shown as a failure
+    assert clean_streak(judged) == 2
+
+
+def test_other_failures_never_count_as_clean_and_unreadable_logs_fail_safe():
+    snapshot_failed = {"state": "FAILED", "startTime": "2026-11-21T02:00:00Z", "error": {"payload": "{\"message\": \"build-snapshot failed\"}"}}
+    assert failed_sources(snapshot_failed) is None
+    judged = judge_cycles([snapshot_failed], lambda *a: True)
+    assert judged[0]["clean"] is False
+
+    def broken(*a):
+        raise PermissionError("no")
+    assert judge_cycles([_cycle("2026-11-21", "FAILED", ["ingest-gleif"])], broken)[0]["clean"] is False
+
+
+def test_refused_only_reads_each_jobs_last_run_of_the_cycle():
+    from lc_site.system import refused_only
+
+    day = "2026-11-21"
+    a = f"runs/{day}/{day}T020300.100Z-job-ingest-gleif-ingest-gleif-ab12c.jsonl"
+    late = f"runs/{day}/{day}T090000.100Z-job-ingest-gleif-ingest-gleif-zz999.jsonl"  # after the cycle: ignored
+    objects = {a: [_line(f"{day}T02:04:00Z", "refused", "failed", "the source refused us (HTTP 403)")],
+               late: [_line(f"{day}T09:00:00Z", "ran", "failed", "stopped with ValueError")]}
+
+    class R(RunsReader):
+        def bucket_names(self, bucket, prefix):
+            return [n for n in objects if n.startswith(prefix)]
+
+    assert refused_only(R(objects), day, ["ingest-gleif"], f"{day}T03:40:00Z")
+    objects[a] = [_line(f"{day}T02:04:00Z", "ran", "failed", "stopped with BadFile")]
+    assert not refused_only(R(objects), day, ["ingest-gleif"], f"{day}T03:40:00Z")
+    assert not refused_only(R(objects), day, ["ingest-br"], f"{day}T03:40:00Z")  # no run at all: not a refusal
