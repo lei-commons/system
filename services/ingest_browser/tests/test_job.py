@@ -4,6 +4,7 @@ import csv
 import gzip
 import io
 import json
+import os
 import zipfile
 
 import pytest
@@ -15,6 +16,11 @@ from lc_core.fetch import FetchError
 from lc_core.sources import pipelines
 from lc_ingest import nta
 from lc_ingest.store import decode_records
+
+def allowlist():
+    """As the job loads it: the image names the file (LC_FIELDS_CONFIG); in the repository it's found by path."""
+    return AllowList.load(os.environ.get("LC_FIELDS_CONFIG")) if os.environ.get("LC_FIELDS_CONFIG") else AllowList.load()
+
 
 PAGE_HTML = ("<h2>CSV形式・Shift_JIS</h2> 令和8年10月30日更新 <h2>CSV形式・Unicode</h2> 令和8年10月30日更新 "
              "<table><tr><td>全国</td><td><a onclick=\"return doDownload(28341);\">zip</a></td></tr></table>").encode()
@@ -103,7 +109,7 @@ def test_the_current_publication_comes_from_the_page_without_a_browser():
 def test_a_run_downloads_with_the_browser_and_stores_the_records():
     download, calls = fake_browser("00_zenkoku_all_20261030.zip", nta_zip(3))
     store, events = MemStore(), []
-    out = job.run(JAPAN, FakeGateway(), store, gate=lambda: None, allowlist=AllowList.load(), log=events.append,
+    out = job.run(JAPAN, FakeGateway(), store, gate=lambda: None, allowlist=allowlist(), log=events.append,
                   download=download)
     assert out == "done" and calls == [(nta.HOST,)]
     assert sum(len(s) for s in store.shards.values()) == 3 and store.manifest["processed"] == ["2026-10-30 zenkoku-unicode"]
@@ -114,7 +120,7 @@ def test_an_already_processed_month_never_starts_a_browser():
     download, calls = fake_browser("00_zenkoku_all_20261030.zip", nta_zip(1))
     store = MemStore()
     store.manifest["processed"] = ["2026-10-30 zenkoku-unicode"]
-    assert job.run(JAPAN, FakeGateway(), store, gate=lambda: None, allowlist=AllowList.load(), log=lambda e: None,
+    assert job.run(JAPAN, FakeGateway(), store, gate=lambda: None, allowlist=allowlist(), log=lambda e: None,
                    download=download) == "already-done"
     assert calls == []
 
@@ -123,7 +129,7 @@ def test_a_file_from_another_month_is_refused_and_fetched_again():
     download, calls = fake_browser("00_zenkoku_all_20260929.zip", nta_zip(1))
     events = []
     with pytest.raises(Exception, match="still bad after 3 downloads"):
-        job.run(JAPAN, FakeGateway(), MemStore(), gate=lambda: None, allowlist=AllowList.load(), log=events.append,
+        job.run(JAPAN, FakeGateway(), MemStore(), gate=lambda: None, allowlist=allowlist(), log=events.append,
                 download=download, sleep=lambda s: None)
     assert len(calls) == 3
     assert "not the publication of 2026-10-30" in [e for e in events if e["event"] == "download-failed"][0]["reason"]
