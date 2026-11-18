@@ -199,7 +199,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._refuse(503, "system-not-running", halted)
 
         client_headers = {k: v for k, v in self.headers.items() if not k.lower().startswith("x-lc-")}
-        d = gw.policy.evaluate(self.command, self.headers.get("X-LC-Target", ""), client_headers)
+        d = gw.policy.evaluate(self.command, self.headers.get("X-LC-Target", ""), client_headers,
+                               browser=self.headers.get("X-LC-Browser") == "1")
         if not d.allow:
             return self._refuse(403, d.rule, d.reason, d)
 

@@ -3,16 +3,16 @@
 # file, so the two never disagree).
 #
 # Before deploying, it proves the cycle's logic in Workflows itself: a self-test copy of the cycle runs
-# one real, harmless job (egress-check) and one job that doesn't exist, with one retry after a minute.
-# It must end as failed, naming only the missing job (it was retried, skipped, and didn't stop the
-# other). Only then is daily-cycle updated. The log shows only states and job names.
+# one real, harmless job (egress-check) and two jobs that don't exist, with one retry after a minute; one
+# of the missing jobs has a "browser fallback" (the real job). It must end as failed, naming only the
+# missing job without a fallback. Only then is daily-cycle updated. The log shows only states and job names.
 name: deploy-cycle
 
 on:
   push:
     branches: [main]
-    paths: ["config/sources.yaml", "config/cycle.yaml", "infra/workflows/**", "scripts/render_cycle.py",
-            "packages/lc_core/lc_core/cycle.py", ".github/workflows/deploy-cycle.yml"]
+    paths: ["config/sources.yaml", "config/cycle.yaml", "config/egress-allowlist.yaml", "infra/workflows/**", "scripts/render_cycle.py",
+            "packages/lc_core/lc_core/cycle.py", "packages/lc_core/lc_core/sources.py", ".github/workflows/deploy-cycle.yml"]
   workflow_dispatch:
 
 permissions:
@@ -57,9 +57,10 @@ jobs:
           echo "$error" | grep -o '"code": *"[a-z-]*"\|"failed": *\[[^]]*\]' || true
           [ "$state" = FAILED ] || { echo "::error::the self-test cycle should end as failed (a source never succeeded); it ended $state"; exit 1; }
           echo "$error" | grep -q 'sources-failed' || { echo "::error::the self-test failed for another reason"; exit 1; }
-          echo "$error" | grep -q 'ingest-selftest-missing' || { echo "::error::the missing job isn't named as failed"; exit 1; }
+          echo "$error" | grep -q 'ingest-selftest-gone' || { echo "::error::the missing job without a fallback isn't named as failed"; exit 1; }
+          if echo "$error" | grep -q 'ingest-selftest-missing'; then echo "::error::the job its fallback recovered is still counted as failed"; exit 1; fi
           if echo "$error" | grep -q 'egress-check'; then echo "::error::the real job was counted as failed"; exit 1; fi
-          echo "the failing job was retried and skipped; the other ran; the cycle reported it"
+          echo "failing jobs were retried; the one with a fallback recovered through it; the other was skipped and reported; the real job ran"
 
       - name: Deploy daily-cycle
         run: |

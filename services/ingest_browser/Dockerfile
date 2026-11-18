@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir "playwright==1.60.0" \
  && chmod -R a+rX /ms-playwright
 COPY config/sources.yaml config/sources.yaml
 COPY config/fields.yaml config/fields.yaml
+COPY config/cycle.yaml config/cycle.yaml
 COPY packages/lc_core packages/lc_core
 COPY packages/lc_ingest packages/lc_ingest
 COPY packages/lc_browser packages/lc_browser
@@ -21,5 +22,5 @@ RUN pip install --no-cache-dir "./packages/lc_core[gcp]" ./packages/lc_ingest ./
 
 USER ingest
 ENV PYTHONUNBUFFERED=1 LC_FIELDS_CONFIG=/app/config/fields.yaml
-ENV LC_SOURCES_CONFIG=/app/config/sources.yaml
+ENV LC_SOURCES_CONFIG=/app/config/sources.yaml LC_CYCLE_CONFIG=/app/config/cycle.yaml
 CMD ["python", "-m", "ingest_browser.job"]

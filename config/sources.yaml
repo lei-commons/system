@@ -376,7 +376,12 @@ sources:
       verified: false
     pipeline: {job: ingest-ie, image: ingest-bulk, store: ie, records_as: ie-cro, label: Companies Registration Office (Ireland),
                refresh: weekly, dataset: "Company Records (opendata.cro.ie)",
-               attribution: "Contains Irish Public Sector Data (Companies Registration Office) licensed under a Creative Commons Attribution 4.0 International (CC BY 4.0) licence."}
+               attribution: "Contains Irish Public Sector Data (Companies Registration Office) licensed under a Creative Commons Attribution 4.0 International (CC BY 4.0) licence.",
+               # If the regular download fails consistently (not a refusal), a browser fetches the same file
+               # from the CRO's public dataset page (docs/browser-downloads.md). Runs only once the owner
+               # approves these hosts as browser hosts for ie-cro.
+               browser_fallback: {page: "https://opendata.cro.ie/dataset/companies", link: "/download/companies\\.csv\\.zip$",
+                                  hosts: [opendata.cro.ie, nl-ams-1.linodeobjects.com]}}
 
   - id: au-asic
     name: Australia ASIC company dataset
@@ -400,7 +405,12 @@ sources:
       verified: false
     pipeline: {job: ingest-au, image: ingest-bulk, store: au, records_as: au-asic, label: ASIC (Australia),
                refresh: monthly extract, dataset: "ASIC Company Dataset (data.gov.au)",
-               attribution: "Contains data from the Australian Securities and Investments Commission (ASIC), licensed under CC BY 3.0 AU."}
+               attribution: "Contains data from the Australian Securities and Investments Commission (ASIC), licensed under CC BY 3.0 AU.",
+               # If the regular download fails consistently (not a refusal), a browser fetches the current
+               # extract from the public dataset page (docs/browser-downloads.md). Runs only once the owner
+               # approves this host as a browser host for au-asic.
+               browser_fallback: {page: "https://data.gov.au/data/dataset/asic-companies", link: "/download/company_\\d{6}\\.zip$",
+                                  hosts: [data.gov.au]}}
 
   - id: jp-nta
     name: Japan National Tax Agency corporate numbers
@@ -453,6 +463,8 @@ sources:
                refresh: weekly, dataset: "Federal Corporations (open.canada.ca)",
                record_url: "https://ised-isde.canada.ca/cc/lgcy/fdrlCrpDtls.html?corpId={registrationNumber}",
                attribution: "Contains information licensed under the Open Government Licence – Canada."}
+    # No browser fallback: open.canada.ca's dataset page rejects automated requests ("Request Rejected",
+    # 2026-11-18), an access control we never get around (Article 2.1).
 
   - id: us-ia-sos
     name: Iowa Secretary of State (open data)

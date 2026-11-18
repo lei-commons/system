@@ -102,7 +102,7 @@ class Relay(socketserver.ThreadingMixIn, socketserver.TCPServer):
         gw = self.gateway
         conn = gw._connect()
         sent = {k: v for k, v in headers if k.lower() in PASS_REQUEST}
-        sent.update({"X-LC-Target": url, "X-LC-Actor": self.actor,
+        sent.update({"X-LC-Target": url, "X-LC-Actor": self.actor, "X-LC-Browser": "1",
                      "X-Serverless-Authorization": f"Bearer {gw._token(gw._url)}"})
         if body is not None:
             sent["Content-Length"] = str(len(body))

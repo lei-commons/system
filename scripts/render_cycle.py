@@ -68,22 +68,26 @@ def _try_source(round_expr: str, prefix: str) -> list:
     }}]
 
 
-SELFTEST_JOBS = ["egress-check", "ingest-selftest-missing"]  # one real, quick and harmless job; one that doesn't exist
+# One real, quick and harmless job; one missing job whose "browser fallback" is that real job (so it
+# recovers); one missing job with no fallback (so it stays failed).
+SELFTEST_JOBS = ["egress-check", "ingest-selftest-missing", "ingest-selftest-gone"]
 
 
-def render(registry: dict, config: dict, selftest: bool = False) -> dict:
+def render(registry: dict, config: dict, selftest: bool = False, fallbacks: dict = None) -> dict:
     """The cycle. ``selftest``: the same logic over SELFTEST_JOBS, one retry after a minute, and no snapshot
     or load, to prove in Workflows itself that a failing source is retried and skipped (deploy-cycle.yml)."""
     s, jobs = settings(config), ingest_jobs(registry)
+    fallbacks = dict(fallbacks or {})  # {regular job: fallback job}, only those the owner approved
     if selftest:
         s, jobs = {"retry_wait_minutes": 1, "retries": 1}, SELFTEST_JOBS
+        fallbacks = {"ingest-selftest-missing": "egress-check"}  # the fallback path: the missing job "recovers"
     steps = [
         {"init": {"assign": [
             {"project": '${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}'},
             {"region": REGION},
             {"sources": jobs},
             {"failed": []},
-        ]}},
+        ] + ([{"fallbacks": fallbacks}] if fallbacks else [])}},
         {"first_try": {"for": {"value": "job", "in": "${sources}", "steps": _try_source("${0}", "first")}}},
     ]
     if s["retries"]:
@@ -93,6 +97,29 @@ def render(registry: dict, config: dict, selftest: bool = False) -> dict:
             {"take_failed": {"assign": [{"trying": "${failed}"}, {"failed": []}]}},
             {"retry_each": {"for": {"value": "job", "in": "${trying}", "steps": _try_source("${retry_round}", "retry")}}},
         ]}}})
+    if fallbacks:
+        # A source still failing after its retries, with an approved browser fallback: its fallback job runs
+        # once (it checks the source's health itself and never runs around a refusal). Success: recovered.
+        steps.append({"browser_fallbacks": {"steps": [
+            {"take_still_failing": {"assign": [{"trying": "${failed}"}, {"failed": []}]}},
+            {"fallback_each": {"for": {"value": "job", "in": "${trying}", "steps": [
+                {"has_fallback": {"switch": [{"condition": "${job in fallbacks}", "next": "fallback_run"}],
+                                  "next": "no_fallback"}},
+                {"no_fallback": {"assign": [{"failed": "${list.concat(failed, job)}"}], "next": "continue"}},
+                {"fallback_run": {
+                    "try": {"steps": [
+                        {"fallback_job": _run("fallbacks[job]")},
+                        {"fallback_log": {"call": "sys.log", "args": {"severity": "WARNING", "json": {
+                            "event": "source-recovered-by-browser", "job": "${job}"}}}},
+                    ]},
+                    "except": {"as": "e", "steps": [
+                        {"fallback_note_failure": {"assign": [{"failed": "${list.concat(failed, job)}"}]}},
+                        {"fallback_log_failure": {"call": "sys.log", "args": {"severity": "WARNING", "json": {
+                            "event": "browser-fallback-failed", "job": "${job}", "error": "${e}"}}}},
+                    ]},
+                }},
+            ]}}},
+        ]}})
     steps += [{job.replace("-", "_"): _run(f'"{job}"')} for job in ([] if selftest else AFTER_INGEST)]
     steps += [
         {"report": {"switch": [{"condition": "${len(failed) > 0}", "steps": [{"fail": {"raise": {
@@ -104,8 +131,16 @@ def render(registry: dict, config: dict, selftest: bool = False) -> dict:
     return {"main": {"steps": steps}}
 
 
+def approved_fallbacks() -> dict:
+    """{regular job: fallback job} for the browser fallbacks whose hosts the owner approved."""
+    from lc_core.sources import browser_fallbacks
+
+    return {job: c["job"] for job, c in browser_fallbacks(REGISTRY, ROOT / "config" / "egress-allowlist.yaml").items()}
+
+
 def text(registry: dict, config: dict, selftest: bool = False) -> str:
-    return HEADER + yaml.safe_dump(render(registry, config, selftest), sort_keys=False, width=200)
+    return HEADER + yaml.safe_dump(render(registry, config, selftest, None if selftest else approved_fallbacks()),
+                                   sort_keys=False, width=200)
 
 
 def main(argv=None) -> int:

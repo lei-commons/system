@@ -13,7 +13,8 @@ rc = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(rc)
 
 REGISTRY = {"sources": [{"id": "a", "pipeline": {"job": "ingest-aa"}}, {"id": "b"}, {"id": "c", "pipeline": {"job": "ingest-cc"}}]}
-CONFIG = {"schedule_utc": "02:00", "sources": {"retry_wait_minutes": 10, "retries": 5}, "gate": {"clean_days": 4}}
+CONFIG = {"schedule_utc": "02:00", "sources": {"retry_wait_minutes": 10, "retries": 5, "browser_fallback_after_failures": 3},
+          "gate": {"clean_days": 4}}
 
 
 def steps(doc):
@@ -52,7 +53,7 @@ def test_retries_and_wait_come_from_the_config():
     assert inner["wait"]["args"]["seconds"] == 600
     assert inner["all_done"]["switch"][0]["next"] == "break"  # stop as soon as nothing is failing
     other = copy.deepcopy(CONFIG)
-    other["sources"] = {"retry_wait_minutes": 3, "retries": 2}
+    other["sources"] = {"retry_wait_minutes": 3, "retries": 2, "browser_fallback_after_failures": 3}
     s2 = steps(rc.render(REGISTRY, other))
     assert s2["retry_rounds"]["for"]["range"] == [1, 2]
     other["sources"]["retries"] = 0
@@ -74,19 +75,33 @@ def test_step_names_are_unique():
     assert len(names) == len(set(names)), names
 
 
-def test_the_selftest_uses_the_same_logic_on_a_real_and_a_missing_job_without_snapshot_or_load():
+def test_the_selftest_uses_the_same_logic_on_a_real_and_two_missing_jobs_without_snapshot_or_load():
     s = steps(rc.render(REGISTRY, CONFIG, selftest=True))
     init = {k: v for a in s["init"]["assign"] for k, v in a.items()}
     assert init["sources"] == rc.SELFTEST_JOBS and "build_snapshot" not in s and "load_db" not in s
     assert s["retry_rounds"]["for"]["range"] == [1, 1]
+    assert init["fallbacks"] == {"ingest-selftest-missing": "egress-check"} and "browser_fallbacks" in s
+
+
+def test_approved_fallbacks_run_after_the_retries_and_before_the_snapshot():
+    doc = rc.render(REGISTRY, CONFIG, fallbacks={"ingest-aa": "ingest-aa-browser"})
+    names = [next(iter(step)) for step in doc["main"]["steps"]]
+    assert names == ["init", "first_try", "retry_rounds", "browser_fallbacks", "build_snapshot", "load_db", "report", "done"]
+    init = {k: v for a in steps(doc)["init"]["assign"] for k, v in a.items()}
+    assert init["fallbacks"] == {"ingest-aa": "ingest-aa-browser"}
+    text = str(steps(doc)["browser_fallbacks"])
+    assert "${job in fallbacks}" in text and "fallbacks[job]" in text and "source-recovered-by-browser" in text
+    assert len(all_step_names(doc, [])) == len(set(all_step_names(doc, [])))
+    assert "browser_fallbacks" not in steps(rc.render(REGISTRY, CONFIG))  # none approved: no fallback round
 
 
 @pytest.mark.parametrize("change,message", [
-    ({"sources": {"retry_wait_minutes": 0, "retries": 5}}, "retry_wait_minutes"),
-    ({"sources": {"retry_wait_minutes": 10, "retries": 13}}, "retries"),
-    ({"sources": {"retry_wait_minutes": "10", "retries": 5}}, "retry_wait_minutes"),
-    ({"sources": {"retry_wait_minutes": 10, "retries": True}}, "retries"),
+    ({"sources": {"retry_wait_minutes": 0, "retries": 5, "browser_fallback_after_failures": 3}}, "retry_wait_minutes"),
+    ({"sources": {"retry_wait_minutes": 10, "retries": 13, "browser_fallback_after_failures": 3}}, "retries"),
+    ({"sources": {"retry_wait_minutes": "10", "retries": 5, "browser_fallback_after_failures": 3}}, "retry_wait_minutes"),
+    ({"sources": {"retry_wait_minutes": 10, "retries": True, "browser_fallback_after_failures": 3}}, "retries"),
     ({"gate": {"clean_days": 0}}, "clean_days"),
+    ({"sources": {"retry_wait_minutes": 10, "retries": 5, "browser_fallback_after_failures": 0}}, "browser_fallback_after_failures"),
     ({"schedule_utc": "2:00"}, "schedule_utc"),
     ({"schedule_utc": "24:00"}, "schedule_utc"),
 ])
