@@ -36,6 +36,8 @@ def settings(config: dict) -> dict:
     return {
         "retry_wait_minutes": _whole(sources.get("retry_wait_minutes"), 1, 120, "sources.retry_wait_minutes"),
         "retries": _whole(sources.get("retries"), 0, 12, "sources.retries"),
+        "browser_fallback_after_failures": _whole(sources.get("browser_fallback_after_failures"), 1, 20,
+                                                  "sources.browser_fallback_after_failures"),
         "clean_days": _whole(gate.get("clean_days"), 1, 30, "gate.clean_days"),
         "schedule_utc": when,
         "cron": f"{int(match.group(2))} {int(match.group(1))} * * *",

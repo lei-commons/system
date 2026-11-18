@@ -165,9 +165,12 @@ class Policy:
         self.min_interval = 1.0 / self.max_rps
         self.pacing = _pacing(cfg.get("pacing"), self.min_interval)
         self.browser, self.browser_pacing, self.browser_ua = _browser(cfg, self.min_interval)
-        overlap = self.browser.keys() & (self.registry | self.model | set(self.owner_key))
+        # A registry host may also be a browser host (a browser fallback for a source whose regular download
+        # fails): the browser profile then applies only to the browser's own requests (relay). Model and
+        # owner-key hosts never.
+        overlap = self.browser.keys() & (self.model | set(self.owner_key))
         if overlap:
-            raise ConfigError(f"{sorted(overlap)[0]} is listed both as a browser host and in another profile")
+            raise ConfigError(f"{sorted(overlap)[0]} is listed both as a browser host and as a model or owner-key host")
         try:
             self.deny_paths = [re.compile(p) for p in (*BUILTIN_DENY_PATHS, *deny)]
         except re.error as exc:
@@ -183,15 +186,17 @@ class Policy:
             raise ConfigError("egress config is not a mapping")
         return cls(cfg, frozenset(approved_sources))
 
-    def profile_for(self, host: str) -> str:
+    def profile_for(self, host: str, browser: bool = False) -> str:
+        """``browser``: the request comes from the browser relay (lc_browser), which may use the browser
+        profile on an approved browser host that is also a registry host."""
         if host in self.model:
             return MODEL
         if host in self.owner_key:
             return OWNER_KEY
+        if host in self.browser and (browser or host not in self.registry):
+            return BROWSER
         if host in self.registry:
             return REGISTRY
-        if host in self.browser:
-            return BROWSER
         return CRAWLER
 
     def pacing_for(self, profile: str) -> dict:
@@ -207,7 +212,7 @@ class Policy:
         # Vertex AI is our own paid API with its own quotas, not a third party's site.
         return profile != MODEL
 
-    def evaluate(self, method: str, url: str, headers: dict) -> Decision:
+    def evaluate(self, method: str, url: str, headers: dict, browser: bool = False) -> Decision:
         method = method.upper()
         if not url or any(ord(c) <= 0x20 or ord(c) >= 0x7F or c == "\\" for c in url):
             return _deny("bad-url", "URL has spaces, control or non-ASCII characters")
@@ -229,7 +234,7 @@ class Policy:
         if port not in (None, default_port):
             return _deny("bad-port", "only the standard web ports are allowed (Article 2.3)")
 
-        profile = self.profile_for(host)
+        profile = self.profile_for(host, browser)
         log_path = parts.path or "/"
         ctx = dict(profile=profile, scheme=parts.scheme, host=host, port=default_port, log_path=log_path)
 

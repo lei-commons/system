@@ -20,6 +20,10 @@ sources:
   retry_wait_minutes: 10
   # Retry rounds after the first try. 0 to 12. Each round retries every source still failing.
   retries: 5
+  # A source with an approved browser fallback (docs/browser-downloads.md) that is still failing after
+  # the retries is fetched once by a real browser from its public download page, if its regular download
+  # has failed at least this many runs in a row, and never if the source refused us. 1 to 20.
+  browser_fallback_after_failures: 3
 
 gate:
   # Clean daily cycles in a row that a phase gate needs (owner decision 2026-11-17: 4). 1 to 30.

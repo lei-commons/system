@@ -76,9 +76,83 @@ def run(profile: Profile, gateway, store, gate=None, allowlist=None, log=log, do
                       **({"sleep": sleep} if sleep else {}))
 
 
+def run_fallback(source: str, config: dict, gateway, store, after_failures: int, gate=None, allowlist=None, log=log,
+                 download=None, sleep=None, today=None):
+    """A source's browser fallback. Returns (outcome, exit code): it runs only after the regular download has
+    failed ``after_failures`` runs in a row, and never when the source refused us."""
+    from datetime import date
+
+    from lc_ingest.bulk import PROFILES as BULK
+    from lc_ingest.health import HEALTH, fallback_decision
+
+    from . import fallback as fb
+
+    profile = BULK[source]
+    if gate is None:
+        require_running(f"job:{profile.job}-browser")
+        require_approved(source)
+    else:
+        gate()
+    allowed, why = fallback_decision(store.read_json(HEALTH), after_failures)
+    if not allowed:
+        log({"event": "fallback-skipped", "source": source, "reason": why})
+        refused = "refused us" in why
+        return ("refused" if refused else "not-needed"), (fb.EXIT_REFUSED if refused else fb.EXIT_NOT_YET)
+    log({"event": "fallback-started", "source": source, "reason": why})
+    find = fb.find_for(source, config, today or date.today())
+    browser = Profile(source=source, job=profile.job, store=profile.store, hosts=tuple(config["hosts"]), current=None,
+                      flow=fb.link_flow(config),
+                      # the file the browser saved must be the one the page linked
+                      expect_in_name=lambda key: config["_link"].split("?", 1)[0].rsplit("/", 1)[-1],
+                      read=profile.read, record=profile.record)
+
+    def fetch(gw, url, out):
+        return fetch_for(browser, "", log=log, download=download)(gw, url, out)
+
+    outcome = run_ingest(gateway=gateway, store=store, gate=lambda: None, find=find, read=profile.read,
+                         mapper=profile.record, source=source, maker=f"ingestion@{profile.store}",
+                         allowlist=allowlist or AllowList.load(), log=log, fetch=fetch, **({"sleep": sleep} if sleep else {}))
+    log({"event": "fallback-used", "source": source, "outcome": outcome})
+    return outcome, (0 if outcome in ("done", "already-done") else 1)
+
+
+def fallback_main(source: str) -> int:
+    from google.cloud import storage
+
+    from lc_core.cycle import load as cycle_settings
+    from lc_core.sources import browser_fallbacks
+    from lc_ingest.bulk import PROFILES as BULK
+
+    config = next((c for c in browser_fallbacks(approved_only=False).values() if c["source"] == source), None)
+    if config is None or source not in BULK:
+        raise SystemExit(f"{source} has no browser fallback")
+    regular = BULK[source]
+    gateway = Gateway(os.environ["LC_GATEWAY_URL"], f"job:{regular.job}-browser")
+    bucket = os.environ["LC_DATA_BUCKET"]
+    client = storage.Client()
+    record = Recorder(f"job:{regular.job}-browser", log)
+    code = 1
+    try:
+        with lease(client.bucket(bucket), regular.job):  # never at the same time as the regular job
+            _, code = run_fallback(source, config, gateway, GcsStore(bucket, regular.store),
+                                   cycle_settings()["browser_fallback_after_failures"],
+                                   allowlist=AllowList.load(os.environ["LC_FIELDS_CONFIG"]), log=record)
+    except Busy as exc:
+        record({"event": "busy", "reason": str(exc)})
+        code = 1  # the regular job is running: not recovered by the fallback
+    except Exception as exc:
+        record(failure(exc))
+        raise
+    finally:
+        record.write(client.bucket(log_bucket_name(bucket)))
+    return code
+
+
 def main() -> int:
     from google.cloud import storage
 
+    if os.environ.get("LC_MODE") == "fallback":
+        return fallback_main(os.environ.get("LC_SOURCE", ""))
     profile = profile_for(os.environ.get("LC_SOURCE", ""))
     gateway = Gateway(os.environ["LC_GATEWAY_URL"], f"job:{profile.job}")
     allowlist = AllowList.load(os.environ["LC_FIELDS_CONFIG"])

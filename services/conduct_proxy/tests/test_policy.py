@@ -228,7 +228,8 @@ def test_browser_hosts_get_their_own_profile_and_pacing():
     lambda c: c["browser_policy"].update({"honour_robots_txt": False}),
     lambda c: c["browser_policy"].update(user_agent="Mozilla/5.0"),
     lambda c: c["browser_policy"]["pacing"].update(min_seconds_between_requests=0.2),
-    lambda c: c["browser_hosts"].append({"host": "r.test", "source": "s", "approved": "o"}),
+    lambda c: c["browser_hosts"].append({"host": "m.test", "source": "s", "approved": "o"}),
+    lambda c: c["browser_hosts"].append({"host": "k.test", "source": "s", "approved": "o"}),
 ])
 def test_a_browser_config_that_hides_us_or_skips_approval_refuses_to_load(change):
     cfg = browser_cfg()
@@ -239,3 +240,18 @@ def test_a_browser_config_that_hides_us_or_skips_approval_refuses_to_load(change
 
 def test_without_browser_hosts_nothing_is_a_browser_host():
     assert Policy(good_cfg()).profile_for("form.test") == "crawler"
+
+
+
+def test_a_registry_host_that_is_also_a_browser_host_uses_the_browser_profile_only_for_the_browser():
+    cfg = browser_cfg()
+    cfg["browser_hosts"].append({"host": "r.test", "source": "xx-src", "approved": "owner 2026-11-18"})
+    p = Policy(cfg)
+    assert p.profile_for("r.test") == "registry" and p.profile_for("r.test", browser=True) == "browser"
+    assert p.profile_for("form.test") == "browser"  # browser-only hosts are browser hosts either way
+    plain = p.evaluate("GET", "https://r.test/x", {"Cookie": "a=1"})
+    assert plain.profile == "registry" and "cookie" not in plain.headers
+    via_browser = p.evaluate("GET", "https://r.test/x", {"Cookie": "a=1"}, browser=True)
+    assert via_browser.profile == "browser" and via_browser.headers["cookie"] == "a=1"
+    assert p.evaluate("POST", "https://r.test/x", {}).rule == "method-not-allowed"  # no posts outside the browser
+    assert p.profile_for("other.test", browser=True) == "crawler"  # the flag never widens the allow-list

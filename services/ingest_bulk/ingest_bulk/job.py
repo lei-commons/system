@@ -18,6 +18,7 @@ from lc_core.control import require_running
 from lc_core.decisions import Recorder, failure, log_bucket_name
 from lc_core.fetch import Gateway
 from lc_core.lease import Busy, lease
+from lc_ingest import health
 from lc_ingest.runner import run_ingest
 from lc_ingest.bulk import PROFILES, Profile
 from lc_ingest.store import GcsStore
@@ -78,14 +79,18 @@ def main() -> int:
     bucket = os.environ["LC_DATA_BUCKET"]
     client = storage.Client()
     record = Recorder(f"job:{profile.job}", log)
+    store = GcsStore(bucket, profile.store)
     try:
         with lease(client.bucket(bucket), profile.job):
-            outcome = run(profile, gateway, GcsStore(bucket, profile.store), allowlist=allowlist, log=record)
+            outcome = run(profile, gateway, store, allowlist=allowlist, log=record)
+        health.note(store, outcome=outcome, log=record)  # a browser fallback reads it (ingest_browser)
     except Busy as exc:
         record({"event": "busy", "reason": str(exc)})
         outcome = "busy"
     except Exception as exc:
-        record(failure(exc))
+        failed = failure(exc)
+        record(failed)
+        health.note(store, failure=failed, log=record)
         raise
     finally:
         record.write(client.bucket(log_bucket_name(bucket)))

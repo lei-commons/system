@@ -103,6 +103,16 @@ def _event(actor: str, record: dict) -> Event | None:
             return Event(actor, "refused", subject, "failed", reason, refs=_refs(record))
         reason = f"stopped with {record.get('error', 'an error')}" + (f": {message}" if message else "")
         return Event(actor, "ran", subject, "failed", reason, refs=_refs(record))
+    if kind == "fallback-skipped":
+        return Event(actor, "considered a browser fallback for", subject, "skipped", record.get("reason") or "not needed",
+                     refs=_refs(record))
+    if kind == "fallback-started":
+        return Event(actor, "fell back to a browser for", subject, "done",
+                     f"the regular download keeps failing: {record.get('reason') or ''}".strip(), refs=_refs(record))
+    if kind == "fallback-used":
+        ok = record.get("outcome") in ("done", "already-done")
+        return Event(actor, "fetched with a browser", subject, "done" if ok else "failed",
+                     f"browser fallback ended {record.get('outcome')}", refs=_refs(record))
     if kind in ("bad-download", "download-recovered", "download-failed"):
         why = " ".join(str(record.get("reason") or "").split())[:300]
         if kind == "bad-download":

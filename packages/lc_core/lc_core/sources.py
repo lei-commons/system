@@ -68,3 +68,31 @@ def jobs(path=None) -> list:
 def names(path=None) -> dict:
     """How each source is shown: {id records carry: label}."""
     return {p["records_as"]: p["label"] for p in pipelines(path)}
+
+
+def browser_fallbacks(path=None, egress_path=None, approved_only: bool = True) -> dict:
+    """Sources with a browser fallback (pipeline.browser_fallback) whose every host the owner approved as
+    a browser host for that source (config/egress-allowlist.yaml browser_hosts): {regular job: {source,
+    store, page, link, hosts, job}}, ``job`` being the fallback's own job (<regular job>-browser).
+    A fallback whose hosts aren't all approved is left out: it neither runs nor joins the cycle."""
+    data = yaml.safe_load(Path(_path(path)).read_text(encoding="utf-8"))
+    egress = Path(egress_path or os.environ.get("LC_EGRESS_CONFIG") or Path(_path(path)).parent / "egress-allowlist.yaml")
+    approved = {}
+    if egress.exists():
+        for entry in (yaml.safe_load(egress.read_text(encoding="utf-8")) or {}).get("browser_hosts") or []:
+            if isinstance(entry, dict) and entry.get("approved") and entry.get("host") and entry.get("source"):
+                approved.setdefault(str(entry["source"]), set()).add(str(entry["host"]).lower())
+    out = {}
+    for source in data.get("sources", []):
+        pipeline, fallback = source.get("pipeline") or {}, (source.get("pipeline") or {}).get("browser_fallback")
+        if not fallback:
+            continue
+        page, hosts = str(fallback.get("page", "")), [str(h).lower() for h in fallback.get("hosts") or []]
+        if not page.startswith("https://") or not hosts:
+            raise ValueError(f"source {source['id']}: browser_fallback needs an https page and its hosts")
+        if page.split("/")[2].lower() not in hosts:
+            raise ValueError(f"source {source['id']}: the fallback page's host must be among its hosts")
+        if not approved_only or set(hosts) <= approved.get(source["id"], set()):
+            out[pipeline["job"]] = {"source": source["id"], "store": pipeline["store"], "page": page,
+                                    "link": fallback.get("link"), "hosts": hosts, "job": f"{pipeline['job']}-browser"}
+    return out

@@ -58,6 +58,14 @@ class GcsStore:
         self._blob("manifest.json").upload_from_string(json.dumps(manifest, indent=2, sort_keys=True),
                                                        content_type="application/json")
 
+    def read_json(self, name: str):
+        """A small JSON object kept beside the store (health.json), or None."""
+        blob = self._blob(name)
+        return json.loads(blob.download_as_bytes()) if blob.exists() else None
+
+    def write_json(self, name: str, data) -> None:
+        self._blob(name).upload_from_string(json.dumps(data, indent=2, sort_keys=True), content_type="application/json")
+
     def read_shard(self, n: int) -> dict:
         blob = self._blob(f"records/{n:03d}.jsonl.gz")
         if self._stale or not blob.exists():

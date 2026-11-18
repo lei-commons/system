@@ -8,7 +8,7 @@ name: deploy-ingest-browser
 on:
   push:
     branches: [main]
-    paths: ["services/ingest_browser/**", "packages/lc_browser/**", "packages/lc_ingest/**", "packages/lc_core/**", "config/fields.yaml", ".github/workflows/deploy-ingest-browser.yml", "config/sources.yaml"]
+    paths: ["services/ingest_browser/**", "packages/lc_browser/**", "packages/lc_ingest/**", "packages/lc_core/**", "config/fields.yaml", ".github/workflows/deploy-ingest-browser.yml", "config/sources.yaml", "config/cycle.yaml", "config/egress-allowlist.yaml"]
   workflow_dispatch:
 
 permissions:
@@ -34,10 +34,16 @@ jobs:
           pip install -q pyyaml
           python3 - <<'PY' > jobs.txt
           import yaml
+          import sys
+          sys.path.insert(0, "packages/lc_core")
+          from lc_core.sources import browser_fallbacks
           for s in yaml.safe_load(open("config/sources.yaml"))["sources"]:
               p = s.get("pipeline") or {}
               if p.get("image") == "ingest-browser":
-                  print(p["job"], s["id"])
+                  print(p["job"], s["id"], "primary")
+          # Browser fallbacks the owner approved (their hosts are browser hosts for the source).
+          for job, c in browser_fallbacks("config/sources.yaml", "config/egress-allowlist.yaml").items():
+              print(c["job"], c["source"], "fallback")
           PY
           cat jobs.txt
           [ -s jobs.txt ] || { echo "::error::no source uses ingest-browser"; exit 1; }
@@ -54,16 +60,17 @@ jobs:
       - name: Deploy the jobs
         run: |
           GATEWAY="$(gcloud run services describe conduct-gateway --region "$REGION" --format='value(status.url)')"
-          while read -r job source; do
+          while read -r job source mode; do
             gcloud run jobs deploy "$job" --region "$REGION" --image "$IMAGE:$GITHUB_SHA" \
               --service-account "lc-ingest@$PROJECT.iam.gserviceaccount.com" \
               --network lc-jobs --subnet "lc-jobs-$REGION" --vpc-egress all-traffic \
-              --set-env-vars "LC_SOURCE=$source,LC_GATEWAY_URL=$GATEWAY,LC_DATA_BUCKET=$PROJECT-data,LC_CONTROL_STATE_URI=gs://$PROJECT-control/state.json" \
+              --set-env-vars "LC_SOURCE=$source,LC_MODE=$mode,LC_GATEWAY_URL=$GATEWAY,LC_DATA_BUCKET=$PROJECT-data,LC_CONTROL_STATE_URI=gs://$PROJECT-control/state.json" \
               --max-retries 0 --task-timeout 10800 --memory 8Gi --cpu 2
           done < jobs.txt
       # Safe to repeat: a week already processed is skipped, and a paused system or an unapproved source stops at the gate.
       - name: Run each once now
         run: |
-          while read -r job source; do
+          while read -r job source mode; do
+            [ "$mode" = primary ] || continue  # a fallback runs only when the cycle needs it
             gcloud run jobs execute "$job" --region "$REGION" --async
           done < jobs.txt

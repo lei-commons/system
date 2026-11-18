@@ -351,3 +351,11 @@ def test_registry_hosts_still_get_no_cookies_and_no_posts(env):
     assert status == 403 and headers["X-LC-Denied"] == "method-not-allowed"
     status, headers, _ = call(port, "https://api.gleif.org/x", headers={"Cookie": "a=1"})
     assert "cookie" not in up.calls[-1]["headers"] and "Set-Cookie" not in headers
+
+
+def test_the_browser_flag_only_matters_for_approved_browser_hosts(env):
+    port, up, _, _, _ = env
+    status, headers, _ = call(port, "https://api.gleif.org/x", "POST", body=b"x", headers={"X-LC-Browser": "1"})
+    assert status == 403 and headers["X-LC-Denied"] == "method-not-allowed"  # not a browser host: still registry
+    call(port, "https://api.gleif.org/x", headers={"X-LC-Browser": "1", "Cookie": "a=1"})
+    assert "cookie" not in up.calls[-1]["headers"]
