@@ -200,3 +200,42 @@ def test_incomplete_config_refuses_to_load(key):
 def test_missing_config_file_refuses_to_load(tmp_path):
     with pytest.raises(ConfigError):
         Policy.from_file(tmp_path / "nope.yaml")
+
+
+
+# ---- the browser profile ----
+
+def browser_cfg():
+    cfg = good_cfg()
+    cfg["browser_hosts"] = [{"host": "form.test", "source": "xx-src", "approved": "owner 2026-11-18"}]
+    cfg["browser_policy"] = {"honour_robots_txt": True, "user_agent": "lei-commons-browser/0.1 (+https://x)",
+                             "pacing": dict(cfg["pacing"], min_seconds_between_requests=1, extra_random_seconds=2)}
+    return cfg
+
+
+def test_browser_hosts_get_their_own_profile_and_pacing():
+    p = Policy(browser_cfg())
+    assert p.profile_for("form.test") == "browser" and p.paced("browser")
+    assert p.pacing_for("browser")["min_seconds_between_requests"] == 1 and p.pacing_for("registry")["min_seconds_between_requests"] == 5
+    d = p.evaluate("GET", "https://form.test/x", {"User-Agent": "curl/8"})
+    assert d.headers["user-agent"] == "lei-commons-browser/0.1 (+https://x)"  # not a browser: just our name
+
+
+@pytest.mark.parametrize("change", [
+    lambda c: c["browser_hosts"][0].pop("approved"),
+    lambda c: c["browser_hosts"][0].pop("source"),
+    lambda c: c.pop("browser_policy"),
+    lambda c: c["browser_policy"].update({"honour_robots_txt": False}),
+    lambda c: c["browser_policy"].update(user_agent="Mozilla/5.0"),
+    lambda c: c["browser_policy"]["pacing"].update(min_seconds_between_requests=0.2),
+    lambda c: c["browser_hosts"].append({"host": "r.test", "source": "s", "approved": "o"}),
+])
+def test_a_browser_config_that_hides_us_or_skips_approval_refuses_to_load(change):
+    cfg = browser_cfg()
+    change(cfg)
+    with pytest.raises(ConfigError):
+        Policy(cfg)
+
+
+def test_without_browser_hosts_nothing_is_a_browser_host():
+    assert Policy(good_cfg()).profile_for("form.test") == "crawler"

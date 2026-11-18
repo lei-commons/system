@@ -29,7 +29,7 @@ from urllib.parse import urljoin
 from lc_core.control import SystemHalted, require_running
 
 from .limits import ROBOTS_MAX_BYTES, HostPacer, RateLimiter, RobotsCache
-from .policy import CRAWLER, ConfigError, Decision, Policy
+from .policy import BROWSER, CRAWLER, ConfigError, Decision, Policy
 from .upstream import BlockedAddress, Upstream
 
 COMPONENT = "conduct-proxy"
@@ -44,7 +44,7 @@ CHUNK = 64 * 1024
 # GLEIF full file is 485 MB.
 RETURN_HEADERS = (
     "content-type", "content-encoding", "content-range", "accept-ranges",
-    "etag", "last-modified", "cache-control", "location", "retry-after",
+    "etag", "last-modified", "cache-control", "location", "retry-after", "content-disposition",
 )
 
 
@@ -114,16 +114,16 @@ class Gateway:
     def finished(self, d: Decision, status: int, retry_after=None) -> None:
         """A paced request has finished (answered, streamed or failed): free the host and set its pause."""
         if self.policy.paced(d.profile):
-            self.pacer.release(d.host, self.pacer.pause_after(self.policy.pacing, status, _seconds(retry_after)))
+            self.pacer.release(d.host, self.pacer.pause_after(self.policy.pacing_for(d.profile), status, _seconds(retry_after)))
 
     def pace(self, d: Decision):
         """Apply robots.txt and per-host pacing. Returns (status, rule, reason, retry_after)."""
-        if d.profile == CRAWLER and not self.robots.allowed(d.scheme, d.host, d.target):
+        if d.profile in (CRAWLER, BROWSER) and not self.robots.allowed(d.scheme, d.host, d.target):
             return 403, "robots-disallowed", "robots.txt does not allow this path (Article 2.4)", None
         if not self.policy.rate_limited(d.profile):
             return None
         if self.policy.paced(d.profile):
-            come_back = self.pacer.acquire(d.host, self.policy.pacing["max_queue_seconds"])
+            come_back = self.pacer.acquire(d.host, self.policy.pacing_for(d.profile)["max_queue_seconds"])
             if come_back is not None:
                 return 429, "rate-limited", "waiting for this host's turn: one request at a time, at a person's pace", come_back
             return None
@@ -229,6 +229,11 @@ class Handler(BaseHTTPRequestHandler):
                 value = resp.getheader(name)
                 if value is not None:
                     self.send_header(name, value)
+            if d.profile == BROWSER:  # the site's own session cookies go back to the browser, one header each
+                msg = getattr(resp, "msg", None)
+                cookies = msg.get_all("set-cookie") if msg is not None and hasattr(msg, "get_all") else None
+                for value in cookies or ([resp.getheader("set-cookie")] if resp.getheader("set-cookie") else []):
+                    self.send_header("Set-Cookie", value)
             self.send_header("Connection", "close")
             if self.command == "HEAD":
                 length = resp.getheader("content-length")

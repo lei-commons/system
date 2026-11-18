@@ -19,6 +19,7 @@ main:
         - ingest-fi
         - ingest-ie
         - ingest-au
+        - ingest-jp
         - ingest-ca
       - failed: []
   - first_try:

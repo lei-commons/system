@@ -300,3 +300,54 @@ def test_empty_body_is_a_valid_chunked_response(env):
     port, up, _, _, _ = env
     up.routes[("api.gleif.org", "/empty")] = FakeResponse(204, b"")
     assert call(port, "https://api.gleif.org/empty")[2] == b""
+
+
+# ---- the browser profile (lc_browser): owner-approved form sites ----
+
+NTA = "https://www.houjin-bangou.nta.go.jp"
+
+
+class CookieMsg:
+    def __init__(self, cookies):
+        self.cookies = cookies
+
+    def get_all(self, name, default=None):
+        return self.cookies if name.lower() == "set-cookie" else default
+
+
+def test_a_browser_host_gets_the_form_post_with_its_session_cookie_and_its_cookies_come_back(env):
+    port, up, _, _, _ = env
+    resp = FakeResponse(200, b"PK..", {"Content-Type": "application/octet-stream",
+                                       "Content-Disposition": "attachment; filename*=utf-8'jp'00_zenkoku_all_20261030.zip"})
+    resp.msg = CookieMsg(["JSESSIONID=abc; Path=/; Secure; HttpOnly", "AWSALB=x; Expires=Thu, 25 Nov 2026 05:15:55 GMT; Path=/"])
+    up.routes[("www.houjin-bangou.nta.go.jp", "/download/zenken/index.html")] = resp
+    status, headers, body = call(port, f"{NTA}/download/zenken/index.html", "POST", body=b"event=download&selDlFileNo=28341",
+                                 headers={"Cookie": "JSESSIONID=abc", "Content-Type": "application/x-www-form-urlencoded",
+                                          "Referer": f"{NTA}/download/zenken/", "User-Agent": "Mozilla/5.0 Chrome/131"})
+    assert status == 200 and headers["content-disposition"].endswith("00_zenkoku_all_20261030.zip")
+    sent = [c for c in up.non_robots()][-1]
+    assert sent["method"] == "POST" and sent["body"] == b"event=download&selDlFileNo=28341"
+    assert sent["headers"]["cookie"] == "JSESSIONID=abc" and sent["headers"]["referer"].startswith(NTA)
+    assert sent["headers"]["user-agent"].startswith("Mozilla/5.0") and "lei-commons-browser" in sent["headers"]["user-agent"]
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    c.request("GET", "/fetch", headers={"X-LC-Target": f"{NTA}/download/zenken/index.html"})
+    r = c.getresponse()
+    assert r.msg.get_all("Set-Cookie") == resp.msg.cookies  # each cookie whole, dates and all
+    r.read()
+    c.close()
+
+
+def test_a_browser_host_honours_robots_and_still_refuses_login_paths_and_credentials(env):
+    port, up, _, _, _ = env
+    up.routes[("www.houjin-bangou.nta.go.jp", "/robots.txt")] = FakeResponse(200, b"User-agent: *\nDisallow: /private/\n")
+    assert call(port, f"{NTA}/private/x")[1]["X-LC-Denied"] == "robots-disallowed"
+    assert call(port, f"{NTA}/login/")[1]["X-LC-Denied"] == "denied-path"
+    assert call(port, f"{NTA}/x", headers={"Authorization": "Bearer t"})[1]["X-LC-Denied"] == "credentials-not-allowed"
+
+
+def test_registry_hosts_still_get_no_cookies_and_no_posts(env):
+    port, up, _, _, _ = env
+    status, headers, _ = call(port, "https://api.gleif.org/x", "POST", body=b"x")
+    assert status == 403 and headers["X-LC-Denied"] == "method-not-allowed"
+    status, headers, _ = call(port, "https://api.gleif.org/x", headers={"Cookie": "a=1"})
+    assert "cookie" not in up.calls[-1]["headers"] and "Set-Cookie" not in headers

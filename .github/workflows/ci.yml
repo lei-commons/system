@@ -119,6 +119,13 @@ jobs:
           docker build -f services/ingest_bulk/Dockerfile -t ingest-bulk .
           docker run --rm ingest-bulk python -c "from lc_ingest.bulk import PROFILES; from lc_core.sources import pipelines; assert set(PROFILES) <= {p['id'] for p in pipelines()}"
           docker build -f services/ingest_socrata/Dockerfile -t ingest-socrata .
+      - name: The browser image starts Chromium as its own (non-root) user, and its tests pass inside it
+        run: |
+          docker build -f services/ingest_browser/Dockerfile -t ingest-browser .
+          docker run --rm ingest-browser python -m ingest_browser.check_chromium
+          # The real-browser tests run in the image the job runs (a real headless Chromium, offline).
+          docker run --rm -u root -v "$PWD:/src:ro" -w /src ingest-browser sh -c \
+            "pip install -q pytest && python -m pytest -q -p no:cacheprovider packages/lc_browser services/ingest_browser"
           docker run --rm -e LC_SOURCE=us-co-sos ingest-socrata python -c "from lc_ingest.socrata import PROFILES; from lc_core.sources import pipelines; assert {p['id'] for p in pipelines() if p['job'].startswith('ingest-')} >= set(PROFILES)"
       - name: Site image builds and contains the app
         run: |

@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ingest-browser"
+version = "0.1.0"
+description = "Ingestion for official sources whose data is offered only through a web page or form, fetched with a real browser (lc_browser)"
+requires-python = ">=3.11"
+license = {text = "Apache-2.0"}
+dependencies = []  # lc-core, lc-ingest, lc-browser and playwright are installed by the Dockerfile
+
+[tool.setuptools.packages.find]
+include = ["ingest_browser*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

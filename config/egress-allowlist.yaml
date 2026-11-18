@@ -61,6 +61,30 @@ pacing:
   seconds_after_an_error: 120
   max_queue_seconds: 900
 
+# Official sources whose public data is offered only through a web page or form: no login, no CAPTCHA,
+# nothing behind an access control (Article 2.1). They are fetched by a real browser (lc_browser) whose
+# every request still comes through this gateway: allow-list, robots.txt, pacing, the fixed address, an
+# honest User-Agent. Approved by the owner per host and source; the browser profile allows GET, HEAD and
+# form POSTs and passes the site's own session cookies both ways, never credentials, never login paths.
+# Never a way around a refusal: a site that blocks us is asked to allow us instead.
+browser_hosts:
+  # Owner approved 2026-11-16: the narrow exception for Japan's NTA corporate-number download form
+  # (one-time token and session cookie), given per-record attribution (done, #84/#88).
+  - {host: www.houjin-bangou.nta.go.jp, source: jp-nta, approved: "owner 2026-11-16"}
+
+browser_policy:
+  honour_robots_txt: true
+  # Appended to the browser's own User-Agent, so every request names us.
+  user_agent: "lei-commons-browser/0.1 (+https://github.com/lei-commons)"
+  # Within a page (its scripts, the form post) requests come a little closer than registry downloads; the
+  # human think time between steps (5-15 s) is the flow's own. Still one request at a time per host.
+  pacing:
+    one_request_at_a_time: true
+    min_seconds_between_requests: 1
+    extra_random_seconds: 2
+    seconds_after_an_error: 120
+    max_queue_seconds: 900
+
 crawler_policy:
   methods: [GET, HEAD]
   max_rps_per_host: 1
