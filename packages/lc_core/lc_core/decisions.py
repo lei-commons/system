@@ -98,6 +98,9 @@ def _event(actor: str, record: dict) -> Event | None:
                      refs=_refs(record))
     if kind == "failed":
         message = " ".join(str(record.get("message") or "").split())[:300]
+        if record.get("refused"):
+            reason = f"the source refused us (HTTP {record.get('status')}), not a fault on our side" + (f": {message}" if message else "")
+            return Event(actor, "refused", subject, "failed", reason, refs=_refs(record))
         reason = f"stopped with {record.get('error', 'an error')}" + (f": {message}" if message else "")
         return Event(actor, "ran", subject, "failed", reason, refs=_refs(record))
     if kind in ("bad-download", "download-recovered", "download-failed"):
@@ -116,10 +119,32 @@ def _event(actor: str, record: dict) -> Event | None:
     return None
 
 
+# A source's own answers that mean "not you" (owner decision 2026-11-18): such a failure is an outside
+# refusal, not a fault in our system, so a cycle whose only failures are refusals still counts as clean.
+REFUSAL_STATUSES = (401, 403, 429, 451)
+
+
+def refusal_status(exc: BaseException):
+    """The HTTP status if ``exc`` (or anything that caused it) is the source refusing us, else None."""
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        status = getattr(exc, "status", None)
+        if type(exc).__name__ in ("FetchError", "IncompleteDownload") and status in REFUSAL_STATUSES:
+            return status
+        exc = exc.__cause__ or exc.__context__
+    return None
+
+
 def failure(exc: BaseException) -> dict:
-    """The record a job logs when it stops with ``exc``: its type and the first line of its message."""
+    """The record a job logs when it stops with ``exc``: its type, the first line of its message, and whether
+    the source refused us (an outside refusal) rather than something failing on our side."""
     lines = str(exc).strip().splitlines()
-    return {"event": "failed", "error": type(exc).__name__, "message": lines[0][:300] if lines else ""}
+    record = {"event": "failed", "error": type(exc).__name__, "message": lines[0][:300] if lines else ""}
+    status = refusal_status(exc)
+    if status is not None:
+        record.update(refused=True, status=status)
+    return record
 
 
 class Recorder:

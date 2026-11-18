@@ -184,7 +184,7 @@ class SystemView:
             lambda: r.api(f"https://cloudscheduler.googleapis.com/v1/projects/{r.project}/locations/{r.region}/jobs").get("jobs", []), [])
         cycles, cycles_error = _try(lambda: r.api(
             f"https://workflowexecutions.googleapis.com/v1/projects/{r.project}/locations/{r.region}/workflows/daily-cycle"
-            f"/executions?pageSize={min(100, max(14, 2 * self._cycle['clean_days']))}").get("executions", []), [])
+            f"/executions?view=FULL&pageSize={min(100, max(14, 2 * self._cycle['clean_days']))}").get("executions", []), [])
         control, control_error = _try(lambda: r.bucket_json("control", "state.json"))
 
         def store(prefix, label):
@@ -215,6 +215,7 @@ class SystemView:
                               "lastRun": latest.get("createTime"), "finished": latest.get("completionTime"),
                               "health": None if runs_error else source_health(r, run_names, src["job"], today.isoformat())})
         steps = [src["job"] for src in self._sources] + AFTER_INGEST
+        judged = judge_cycles(cycles, lambda day, jobs, until: refused_only(r, day, jobs, until))
         feed, feed_error = _try(lambda: self._feed(r), [])
         names, decisions_error = _try(lambda: sorted(r.bucket_names("decision_log", "owner-control/")
                                                      + r.bucket_names("decision_log", "budget-guard/"))[-DECISIONS_SHOWN:], [])
@@ -243,10 +244,8 @@ class SystemView:
                            "status": BAD if (s.get("status") or {}).get("code") else (OK if s.get("lastAttemptTime") else IDLE)}
                           for s in schedules],
             "schedulesError": schedules_error,
-            "cycles": [{"started": c.get("startTime"), "ended": c.get("endTime"), "state": c.get("state"),
-                        "status": {"SUCCEEDED": OK, "FAILED": BAD, "CANCELLED": BAD, "ACTIVE": BUSY}.get(c.get("state"), UNKNOWN)}
-                       for c in cycles],
-            "cleanStreak": clean_streak(cycles),
+            "cycles": judged,
+            "cleanStreak": clean_streak(judged),
             "cycle": {"cleanDays": self._cycle["clean_days"], "scheduleUtc": self._cycle["schedule_utc"],
                       "retries": self._cycle["retries"], "retryWaitMinutes": self._cycle["retry_wait_minutes"]},
             "healthError": runs_error,
@@ -317,10 +316,11 @@ def source_health(reader, names: list, job: str, today: str):
               "failedRunsToday": failed_today, "runsToday": len(todays)}
     if last_failed:
         name, events = last_failed
-        final = next((e for e in reversed(events) if e["action"] == "ran" and e["decision"] == "failed"), None) \
+        final = next((e for e in reversed(events) if e["action"] in ("ran", "refused") and e["decision"] == "failed"), None) \
             or next(e for e in reversed(events) if e["decision"] == "failed")
         health["problem"] = {"at": final["ts"], "error": final["reason"], "run": final.get("run_id") or name.rsplit("/", 1)[-1],
-                             "recovered": not newest_failed, "events": events[-DETAILS_SHOWN:]}
+                             "recovered": not newest_failed, "refused": final["action"] == "refused",
+                             "events": events[-DETAILS_SHOWN:]}
     return health
 
 
@@ -341,16 +341,71 @@ def last_cycle(executions: list, job_rows: dict, steps: list):
     return {"started": newest.get("startTime"), "ended": newest.get("endTime"), "state": newest.get("state"), "steps": out}
 
 
-def clean_streak(executions: list) -> int:
-    """Days in a row, newest first, whose daily cycle succeeded. A run still going doesn't break it."""
+def failed_sources(execution: dict):
+    """The jobs a cycle names as still failing (it raised code sources-failed), or None for any other end."""
+    payload = ((execution.get("error") or {}).get("payload")) or ""
+    try:
+        error = json.loads(payload) if isinstance(payload, str) else payload
+    except ValueError:
+        return None
+    if isinstance(error, dict) and error.get("code") == "sources-failed" and isinstance(error.get("failed"), list):
+        return [str(j) for j in error["failed"]]
+    return None
+
+
+def _stamp(ts: str) -> str:
+    """An ISO time as run object names spell it (no colons), for comparing."""
+    return (ts or "").replace(":", "")
+
+
+def refused_only(reader, day: str, jobs: list, until: str) -> bool:
+    """Whether every job in ``jobs`` stopped on ``day`` (by ``until``) because its source refused us."""
+    names = reader.bucket_names("decision_log", f"runs/{day}/")
+    for job in jobs:
+        runs = [n for n in _job_runs(names, job) if _stamp(n.rsplit("/", 1)[-1][:len("2026-01-01T000000")]) <= _stamp(until)[:17]]
+        if not runs:
+            return False
+        events = _events(reader, runs[-1])
+        final = next((e for e in reversed(events) if e["decision"] == "failed"), None)
+        if final is None or final["action"] != "refused":
+            return False
+    return True
+
+
+def judge_cycles(executions: list, refused) -> list:
+    """Each cycle with its status and whether it counts as clean. Clean: it succeeded, or every source it
+    names as failing was refused by that source (owner decision 2026-11-18: an outside refusal isn't a
+    fault in our system); such a day is still marked, with the sources."""
+    out = []
+    for c in executions:
+        state = c.get("state")
+        row = {"started": c.get("startTime"), "ended": c.get("endTime"), "state": state,
+               "status": {"SUCCEEDED": OK, "FAILED": BAD, "CANCELLED": BAD, "ACTIVE": BUSY}.get(state, UNKNOWN),
+               "clean": state == "SUCCEEDED", "failedSources": [], "refusedOnly": False}
+        jobs = failed_sources(c) if state == "FAILED" else None
+        if jobs:
+            row["failedSources"] = jobs
+            day = (c.get("startTime") or "")[:10]
+            try:
+                row["refusedOnly"] = bool(day) and refused(day, jobs, c.get("endTime") or "")
+            except Exception:
+                row["refusedOnly"] = False  # can't tell: not clean, never a false "all good"
+            row["clean"] = row["refusedOnly"]
+        out.append(row)
+    return out
+
+
+def clean_streak(cycles: list) -> int:
+    """Days in a row, newest first, whose daily cycle was clean (``judge_cycles``). A run still going
+    doesn't break it."""
     days = {}
-    for e in executions:
-        day = (e.get("startTime") or "")[:10]
-        if day and e.get("state") != "ACTIVE":
-            days.setdefault(day, []).append(e.get("state"))
+    for c in cycles:
+        day = (c.get("started") or "")[:10]
+        if day and c.get("state") != "ACTIVE":
+            days.setdefault(day, []).append(c.get("clean"))
     streak = 0
     for day in sorted(days, reverse=True):
-        if all(state == "SUCCEEDED" for state in days[day]):
+        if all(days[day]):
             streak += 1
         else:
             break

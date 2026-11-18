@@ -13,7 +13,7 @@ import sys
 from datetime import datetime, timedelta
 
 from lc_core.allowlist import AllowList
-from lc_core.control import require_running
+from lc_core.control import SystemHalted, require_running
 from lc_core.approvals import require_approved
 from lc_core.decisions import Recorder, failure, log_bucket_name
 from lc_core.lease import Busy, lease
@@ -103,8 +103,18 @@ def main() -> int:
     record = Recorder(COMPONENT, log)  # every decision goes to the decision log too
     try:
         with lease(client.bucket(bucket), "ingest-gleif"):
-            outcomes = [run(gateway, GcsStore(bucket, "gleif"), allowlist=allowlist, log=record),
-                        run_relationships(gateway, GcsStore(bucket, "gleif-rr"), allowlist=allowlist, log=record)]
+            # Entities and relationships are separate files: one failing doesn't stop the other.
+            outcomes, errors = [], []
+            for work in (lambda: run(gateway, GcsStore(bucket, "gleif"), allowlist=allowlist, log=record),
+                         lambda: run_relationships(gateway, GcsStore(bucket, "gleif-rr"), allowlist=allowlist, log=record)):
+                try:
+                    outcomes.append(work())
+                except SystemHalted:
+                    raise
+                except Exception as exc:  # recorded below, after the other part has had its turn
+                    errors.append(exc)
+            if errors:
+                raise errors[0]
     except Busy as exc:
         record({"event": "busy", "reason": str(exc)})  # another run is doing this work
         outcomes = ["busy"]
