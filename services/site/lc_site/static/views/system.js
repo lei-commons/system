@@ -8,7 +8,9 @@ import { actionBar, api, errorBox, flag, fmt, h, svg } from "../lib.js";
 const KIND = { ok: "good", failed: "bad", running: "busy", idle: "idle", unknown: "idle" };
 const ICON = { good: "✓", bad: "✕", busy: "●", idle: "○" };
 const WORD = { good: "healthy", bad: "failed", busy: "running", idle: "idle" };
-const W = 190, H = 50, ROW = 64, TOP = 16, GATE = 7;
+const W = 190, H = 50, ROW = 64, TOP = 16;
+// Which sources' error details are open: kept across the page's redraws every 30 seconds.
+const openDetails = new Set();
 
 const when = (t) => (t ? new Date(t).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }) : "–");
 const clock = (t) => (t ? new Date(t).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" }) + " UTC" : "–");
@@ -45,7 +47,7 @@ function layout(d) {
     gateway: [260, mid, "Conduct gateway", "the only way out", svc("conduct-gateway")],
     egress: [260, mid + ROW * 1.6, "Egress check", "proves the seal", job("egress-check")],
     data: [720, mid, "Data bucket", "records and changes", d.sources.some((s) => s.records) ? "ok" : "unknown"],
-    snapshot: [950, mid - ROW * 0.7, "Daily snapshot", "02:00 UTC, signed", job("build-snapshot")],
+    snapshot: [950, mid - ROW * 0.7, "Daily snapshot", `${d.cycle.scheduleUtc} UTC, signed`, job("build-snapshot")],
     site: [950, mid + ROW * 0.7, "Database and site", "private", svc("lei-commons-site")],
   });
   const bottom = TOP + n * ROW + 40;
@@ -96,10 +98,11 @@ function sourcesTile(sources) {
 
 function kpis(d, meta) {
   const cycle = d.lastCycle;
-  const streak = Math.min(d.cleanStreak || 0, GATE);
+  const gate = d.cycle.cleanDays; // config/cycle.yaml gate.clean_days
+  const streak = Math.min(d.cleanStreak || 0, gate);
   const ring = svg("svg", { class: "ring", viewBox: "0 0 44 44", width: 44, height: 44, "aria-hidden": "true" },
     svg("circle", { cx: 22, cy: 22, r: 18, class: "ring-track" }),
-    svg("circle", { cx: 22, cy: 22, r: 18, class: "ring-fill", "stroke-dasharray": `${(streak / GATE) * 113.1} 113.1`,
+    svg("circle", { cx: 22, cy: 22, r: 18, class: "ring-fill", "stroke-dasharray": `${(streak / gate) * 113.1} 113.1`,
       transform: "rotate(-90 22 22)" }));
   const tile = (value, label, extra) => h("div", { class: "kpi" }, extra || null, h("div", {},
     h("div", { class: "kpi-value num" }, value), h("div", { class: "kpi-label" }, label)));
@@ -107,7 +110,7 @@ function kpis(d, meta) {
     tile(fmt(meta.records), "records in the directory"),
     tile(fmt(meta.relationships), "relationships"),
     sourcesTile(d.sources),
-    tile(`${d.cleanStreak || 0} of ${GATE}`, "clean daily cycles in a row (M2 gate)", ring),
+    tile(`${d.cleanStreak || 0} of ${gate}`, `clean daily cycles in a row (the gate is ${gate} in a row)`, ring),
     tile(cycle ? `${minutes(cycle.started, cycle.ended) ?? "–"} min` : "–",
       cycle ? `last cycle, ${clock(cycle.started)} · ${(cycle.state || "").toLowerCase()}` : "no cycle yet"));
 }
@@ -128,7 +131,37 @@ function sourceCards(d, meta) {
       h("div", {}, h("dt", {}, "Last processed"), h("dd", { class: "mono" }, s.last || "–")),
       h("div", {}, h("dt", {}, "Job"), h("dd", {}, pill(s.jobStatus), " ", h("span", { class: "muted" }, when(s.lastRun)))),
       h("div", {}, h("dt", {}, "Licence"), h("dd", {}, s.licence || "–"))),
+    health(s),
     unavailable(s.error))));
+}
+
+// A source's trouble, from its runs in the decision log: a failed newest run, or failures today it
+// recovered from. The details (each attempt and its reason) open on click.
+function health(s) {
+  const hl = s.health;
+  if (!hl) {
+    return s.jobStatus === "failed"
+      ? h("p", { class: "source-problem" }, pill("failed"), " No details were recorded: see the job's logs in Cloud Run.")
+      : null;
+  }
+  if (!hl.problem) return null;
+  const p = hl.problem;
+  const summary = p.recovered
+    ? `Recovered: ${hl.failedRunsToday} of ${hl.runsToday} runs today failed first`
+    : `Failing${hl.failedRunsToday ? `: ${hl.failedRunsToday} ${hl.failedRunsToday === 1 ? "run" : "runs"} failed today` : ""}`;
+  const details = h("details", { class: `source-problem ${p.recovered ? "recovered" : "failing"}` },
+    h("summary", {}, p.recovered ? pill("ok") : pill("failed"), " ", summary, h("span", { class: "muted" }, " · error details")),
+    h("dl", { class: "problem" },
+      h("dt", {}, "Error"), h("dd", {}, p.error || "–"),
+      h("dt", {}, "When"), h("dd", {}, when(p.at)),
+      h("dt", {}, "Run"), h("dd", { class: "mono" }, p.run || "–")),
+    h("ol", { class: "attempts" }, ...(p.events || []).map((e) => h("li", {},
+      h("div", { class: "attempt-head" }, h("span", { class: "mono" }, clock(e.ts)), " ", e.action, " ",
+        pill(e.decision === "failed" ? "failed" : "ok")),
+      h("div", { class: "attempt-reason" }, e.reason || "")))));
+  if (openDetails.has(s.id)) details.open = true;
+  details.addEventListener("toggle", () => (details.open ? openDetails.add(s.id) : openDetails.delete(s.id)));
+  return details;
 }
 
 // ---- last night's cycle, step by step ----
@@ -191,6 +224,10 @@ function page(d, meta, updated, reload) {
       h("p", { class: "muted", style: { marginBottom: 0 } },
         c.state === "running" ? "Moving lines show the data path while the system is running." : "The system is not running, so nothing moves.")),
     h("h2", { class: "section-title" }, "Sources"),
+    h("p", { class: "muted" }, `Each source runs on its own: one that fails is tried again every ${d.cycle.retryWaitMinutes} minutes, `
+      + `up to ${d.cycle.retries} more times, while the others carry on; it keeps its last good data until it succeeds. `
+      + `The cycle starts at ${d.cycle.scheduleUtc} UTC.`),
+    unavailable(d.healthError),
     sourceCards(d, meta),
     h("div", { class: "grid cols-2", style: { marginTop: "18px" } },
       h("section", { class: "card card-pad" }, h("h3", {}, "Last daily cycle"), timeline(d), unavailable(d.cyclesError)),
@@ -198,7 +235,7 @@ function page(d, meta, updated, reload) {
         h("p", { style: { marginBottom: 0 } }, h("a", { href: "#/log" }, "The full decision log →")), unavailable(d.feedError))),
     h("div", { class: "grid cols-3", style: { marginTop: "18px" } },
       h("section", { class: "card card-pad" }, h("h3", {}, "Recent cycles"),
-        table(["Started", "Took", "Status"], d.cycles.slice(0, 7).map((x) => h("tr", {}, h("td", {}, when(x.started)),
+        table(["Started", "Took", "Status"], d.cycles.map((x) => h("tr", {}, h("td", {}, when(x.started)),
           h("td", { class: "num" }, x.ended ? `${minutes(x.started, x.ended)} min` : "–"), h("td", {}, pill(x.status)))))),
       h("section", { class: "card card-pad" }, h("h3", {}, "Services"),
         table(["Service", "Access", "Status"], d.services.map((s) => h("tr", {}, h("td", { class: "mono" }, s.name),

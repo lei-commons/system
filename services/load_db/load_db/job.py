@@ -20,7 +20,7 @@ import tempfile
 import time
 
 from lc_core.control import SystemHalted, require_running
-from lc_core.decisions import Recorder
+from lc_core.decisions import Recorder, failure
 
 COMPONENT = "job:load-db"
 OK = ("loaded", "already-loaded", "halted", "no-snapshot", "busy")
@@ -185,7 +185,7 @@ def main() -> int:
         outcome = run(bucket=client.bucket(os.environ["LC_SNAPSHOT_BUCKET"]), connect=connect,
                       readers=[os.environ["LC_SITE_DB_USER"]], log=record)
     except Exception as exc:
-        record({"event": "failed", "error": type(exc).__name__})
+        record(failure(exc))
         raise
     finally:  # the log bucket is <project>-decision-log
         record.write(client.bucket(os.environ.get("LC_DECISION_LOG_BUCKET", f"{project}-decision-log")))

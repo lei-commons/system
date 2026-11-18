@@ -97,11 +97,29 @@ def _event(actor: str, record: dict) -> Event | None:
         return Event(actor, "sealed", "decision log", "failed", f"stopped with {record.get('error', 'an error')}",
                      refs=_refs(record))
     if kind == "failed":
-        return Event(actor, "ran", subject, "failed", f"stopped with {record.get('error', 'an error')}", refs=_refs(record))
+        message = " ".join(str(record.get("message") or "").split())[:300]
+        reason = f"stopped with {record.get('error', 'an error')}" + (f": {message}" if message else "")
+        return Event(actor, "ran", subject, "failed", reason, refs=_refs(record))
+    if kind in ("bad-download", "download-recovered", "download-failed"):
+        why = " ".join(str(record.get("reason") or "").split())[:300]
+        if kind == "bad-download":
+            reason = f"attempt {record.get('attempt', '?')} was bad, fetching again" + (f": {why}" if why else "")
+        elif kind == "download-recovered":
+            reason = f"good on attempt {record.get('attempt', '?')}"
+        else:
+            reason = f"still bad after {record.get('attempts', '?')} attempts" + (f": {why}" if why else "")
+        return Event(actor, "downloaded", subject, "done" if kind == "download-recovered" else "failed", reason,
+                     refs=_refs(record))
     if kind == "denied":
         return Event(actor, "fetched", subject, "failed", record.get("reason") or "the gateway refused the request",
                      refs=_refs(record))
     return None
+
+
+def failure(exc: BaseException) -> dict:
+    """The record a job logs when it stops with ``exc``: its type and the first line of its message."""
+    lines = str(exc).strip().splitlines()
+    return {"event": "failed", "error": type(exc).__name__, "message": lines[0][:300] if lines else ""}
 
 
 class Recorder:

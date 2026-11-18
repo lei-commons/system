@@ -18,7 +18,7 @@ from datetime import date
 from lc_core.allowlist import AllowList
 from lc_core.control import require_running
 from lc_core.approvals import require_approved
-from lc_core.decisions import Recorder, log_bucket_name
+from lc_core.decisions import Recorder, failure, log_bucket_name
 from lc_core.fetch import Gateway
 from lc_core.lease import Busy, lease
 from lc_ingest.registers import NY_COLUMNS, ny_record, read_csv
@@ -76,7 +76,7 @@ def main() -> int:
         record({"event": "busy", "reason": str(exc)})
         outcome = "busy"
     except Exception as exc:
-        record({"event": "failed", "error": type(exc).__name__})
+        record(failure(exc))
         raise
     finally:
         record.write(client.bucket(log_bucket_name(bucket)))

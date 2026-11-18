@@ -1,16 +1,19 @@
-# The daily cycle (design: one Cloud Workflows run a day). Each step starts only
-# after the previous one succeeded, so the snapshot never reads half-updated
-# data and the database never loads a half-built snapshot. A failed step stops
-# the cycle and alerts the owner. Every job stops at once if the system isn't
-# running, so a paused system makes the cycle a quick no-op.
+# The daily cycle (design: one Cloud Workflows run a day). Each source is independent (owner decision
+# 2026-11-18): a source whose job fails is logged and retried later in the run, and never stops the
+# others; the snapshot and the database load then run (these two still stop the cycle if they fail),
+# and the cycle ends as failed if any source never succeeded, which alerts the owner. Every job stops at
+# once if the system isn't running, so a paused system makes the cycle a quick no-op.
+#
+# The definition is rendered by scripts/render_cycle.py from config/sources.yaml and config/cycle.yaml
+# into infra/workflows/daily-cycle.yaml; this file and deploy-cycle.yml both deploy that same file.
 
 locals {
-  # One ingestion step per built source, in the registry's order (config/sources.yaml, the
-  # entries with a pipeline), then the snapshot and the database load. A new source's job must
-  # be deployed (its deploy workflow) before this is applied, or its step would fail the cycle.
   sources_registry = yamldecode(file("${path.module}/../../config/sources.yaml"))
+  cycle_config     = yamldecode(file("${path.module}/../../config/cycle.yaml"))
   ingest_steps     = [for s in local.sources_registry.sources : s.pipeline.job if try(s.pipeline.job, null) != null]
   cycle_steps      = concat(local.ingest_steps, ["build-snapshot", "load-db"])
+  cycle_time       = split(":", local.cycle_config.schedule_utc)
+  cycle_cron       = "${tonumber(local.cycle_time[1])} ${tonumber(local.cycle_time[0])} * * *"
 }
 
 resource "google_workflows_workflow" "daily_cycle" {
@@ -19,21 +22,9 @@ resource "google_workflows_workflow" "daily_cycle" {
   name            = "daily-cycle"
   region          = var.region
   service_account = google_service_account.sa["workflow"].email
-  description     = "Ingest, then snapshot, then load the serving database, in order."
+  description     = "Ingest every source (each independent, failures retried), then snapshot, then load the serving database."
 
-  source_contents = yamlencode({
-    main = {
-      steps = [for job in local.cycle_steps : {
-        (replace(job, "-", "_")) = {
-          call = "googleapis.run.v2.projects.locations.jobs.run"
-          args = {
-            name             = "projects/${var.project_id}/locations/${var.region}/jobs/${job}"
-            connector_params = { timeout = 7200 }
-          }
-        }
-      }]
-    }
-  })
+  source_contents = file("${path.module}/../workflows/daily-cycle.yaml")
 
   depends_on = [google_project_service.apis]
 }
@@ -43,7 +34,7 @@ resource "google_cloud_scheduler_job" "daily_cycle" {
 
   name      = "daily-cycle"
   region    = var.region
-  schedule  = "0 2 * * *"
+  schedule  = local.cycle_cron # config/cycle.yaml schedule_utc
   time_zone = "Etc/UTC"
 
   http_target {
@@ -78,7 +69,7 @@ resource "google_monitoring_alert_policy" "cycle_failed" {
   }
 
   documentation {
-    content   = "The daily cycle stopped at a failed step, so later steps didn't run and the site still serves yesterday's data. Open Workflows → daily-cycle to see which step."
+    content   = "The daily cycle ended as failed: either a source still failed after its retries (the other sources, the snapshot and the load still ran; that source keeps its last good data), or the snapshot or the load failed. The private site's System page shows which, with the error details."
     mime_type = "text/markdown"
   }
 }

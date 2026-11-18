@@ -1,0 +1,72 @@
+# Deploys the daily cycle (Cloud Workflows) from infra/workflows/daily-cycle.yaml, the file rendered by
+# scripts/render_cycle.py from config/sources.yaml and config/cycle.yaml (Terraform deploys the same
+# file, so the two never disagree).
+#
+# Before deploying, it proves the cycle's logic in Workflows itself: a self-test copy of the cycle runs
+# one real, harmless job (egress-check) and one job that doesn't exist, with one retry after a minute.
+# It must end as failed, naming only the missing job (it was retried, skipped, and didn't stop the
+# other). Only then is daily-cycle updated. The log shows only states and job names.
+name: deploy-cycle
+
+on:
+  push:
+    branches: [main]
+    paths: ["config/sources.yaml", "config/cycle.yaml", "infra/workflows/**", "scripts/render_cycle.py",
+            "packages/lc_core/lc_core/cycle.py", ".github/workflows/deploy-cycle.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-cycle
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      REGION: ${{ vars.GCP_REGION }}
+      CYCLE_SA: lc-workflow@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml
+      - name: The committed cycle matches the registry and config/cycle.yaml
+        run: python scripts/render_cycle.py --check
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Self-test the cycle's logic in Workflows
+        run: |
+          python scripts/render_cycle.py --selftest "$RUNNER_TEMP/selftest.yaml"
+          gcloud workflows deploy daily-cycle-selftest --location "$REGION" --source "$RUNNER_TEMP/selftest.yaml" \
+            --service-account "$CYCLE_SA" --description "Self-test of the daily cycle's retry and skip logic (deploy-cycle.yml)" --quiet
+          name=$(gcloud workflows run daily-cycle-selftest --location "$REGION" --format='value(name)')
+          state=$(gcloud workflows executions describe "$name" --location "$REGION" --format='value(state)')
+          error=$(gcloud workflows executions describe "$name" --location "$REGION" --format='value(error.payload)')
+          gcloud workflows delete daily-cycle-selftest --location "$REGION" --quiet || true
+          echo "self-test: $state"
+          echo "$error" | grep -o '"code": *"[a-z-]*"\|"failed": *\[[^]]*\]' || true
+          [ "$state" = FAILED ] || { echo "::error::the self-test cycle should end as failed (a source never succeeded); it ended $state"; exit 1; }
+          echo "$error" | grep -q 'sources-failed' || { echo "::error::the self-test failed for another reason"; exit 1; }
+          echo "$error" | grep -q 'ingest-selftest-missing' || { echo "::error::the missing job isn't named as failed"; exit 1; }
+          if echo "$error" | grep -q 'egress-check'; then echo "::error::the real job was counted as failed"; exit 1; fi
+          echo "the failing job was retried and skipped; the other ran; the cycle reported it"
+
+      - name: Deploy daily-cycle
+        run: |
+          gcloud workflows deploy daily-cycle --location "$REGION" --source infra/workflows/daily-cycle.yaml \
+            --service-account "$CYCLE_SA" \
+            --description "Ingest every source (each independent, failures retried), then snapshot, then load the serving database." --quiet
+          echo "Deployed steps:"
+          gcloud workflows describe daily-cycle --location "$REGION" --format='value(sourceContents)' \
+            | grep -oE '(ingest-[a-z0-9-]+|build-snapshot|load-db)' | awk '!seen[$0]++' | tr '\n' ' '
+          echo
