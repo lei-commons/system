@@ -61,16 +61,18 @@ jobs:
         run: |
           GATEWAY="$(gcloud run services describe conduct-gateway --region "$REGION" --format='value(status.url)')"
           while read -r job source mode; do
+            gcloud run jobs describe "$job" --region "$REGION" >/dev/null 2>&1 || echo "$job" >> new_jobs.txt
             gcloud run jobs deploy "$job" --region "$REGION" --image "$IMAGE:$GITHUB_SHA" \
               --service-account "lc-ingest@$PROJECT.iam.gserviceaccount.com" \
               --network lc-jobs --subnet "lc-jobs-$REGION" --vpc-egress all-traffic \
               --set-env-vars "LC_SOURCE=$source,LC_MODE=$mode,LC_GATEWAY_URL=$GATEWAY,LC_DATA_BUCKET=$PROJECT-data,LC_CONTROL_STATE_URI=gs://$PROJECT-control/state.json" \
               --max-retries 0 --task-timeout 10800 --memory 8Gi --cpu 2
           done < jobs.txt
-      # Safe to repeat: a week already processed is skipped, and a paused system or an unapproved source stops at the gate.
-      - name: Run each once now
+      # Only a job this deploy created runs now (its first run); the daily cycle runs the others, one at a time.
+      - name: Run each new job once now
         run: |
-          while read -r job source mode; do
-            [ "$mode" = primary ] || continue  # a fallback runs only when the cycle needs it
+          [ -s new_jobs.txt ] || { echo "no new jobs"; exit 0; }
+          while read -r job; do
+            grep -q "^$job .* fallback$" jobs.txt && continue  # a fallback runs only when the cycle needs it
             gcloud run jobs execute "$job" --region "$REGION" --async
-          done < jobs.txt
+          done < new_jobs.txt

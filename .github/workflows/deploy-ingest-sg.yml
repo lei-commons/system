@@ -37,6 +37,10 @@ jobs:
           gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
           docker build -f services/ingest_sg/Dockerfile -t "$IMAGE:$GITHUB_SHA" .
           docker push "$IMAGE:$GITHUB_SHA"
+      - name: Is the job new?
+        id: new
+        run: |
+          if gcloud run jobs describe ingest-sg --region "$REGION" >/dev/null 2>&1; then echo "new=false" >> "$GITHUB_OUTPUT"; else echo "new=true" >> "$GITHUB_OUTPUT"; fi
       - name: Deploy the job
         run: |
           GATEWAY="$(gcloud run services describe conduct-gateway --region "$REGION" --format='value(status.url)')"
@@ -60,6 +64,7 @@ jobs:
               --uri "https://run.googleapis.com/v2/projects/$PROJECT/locations/$REGION/jobs/ingest-sg:run" \
               --oauth-service-account-email "lc-workflow@$PROJECT.iam.gserviceaccount.com"
           fi
-      # Safe to repeat: a publish already processed is skipped, and a paused system stops at the gate.
-      - name: Run once now
+      # Only a job this deploy created runs now (its first run); the daily cycle runs the others, one at a time.
+      - name: Run once now (a new job only)
+        if: steps.new.outputs.new == 'true'
         run: gcloud run jobs execute ingest-sg --region "$REGION" --async

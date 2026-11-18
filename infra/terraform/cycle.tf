@@ -56,7 +56,8 @@ resource "google_monitoring_alert_policy" "cycle_failed" {
   conditions {
     display_name = "Daily cycle execution failed"
     condition_threshold {
-      filter          = "resource.type = \"workflows.googleapis.com/Workflow\" AND metric.type = \"workflows.googleapis.com/finished_execution_count\" AND metric.labels.status = \"FAILED\""
+      # The daily cycle only: deploy-cycle's self-test copy (daily-cycle-selftest) is meant to end as failed.
+      filter          = "resource.type = \"workflows.googleapis.com/Workflow\" AND resource.labels.workflow_id = \"daily-cycle\" AND metric.type = \"workflows.googleapis.com/finished_execution_count\" AND metric.labels.status = \"FAILED\""
       comparison      = "COMPARISON_GT"
       threshold_value = 0
       duration        = "0s"
@@ -69,7 +70,7 @@ resource "google_monitoring_alert_policy" "cycle_failed" {
   }
 
   documentation {
-    content   = "The daily cycle ended as failed: either a source still failed after its retries (the other sources, the snapshot and the load still ran; that source keeps its last good data), or the snapshot or the load failed. The private site's System page shows which, with the error details."
+    content   = "The daily cycle ended as failed: either a source still failed after its retries and any browser fallback (the other sources, the snapshot and the load still ran; that source keeps its last good data), or the snapshot or the load failed. A day whose only failures are sources refusing us still counts as clean. The private site's System page shows which, with the error details."
     mime_type = "text/markdown"
   }
 }

@@ -24,7 +24,10 @@ resource "google_monitoring_alert_policy" "job_failed" {
   conditions {
     display_name = "Cloud Run job execution failed"
     condition_threshold {
-      filter          = "resource.type = \"cloud_run_job\" AND metric.type = \"run.googleapis.com/job/completed_execution_count\" AND metric.labels.result = \"failed\""
+      # Ingestion jobs aren't here: a source is tried and retried many times a day (and refusals are expected),
+      # so its failures are reported once a day by the daily cycle's alert, after all its retries, and on the
+      # System page. This alert is for the jobs that aren't sources (snapshot, load, egress check...).
+      filter          = "resource.type = \"cloud_run_job\" AND metric.type = \"run.googleapis.com/job/completed_execution_count\" AND metric.labels.result = \"failed\" AND NOT resource.labels.job_name = starts_with(\"ingest-\")"
       comparison      = "COMPARISON_GT"
       threshold_value = 0
       duration        = "0s"
@@ -37,15 +40,16 @@ resource "google_monitoring_alert_policy" "job_failed" {
   }
 
   documentation {
-    content   = "A lei-commons job failed. Open the private site's System page to see which one, and its logs in Cloud Run."
+    content   = "A lei-commons job that isn't a source failed (the snapshot, the database load, the egress check...). Open the private site's System page to see which one, and its logs in Cloud Run. Sources are reported by the daily cycle's alert."
     mime_type = "text/markdown"
   }
 }
 
-# Every request the conduct gateway refuses, except while the system is paused.
+# Every request the conduct gateway refuses by policy, except while the system is paused.
+# Policy refusals only: not a site timing out (upstream-error) or a request waiting its turn (rate-limited).
 resource "google_logging_metric" "gateway_denials" {
   name   = "lc_gateway_denials"
-  filter = "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"conduct-gateway\" AND jsonPayload.allowed=false AND NOT jsonPayload.rule=\"system-not-running\""
+  filter = "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"conduct-gateway\" AND jsonPayload.allowed=false AND NOT jsonPayload.rule=\"system-not-running\" AND NOT jsonPayload.rule=\"upstream-error\" AND NOT jsonPayload.rule=\"rate-limited\""
 
   metric_descriptor {
     metric_kind = "DELTA"
