@@ -78,3 +78,7 @@ jobs:
         run: gcloud scheduler jobs list --location "$REGION" --format='table(name.basename(),schedule,state,lastAttemptTime,status.code)' || true
       - name: Services
         run: gcloud run services list --region "$REGION" --format='table(metadata.name,status.conditions[0].status,status.latestReadyRevisionName)' || true
+      - name: The gateway's way out (network and egress setting; lc-egress means the one fixed address)
+        run: |
+          gcloud run services describe conduct-gateway --region "$REGION" --format=json \
+            | jq -c '.spec.template.metadata.annotations | {network: (."run.googleapis.com/network-interfaces" // "none: shared Cloud Run addresses"), egress: ."run.googleapis.com/vpc-access-egress"}' || true
