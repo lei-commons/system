@@ -104,7 +104,7 @@ resource "google_cloud_run_v2_job" "build_snapshot" {
       containers {
         image = "${local.image_base}/build-snapshot:latest"
         resources {
-          limits = { cpu = "2", memory = "8Gi" }
+          limits = { cpu = "4", memory = "16Gi" } # local disk is memory on Cloud Run: the build and the load keep the snapshot files there (42M records, 2026-11-18)
         }
         env {
           name  = "LC_DATA_BUCKET"
@@ -155,7 +155,7 @@ resource "google_cloud_run_v2_job" "load_db" {
       containers {
         image = "${local.image_base}/load-db:latest"
         resources {
-          limits = { cpu = "2", memory = "8Gi" }
+          limits = { cpu = "4", memory = "16Gi" } # local disk is memory on Cloud Run: the build and the load keep the snapshot files there (42M records, 2026-11-18)
         }
         env {
           name  = "GCP_PROJECT_ID"
