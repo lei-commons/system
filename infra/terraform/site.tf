@@ -7,11 +7,13 @@ resource "google_cloud_run_v2_service" "site" {
   provider = google-beta
   count    = var.site_enabled ? 1 : 0
 
-  name                = "lei-commons-site"
-  location            = var.region
-  ingress             = "INGRESS_TRAFFIC_ALL"
+  name     = "lei-commons-site"
+  location = var.region
+  # Until the site moves behind its load balancer (config/site.yaml, site_lb.tf), IAP guards it directly at
+  # its run.app address; afterwards only the load balancer (with IAP on it) may reach it.
+  ingress             = local.site_lb_only ? "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER" : "INGRESS_TRAFFIC_ALL"
   launch_stage        = "BETA"
-  iap_enabled         = true
+  iap_enabled         = !local.site_lb_only
   deletion_protection = false
 
   template {
@@ -49,8 +51,8 @@ resource "google_cloud_run_v2_service" "site" {
         value = var.owner_email
       }
       env {
-        name  = "LC_IAP_AUDIENCE"
-        value = "/projects/${data.google_project.this.number}/locations/${var.region}/services/lei-commons-site"
+        name  = "LC_IAP_AUDIENCE" # the IAP token audiences accepted (site_lb.tf): direct, the load balancer's, or both
+        value = join(",", local.site_audiences)
       }
       env {
         name  = "LC_SNAPSHOT_BUCKET"
