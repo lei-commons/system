@@ -52,6 +52,7 @@ class Handler(BaseHTTPRequestHandler):
     decisions = None
     downloads = None
     actions = None
+    dedi = None
     files: dict = {}
     iap = staticmethod(verify_iap)
 
@@ -90,6 +91,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, (STATIC / "index.html").read_bytes())
         if path.startswith("/download/"):
             return self._download(path[len("/download/"):])
+        if path == "/.well-known/dedi.index.json" or path.startswith(("/dedi/", "/data/")):
+            return self._dedi(path)
         if path.startswith("/static/"):
             file = self.files.get(path)
             if file is None:
@@ -122,7 +125,32 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(f"{len(block):x}\r\n".encode() + block + b"\r\n")
         self.wfile.write(b"0\r\n\r\n")
 
+    def _dedi(self, path):
+        """A DeDi file, or a snapshot file it points to (lc_site.dedi_files), streamed from the bucket."""
+        from .dedi_files import headers_for
+
+        if self.dedi is None:
+            return self._plain(503, "DeDi files aren't configured.")
+        obj, blob = self.dedi.blob(path)
+        if blob is None:
+            return self._plain(404, "Not found.")
+        self.close_connection = True
+        self.send_response(200)
+        for k, v in (HEADERS | headers_for(obj)).items():
+            self.send_header(k, v)
+        self.send_header("Transfer-Encoding", "chunked")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        with blob.open("rb") as f:
+            for block in iter(lambda: f.read(1 << 20), b""):
+                self.wfile.write(f"{len(block):x}\r\n".encode() + block + b"\r\n")
+        self.wfile.write(b"0\r\n\r\n")
+
     def _api(self, path, query):
+        if path == "/api/v1/dedi":
+            if self.dedi is None:
+                return self._json(503, {"error": "DeDi files aren't configured"})
+            return self._json(200, self.dedi.status())
         if path == "/api/v1/source-names":
             return self._json(200, source_names())
         if path == "/api/v1/snapshots":
@@ -274,10 +302,10 @@ def load_from(bucket, latest: dict):
 
 
 def make_server(snapshot, owners, audience, address, iap=verify_iap, system=None, decisions=None, downloads=None,
-                actions=None):
+                actions=None, dedi=None):
     attrs = {"snapshot": snapshot, "owners": {o.strip().lower() for o in owners if o.strip()}, "audience": audience,
              "iap": staticmethod(iap), "system": system, "decisions": decisions, "downloads": downloads,
-             "actions": actions, "files": static_files()}
+             "actions": actions, "dedi": dedi, "files": static_files()}
     return ThreadingHTTPServer(address, type("Bound", (Handler,), attrs))
 
 
@@ -287,16 +315,18 @@ def main() -> int:
     except KeyError as exc:
         print(f"refusing to start: {exc} is not set", file=sys.stderr)
         return 1
-    system = decisions = downloads = None
+    system = decisions = downloads = dedi = None
     try:
         from google.cloud import storage
 
         from .decision_log import DecisionLogReader
+        from .dedi_files import DediFiles
         from .downloads import SnapshotFiles
 
         client = storage.Client()
         decisions = DecisionLogReader(client.bucket(f"{os.environ['GCP_PROJECT_ID']}-decision-log"))
         downloads = SnapshotFiles(client.bucket(bucket))
+        dedi = DediFiles(client.bucket(bucket))
     except Exception as exc:  # the rest of the site works without it
         print(json.dumps({"event": "decision-log-unavailable", "error": type(exc).__name__}), flush=True)
     try:
@@ -313,7 +343,7 @@ def main() -> int:
     except Exception as exc:  # the rest of the site works without it; actions answer 503
         print(json.dumps({"event": "owner-actions-unavailable", "error": type(exc).__name__}), flush=True)
     make_server(choose_directory(bucket), owners, audience, ("0.0.0.0", int(os.environ.get("PORT", "8080"))),
-                system=system, decisions=decisions, downloads=downloads, actions=actions).serve_forever()
+                system=system, decisions=decisions, downloads=downloads, actions=actions, dedi=dedi).serve_forever()
     return 0
 
 

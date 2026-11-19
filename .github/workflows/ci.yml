@@ -76,6 +76,16 @@ jobs:
       - run: pytest -q services/ingest_socrata
       - run: pip install -e services/ingest_bulk
       - run: pytest -q services/ingest_bulk
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - name: dedi-cli, the DeDi protocol's own signer and verifier, for the conformance tests
+        run: |
+          GOBIN="$RUNNER_TEMP/bin" go install github.com/nfh-trust-labs/dedi-cli/cmd/dedi-cli@86d1b37461e00a10f8d7e6918a2474ae4175eafb
+          echo "DEDI_CLI=$RUNNER_TEMP/bin/dedi-cli" >> "$GITHUB_ENV"
+          echo "LC_REQUIRE_DEDI_CLI=1" >> "$GITHUB_ENV"
+      - run: pip install -e "packages/lc_dedi[test]"
+      - run: pytest -q packages/lc_dedi
       - run: pip install -e packages/lc_publish
       - run: pytest -q packages/lc_publish
       - run: pip install -e packages/lc_directory
@@ -88,6 +98,7 @@ jobs:
           docker run --rm load-db python -c "from lc_core.publishing import load; print(load().load)"
           docker build -f services/build_snapshot/Dockerfile -t build-snapshot .
           docker run --rm build-snapshot python -c "from lc_core.publishing import load; import lc_publish.job; print(load().snapshots)"
+          docker run --rm build-snapshot python -c "from lc_publish import dedi; c = dedi.load_config(); print(c.domain); [dedi.record_schema(r, c) for r in dedi.REGISTRIES]; print(len(dedi.country_names()))"
       - run: pip install -e services/site
       - run: pytest -q services/site
       - name: Front-end modules parse

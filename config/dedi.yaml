@@ -1,0 +1,50 @@
+# DeDi publication (Decentralized Directory protocol, LF Decentralized Trust; docs/dedi.md).
+# Every setting is required and checked when read (lc_publish.dedi.load_config): a missing,
+# unknown or out-of-range value stops the DeDi step (never the snapshot itself).
+#
+# lei-commons publishes signed DeDi files describing itself (its data sources, where each
+# country's data is, and its daily editions), plus the signed manifest that DeDi verifiers
+# and servers such as dedi.global start from: /.well-known/dedi.index.json on our domain.
+#
+# Nothing here makes anything public. Until the owner approves going public, the files are
+# written to the snapshots bucket and served only by the private site (owner login), so the
+# namespace is the private site's own host: the manifest is truthful there, and the owner can
+# verify everything end to end. Going public means a domain we control (owner decision), set
+# here; the key and everything else stay as they are.
+
+version: 1
+
+enabled: true
+domain: lei-commons-site-aovjqfftsa-uc.a.run.app            # the DeDi namespace (the private site, for now)
+base_url: https://lei-commons-site-aovjqfftsa-uc.a.run.app   # serves /.well-known/dedi.index.json and /dedi/*
+data_base_url: https://lei-commons-site-aovjqfftsa-uc.a.run.app/data   # parts/<sha256>.parquet, <date>/manifest.json
+name: lei-commons
+description: >-
+  An open, AI-run directory of legal entities in LEI-compatible form, built from GLEIF and
+  official company registers, published daily with signed manifests. Not affiliated with
+  GLEIF and does not issue LEIs.
+
+key:
+  kid: lc-dedi-1                      # the key id published in the manifest
+  # seed: an Ed25519 key in Secret Manager, created by the first publication (nobody sees it), or
+  # kms: a Cloud KMS EC_SIGN_ED25519 key version (KMS signs raw messages; check its request size
+  # limit against the countries file, about 0.5 MB, before switching).
+  signer: seed
+  ref: projects/lei-commons-prod/secrets/dedi-signing-key
+  # Extra public keys to list (rotation: add the new key here, sign with it, then drop the old one).
+  also_list: []
+
+freshness_hours:
+  files: 36        # registry files and digests are re-issued by every daily cycle; stale after this
+  manifest: 168    # keys and the file list change rarely; verifiers may cache them this long
+
+registries:
+  data-sources:
+    enabled: true
+    include_assessment: false   # Claude's reading of each source's terms; owner decides whether it is public
+    include_pending: true       # list sources not yet approved (with approval: pending/denied)
+  countries:
+    enabled: true
+  snapshots:
+    enabled: true
+    max_records: 400            # editions listed (kept days); the file stays small

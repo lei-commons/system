@@ -1,0 +1,84 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "{base_url}/dedi/schemas/country-snapshot.v1.json",
+  "title": "lei-commons country snapshot",
+  "description": "Where to get every legal entity lei-commons holds for one country: the files of the latest full snapshot, each with a permanent content-addressed URL, its SHA-256, size, record count and Merkle root, and how to bring them up to the current day. A superset of the DeDi Public-Data-Set schema: every record also validates against it (data_url is the full snapshot's manifest, which lists every file and is signed with Sigstore).",
+  "type": "object",
+  "required": ["publisher_id", "name", "description", "type", "data_url", "data_url_checksum", "data_url_checksum_type",
+               "country", "country_name", "full_snapshot", "parts", "current", "sources"],
+  "additionalProperties": false,
+  "properties": {
+    "publisher_id": {"type": "string", "description": "Public-Data-Set: the publisher (the DeDi namespace)."},
+    "name": {"type": "string"},
+    "description": {"type": "string"},
+    "tags": {"type": "array", "items": {"type": "string"}},
+    "type": {"type": "string", "enum": ["json"], "description": "Public-Data-Set: data_url points at the full snapshot's manifest (JSON); the data itself is Parquet (see parts)."},
+    "data_url": {"type": "string", "format": "uri"},
+    "data_url_checksum": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "data_url_checksum_type": {"type": "string", "enum": ["sha256"]},
+    "country": {"type": "string", "pattern": "^[A-Z]{2}$", "description": "ISO 3166-1 alpha-2; XX for records whose country is unknown."},
+    "country_name": {"type": "string"},
+    "format": {"type": "string", "description": "The files' format and schema, e.g. parquet; the columns are documented at schema_url."},
+    "schema_url": {"type": ["string", "null"], "description": "Where the Parquet columns are documented."},
+    "full_snapshot": {
+      "type": "object",
+      "required": ["date", "snapshot_root", "manifest_url", "manifest_sha256", "records"],
+      "additionalProperties": false,
+      "properties": {
+        "date": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "The full snapshot these files belong to."},
+        "snapshot_root": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "Merkle root of that day's whole directory; signed in the manifest."},
+        "manifest_url": {"type": "string", "format": "uri"},
+        "manifest_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "signature_url": {"type": ["string", "null"], "description": "The manifest's Sigstore bundle (Rekor transparency log)."},
+        "records": {"type": "integer", "minimum": 0, "description": "This country's records in that full snapshot."}
+      }
+    },
+    "parts": {
+      "type": "array",
+      "minItems": 1,
+      "description": "This country's files in the full snapshot. Records are split by their exact sources (e.g. register only, or register and GLEIF) and, for large groups, by shard.",
+      "items": {
+        "type": "object",
+        "required": ["name", "url", "sha256", "bytes", "records", "root", "sources"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string"},
+          "url": {"type": "string", "format": "uri", "description": "Permanent: the address is the SHA-256 of the bytes, so it never changes meaning."},
+          "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+          "bytes": {"type": "integer", "minimum": 0},
+          "records": {"type": "integer", "minimum": 0},
+          "root": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$", "description": "Merkle root of the file's rows; anyone can recompute it."},
+          "sources": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "current": {
+      "type": "object",
+      "required": ["date", "records", "snapshot_root", "recipe_url"],
+      "additionalProperties": false,
+      "description": "The latest day. Between full snapshots only changes are published; recipe_url lists the change files to apply to the parts above (each change row carries its country).",
+      "properties": {
+        "date": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+        "records": {"type": "integer", "minimum": 0},
+        "snapshot_root": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "recipe_url": {"type": "string", "format": "uri"}
+      }
+    },
+    "sources": {
+      "type": "array",
+      "description": "The sources this country's records come from, with the credit each licence asks for.",
+      "items": {
+        "type": "object",
+        "required": ["source_id", "licence"],
+        "additionalProperties": false,
+        "properties": {
+          "source_id": {"type": "string"},
+          "licence": {"type": "string"},
+          "attribution": {"type": ["string", "null"]},
+          "citation": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "notice_url": {"type": ["string", "null"], "description": "The snapshot's NOTICE (licences and credits)."}
+  }
+}

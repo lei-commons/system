@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lc-dedi"
+version = "0.1.0"
+description = "DeDi (Decentralized Directory protocol) documents: JCS, the EdDSA detached-JWS profile, building and verifying DeDi files, manifests and digests"
+requires-python = ">=3.11"
+license = {text = "Apache-2.0"}
+dependencies = ["cryptography>=42", "jsonschema>=4.18"]
+
+[project.optional-dependencies]
+kms = ["google-cloud-kms>=2.21"]
+test = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+include = ["lc_dedi*"]
+
+[tool.setuptools.package-data]
+lc_dedi = ["schemas/*.json", "schemas/README.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "lc_dedi"]
+addopts = "--doctest-modules"
