@@ -55,6 +55,10 @@ resource "google_cloud_run_v2_service" "console" {
         value = "/projects/${data.google_project.this.number}/locations/${var.region}/services/owner-console"
       }
       env {
+        name  = "LC_SITE_HOSTS" # the site's own address (config/site.yaml), for the console's link back to it
+        value = local.site_lb ? local.site_domain : ""
+      }
+      env {
         name  = "GCP_PROJECT_ID"
         value = var.project_id
       }

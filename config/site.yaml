@@ -1,0 +1,22 @@
+# The private site's address (owner decision 2026-11-19: lei-commons.nfh.global, a subdomain of the owner's
+# nfh.global, rather than a new domain). The site stays private behind IAP (the owner's Google login with
+# 2-step verification); nothing here makes anything public.
+#
+# The address is served by a global HTTPS load balancer with a Google-managed certificate and IAP on the
+# load balancer (infra/terraform/site_lb.tf). It goes live in two steps, each applied by a bootstrap rerun:
+#
+#   1. load_balancer: true. The load balancer, its fixed address (Terraform output site_ip), the certificate
+#      and IAP on it are created; the site keeps working at its run.app address meanwhile and accepts IAP's
+#      token from either. The owner adds one DNS record: domain -> site_ip (type A). Google issues the
+#      certificate once the record resolves (up to an hour).
+#   2. only_through_load_balancer: true, once https://<domain>/ answers with IAP's sign-in. The site then
+#      accepts traffic only from the load balancer (the run.app address stops answering outside traffic),
+#      IAP runs only there, and only the load balancer's token is accepted. Never unprotected: IAP is on the
+#      load balancer from the moment it exists.
+#
+# Later, going public (owner decision) would add a separate route, without IAP, for the DeDi paths only
+# (/.well-known/dedi.index.json, /dedi/*, /data/*), which only a load balancer allows.
+
+domain: lei-commons.nfh.global
+load_balancer: true
+only_through_load_balancer: false

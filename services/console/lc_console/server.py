@@ -314,10 +314,16 @@ class Handler(BaseHTTPRequestHandler):
                                      "<a href=https://github.com/lei-commons/control/actions>control repository</a>.</p>")
 
 
-def _site(url: str):
-    """The site's address, if ``url`` is one: https and a run.app host only, so the link can't lead elsewhere."""
-    m = re.fullmatch(r"https://[a-z0-9-]+(\.[a-z0-9-]+)*\.run\.app", (url or "").strip().rstrip("/"))
-    return m.group(0) if m else None
+def _site(url: str, hosts=None):
+    """The site's address, if ``url`` is one: https and a run.app host, or one of the site's own hosts
+    (LC_SITE_HOSTS, from config/site.yaml), so the link can't lead elsewhere."""
+    url = (url or "").strip().rstrip("/")
+    m = re.fullmatch(r"https://[a-z0-9-]+(\.[a-z0-9-]+)*\.run\.app", url)
+    if m:
+        return m.group(0)
+    allowed = hosts if hosts is not None else [h.strip().lower() for h in os.environ.get("LC_SITE_HOSTS", "").split(",") if h.strip()]
+    m = re.fullmatch(r"https://([a-z0-9-]+(\.[a-z0-9-]+)+)", url)
+    return m.group(0) if m and m.group(1) in allowed else None
 
 
 def make_server(app: App, address) -> ThreadingHTTPServer:

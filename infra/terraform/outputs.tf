@@ -32,8 +32,8 @@ output "console_url" {
 }
 
 output "site_url" {
-  description = "The private site and API. Empty until site_enabled is true."
-  value       = var.site_enabled ? google_cloud_run_v2_service.site[0].uri : ""
+  description = "The private site and API (its own address once it is served only through its load balancer, config/site.yaml). Empty until site_enabled is true."
+  value       = local.site_lb_only ? "https://${local.site_domain}/" : (var.site_enabled ? google_cloud_run_v2_service.site[0].uri : "")
 }
 
 output "database_connection" {
