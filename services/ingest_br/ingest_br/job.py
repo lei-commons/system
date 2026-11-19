@@ -151,6 +151,11 @@ def run(gateway, store, lookup_for, today=None, gate=gate, allowlist=None, log=l
         return "halted"
     started = clock()
     month = latest_month(gateway, today or date.today())
+    processed = set(store.read_manifest().get("processed", []))
+    if all(f"{month} estab{k}" in processed for k in range(FILES)):
+        # Nothing to do this month: say so (the decision log and the System page see the run), and fetch nothing.
+        log({"event": "already-done", "source": "br", "publish": month})
+        return "already-done"
     lookup = lookup_for(month)
     if not lookup.ready():
         build(gateway, lookup, month, log=log, sleep=sleep)

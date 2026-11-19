@@ -311,3 +311,15 @@ def test_refused_only_reads_each_jobs_last_run_of_the_cycle():
     objects[a] = [_line(f"{day}T02:04:00Z", "ran", "failed", "stopped with BadFile")]
     assert not refused_only(R(objects), day, ["ingest-gleif"], f"{day}T03:40:00Z")
     assert not refused_only(R(objects), day, ["ingest-br"], f"{day}T03:40:00Z")  # no run at all: not a refusal
+
+
+def test_a_later_successful_run_with_nothing_to_record_clears_a_failure():
+    """Brazil's quiet nights wrote no decision-log object, so the page kept showing an old failure."""
+    a = "runs/2026-11-18/2026-11-18T124900Z-job-ingest-br-ingest-br-b5f5w.jsonl"
+    reader = RunsReader({a: [_line("2026-11-18T12:49:30Z", "ran", "failed", "stopped with Denied: TimeoutError", "ingest-br-b5f5w")]})
+    stale = source_health(reader, [a], "ingest-br", "2026-11-19")
+    assert stale["state"] == BAD
+    fresh = source_health(reader, [a], "ingest-br", "2026-11-19", succeeded_at="2026-11-19T02:19:42Z")
+    assert fresh["state"] == OK and fresh["problem"]["recovered"] is True
+    older = source_health(reader, [a], "ingest-br", "2026-11-19", succeeded_at="2026-11-18T06:14:18Z")
+    assert older["state"] == BAD  # a success before the failure doesn't clear it
