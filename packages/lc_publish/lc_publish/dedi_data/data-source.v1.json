@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "{base_url}/dedi/schemas/data-source.v1.json",
+  "title": "lei-commons data source",
+  "description": "One source lei-commons uses or has considered for its directory of legal entities: where the data is published, under what licence, how it is credited, and the owner's decision about using it. Only approved sources are fetched, and only approved sources' records are published.",
+  "type": "object",
+  "required": ["source_id", "name", "country", "access", "approval", "in_use", "url", "licence", "licence_verified"],
+  "additionalProperties": false,
+  "properties": {
+    "source_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$", "description": "The source's id in lei-commons."},
+    "name": {"type": "string", "description": "The source as its publisher names it."},
+    "label": {"type": ["string", "null"], "description": "How lei-commons shows the source."},
+    "country": {"type": "string", "pattern": "^([A-Z]{2}|\\*)$", "description": "ISO 3166-1 alpha-2 country it covers, or * for global."},
+    "access": {"type": "string", "enum": ["open", "owner-key", "web-discovery"], "description": "open: public file or keyless API; owner-key: needs a credential; web-discovery: public web pages."},
+    "method": {"type": ["string", "null"]},
+    "cadence": {"type": ["string", "null"], "description": "How often the publisher releases data."},
+    "approval": {"type": "string", "enum": ["approved", "pending", "denied"], "description": "The owner's current decision. Pending and denied sources are never fetched."},
+    "approved_at": {"type": ["string", "null"], "description": "When the current decision was made (date or date-time), if known."},
+    "in_use": {"type": "boolean", "description": "Built, approved, and contributing records to the current snapshot."},
+    "records": {"type": ["integer", "null"], "minimum": 0, "description": "Records from this source in the current snapshot."},
+    "records_as": {"type": ["string", "null"], "description": "The id records carry in their sources column."},
+    "registration_authority": {"type": ["string", "null"], "description": "GLEIF's Registration Authority code for the register (e.g. RA000681), used to mint directory ids so LEI records and register records merge."},
+    "url": {"type": "string", "format": "uri", "description": "Where the data is published."},
+    "terms_url": {"type": ["string", "null"], "description": "The licence or terms of use."},
+    "licence": {"type": "string", "description": "The licence, as lei-commons understands it (SPDX id where one exists)."},
+    "licence_verified": {"type": "boolean", "description": "Whether the owner (or counsel) has checked the terms. False means lei-commons' reading has not been checked."},
+    "attribution": {"type": ["string", "null"], "description": "The credit every reuse must give, if the licence asks for one."},
+    "record_url_template": {"type": ["string", "null"], "description": "Where the source shows one record: {registrationNumber}, {lei} or {directoryId} is substituted."},
+    "refresh": {"type": ["string", "null"], "description": "How lei-commons refreshes the source."},
+    "assessment": {
+      "type": "object",
+      "description": "lei-commons' reading of the terms (not legal advice). Published only if the owner chooses.",
+      "additionalProperties": false,
+      "properties": {
+        "risk": {"type": "string", "enum": ["low", "medium", "high", "unknown"]},
+        "commercial_use": {"type": "string"},
+        "attribution_requirement": {"type": "string"},
+        "summary": {"type": "string"}
+      }
+    }
+  }
+}

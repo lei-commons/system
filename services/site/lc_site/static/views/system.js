@@ -199,6 +199,40 @@ function feed(d) {
       h("div", { class: "ink2" }, e.reason || ""), h("div", { class: "muted mono" }, `${when(e.ts)}${e.subject ? " · " + e.subject : ""}`)))));
 }
 
+// ---- DeDi files: lei-commons described as signed DeDi files (docs/dedi.md), each one link away ----
+const DEDI_STATE = { ok: ["good", "published and verified"], failing: ["bad", "needs attention"],
+  unpublished: ["idle", "not published yet"] };
+
+function dediCard(dd) {
+  if (!dd) return null;
+  const [kind, word] = DEDI_STATE[dd.state] || ["idle", dd.state];
+  const pub = dd.published || {}, chk = dd.check || {};
+  const soon = (t) => t && new Date(t) - Date.now() < 12 * 3600 * 1000;
+  const rows = dd.files.map((f) => h("tr", {},
+    h("td", {}, f.present
+      ? h("a", { href: f.path, target: "_blank", rel: "noopener" }, f.label)
+      : h("span", { class: "muted" }, f.label)),
+    h("td", { class: "mono" }, f.path),
+    h("td", { class: "num" }, f.records != null ? fmt(f.records) : "–"),
+    h("td", {}, when(f.updatedAt)),
+    h("td", {}, f.nextUpdate ? h("span", { class: soon(f.nextUpdate) ? "pill warn" : "" }, when(f.nextUpdate)) : "–")));
+  const notes = [];
+  if (pub.ok) notes.push(`Last published ${when(pub.publishedAt)} for the ${pub.date} snapshot` + (pub.attempts > 1 ? ` (after ${pub.attempts} attempts)` : "") + ".");
+  else if (pub.failedAt) notes.push(`Publishing failed ${when(pub.failedAt)}: ${pub.error}. ` + (pub.lastGood ? `The set published ${when(pub.lastGood)} stays valid until it goes stale.` : "Nothing has been published yet."));
+  if (chk.checkedAt) notes.push(chk.ok ? `Independent check passed ${when(chk.checkedAt)}.` : `Independent check failed ${when(chk.checkedAt)}: ${(chk.problems || []).join("; ")}`);
+  return h("section", { class: "card card-pad dedi" },
+    h("div", { class: "toolbar", style: { marginBottom: "8px" } }, h("h3", { style: { margin: 0 } }, "DeDi files"),
+      h("span", { class: `pill ${kind}` }, ICON[kind], " ", word),
+      dd.domain ? h("span", { class: "muted" }, `namespace ${dd.domain}`) : null),
+    h("p", { class: "muted", style: { marginTop: 0 } },
+      "lei-commons described as signed DeDi files (Decentralized Directory protocol): its data sources, where every country's data is, "
+      + "and its daily editions, plus the signed index that DeDi verifiers start from. Re-issued every day after the snapshot. Click to view."),
+    // On a narrow screen the table scrolls sideways inside the card rather than running off it.
+    dd.files.length ? h("div", { class: "table-scroll" }, table(["File", "Path", "Records", "Content changed", "Fresh until"], rows))
+      : h("p", {}, "Nothing published yet."),
+    ...notes.map((n) => h("p", { class: "muted", style: { marginBottom: 0 } }, n)));
+}
+
 // ---- owner actions: open the console, which asks for a fresh code ----
 function actions(d, reload) {
   if (!d.actions || !d.actions.length) return null;
@@ -218,6 +252,7 @@ function page(d, meta, updated, reload) {
       h("span", { class: "ink2" }, `State: ${c.state || "unknown"}`),
       (c.pausedComponents || []).length ? h("span", { class: "pill warn" }, `paused: ${c.pausedComponents.join(", ")}`) : null,
       h("span", { class: "muted" }, `Updated ${updated.toLocaleTimeString("en-GB")} · refreshes every 30 seconds`)),
+    dediCard(d.dedi),
     kpis(d, meta),
     actions(d, reload),
     h("section", { class: "card card-pad" }, diagram(d), unavailable(c.error),
@@ -259,8 +294,10 @@ export async function render(root) {
     // Don't redraw under an open action form: the owner may be typing a code.
     if (!force && root.querySelector(".action-panel:not([hidden])")) return;
     try {
-      const [d, meta] = await Promise.all([api("/api/v1/system"), api("/api/v1/meta")]);
-      root.replaceChildren(page(d, meta, new Date(), () => load(true)));
+      // The DeDi card is extra: if its status can't be read, the rest of the page still shows.
+      const [d, meta, dedi] = await Promise.all([api("/api/v1/system"), api("/api/v1/meta"),
+        api("/api/v1/dedi").catch(() => null)]);
+      root.replaceChildren(page({ ...d, dedi }, meta, new Date(), () => load(true)));
     } catch (error) {
       root.replaceChildren(h("div", { class: "wrap" }, errorBox(error)));
     }

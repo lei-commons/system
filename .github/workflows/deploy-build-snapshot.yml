@@ -5,7 +5,7 @@ name: deploy-build-snapshot
 on:
   push:
     branches: [main]
-    paths: ["packages/lc_publish/**", "packages/lc_core/**", "packages/lc_directory/**", "services/build_snapshot/Dockerfile", ".github/workflows/deploy-build-snapshot.yml", "config/sources.yaml", "config/publishing.yaml"]
+    paths: ["packages/lc_publish/**", "packages/lc_core/**", "packages/lc_directory/**", "services/build_snapshot/Dockerfile", ".github/workflows/deploy-build-snapshot.yml", "config/sources.yaml", "config/publishing.yaml", "packages/lc_dedi/**", "config/dedi.yaml"]
   workflow_dispatch:
 
 permissions:
@@ -40,4 +40,8 @@ jobs:
             gcloud run jobs update build-snapshot --region "${{ vars.GCP_REGION }}" --image "$IMAGE:$GITHUB_SHA" --task-timeout 7200s --memory 16Gi --cpu 4
           else
             echo "::notice::build-snapshot doesn't exist yet; the image is pushed"
+          fi
+          # The DeDi watchdog runs the same image (python -m lc_publish.dedi_job check --repair; infra/terraform/dedi.tf).
+          if gcloud run jobs describe dedi-check --region "${{ vars.GCP_REGION }}" >/dev/null 2>&1; then
+            gcloud run jobs update dedi-check --region "${{ vars.GCP_REGION }}" --image "$IMAGE:$GITHUB_SHA"
           fi

@@ -35,7 +35,7 @@ jobs:
       - name: The cycle's jobs, from the sources registry
         run: |
           pip install -q pyyaml
-          python3 -c "import yaml; s = yaml.safe_load(open('config/sources.yaml'))['sources']; print('CYCLE_JOBS=' + ' '.join([x['pipeline']['job'] for x in s if x.get('pipeline')] + ['build-snapshot', 'load-db']))" >> "$GITHUB_ENV"
+          python3 -c "import yaml; s = yaml.safe_load(open('config/sources.yaml'))['sources']; print('CYCLE_JOBS=' + ' '.join([x['pipeline']['job'] for x in s if x.get('pipeline')] + ['build-snapshot', 'load-db', 'dedi-check']))" >> "$GITHUB_ENV"
       - name: Only a job of the cycle
         run: |
           case " $CYCLE_JOBS " in *" $JOB "*) echo "running $JOB" ;; *) echo "::error::$JOB isn't a job of the daily cycle ($CYCLE_JOBS)"; exit 1 ;; esac

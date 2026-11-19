@@ -8,13 +8,17 @@ version = "0.1.0"
 description = "Builds the daily lei-commons snapshot"
 requires-python = ">=3.11"
 license = {text = "Apache-2.0"}
-dependencies = ["pyarrow>=15"]  # also needs lc-core[gcp]
+dependencies = ["pyarrow>=15"]  # also needs lc-core[gcp] and lc-dedi (DeDi publication)
 
 [project.optional-dependencies]
+dedi = ["google-cloud-secret-manager>=2.20"]
 test = ["pytest>=8"]
 
 [tool.setuptools.packages.find]
 include = ["lc_publish*"]
+
+[tool.setuptools.package-data]
+lc_publish = ["dedi_data/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

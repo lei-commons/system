@@ -315,3 +315,7 @@ dl.mini.wide { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
 .credit:first-child { border-top: 0; padding-top: 0; }
 .credit-attribution { margin: 4px 0; }
 .credit-citation { font-size: 12px; white-space: normal; overflow-wrap: anywhere; }
+
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table-scroll > table.data { min-width: 640px; }
+.dedi td.mono { white-space: nowrap; }

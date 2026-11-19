@@ -89,7 +89,7 @@ def combined(readers):
 
 
 def publish(snapshots, data, date: str, readers: dict, relationships, settings, work: Path, record,
-            decision_log=None, shards: int = None, now=None) -> dict:
+            decision_log=None, shards: int = None, now=None, dedi: bool = False) -> dict:
     """Build the day against the last published state, upload it, point latest.json at it, then prune."""
     previous, state, why_not = previous_state(snapshots, data, date, work)
     if why_not:
@@ -111,6 +111,16 @@ def publish(snapshots, data, date: str, readers: dict, relationships, settings, 
         prune(snapshots, data, date, latest, settings.snapshots, now=now, log=record)
     except Exception as exc:
         record({"event": "prune-skipped", "error": type(exc).__name__, "reason": str(exc)[:200]})
+    if dedi:  # the DeDi files describe the new day (docs/dedi.md); a failure never undoes the day
+        try:
+            from .dedi_job import publish_after_build  # here: only the job needs lc-dedi
+
+            with lease(data, "dedi"):
+                publish_after_build(snapshots, record)
+        except Busy as exc:
+            record({"event": "dedi-busy", "reason": str(exc)})
+        except Exception as exc:  # e.g. the lease couldn't be taken: the dedi-check step repairs it
+            record({"event": "dedi-failed", "error": f"{type(exc).__name__}: {str(exc)[:200]}"})
     return manifest
 
 
@@ -150,7 +160,7 @@ def main() -> int:
             publish(snapshots, data, date, {s["id"]: shard_reader(data, s["prefix"]) for s in included},
                     combined([shard_reader(data, store) for store in relationship_stores]) if relationship_stores else None,
                     settings, work, record,
-                    decision_log=seal)
+                    decision_log=seal, dedi=True)
     except Busy as exc:
         record({"event": "busy", "reason": str(exc)})  # another run is building it
         record.write(decisions)
