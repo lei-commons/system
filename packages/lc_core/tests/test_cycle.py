@@ -12,7 +12,7 @@ def test_the_repository_settings_load():
 
 
 def test_the_cron_follows_the_time():
-    s = cycle.settings({"schedule_utc": "23:05", "sources": {"retry_wait_minutes": 1, "retries": 0, "browser_fallback_after_failures": 2}, "gate": {"clean_days": 1}})
+    s = cycle.settings({"schedule_utc": "23:05", "sources": {"retry_wait_minutes": 1, "retries": 0, "browser_fallback_after_failures": 2}, "gate": {"clean_days": 1}, "watchdogs": {"dedi_check_utc": "14:17"}})
     assert s["cron"] == "5 23 * * *"
 
 

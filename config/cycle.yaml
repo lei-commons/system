@@ -28,3 +28,8 @@ sources:
 gate:
   # Clean daily cycles in a row that a phase gate needs (owner decision 2026-11-17: 4). 1 to 30.
   clean_days: 4
+
+watchdogs:
+  # The DeDi watchdog (job dedi-check, docs/dedi.md) also runs after the load in every cycle; this second
+  # daily run re-issues the files on a day the cycle failed, so they never go stale. HH:MM in UTC.
+  dedi_check_utc: "14:17"

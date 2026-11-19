@@ -29,6 +29,10 @@ def settings(config: dict) -> dict:
     """Validated settings: retry_wait_minutes, retries, clean_days, schedule_utc ("HH:MM"), cron."""
     config = config or {}
     sources, gate = config.get("sources") or {}, config.get("gate") or {}
+    watchdogs = config.get("watchdogs") or {}
+    dedi_check = str(watchdogs.get("dedi_check_utc", ""))
+    if not TIME.match(dedi_check):
+        raise CycleConfigError("watchdogs.dedi_check_utc must be a time of day, HH:MM (UTC)")
     when = str(config.get("schedule_utc", ""))
     match = TIME.match(when)
     if not match:
@@ -40,6 +44,7 @@ def settings(config: dict) -> dict:
                                                   "sources.browser_fallback_after_failures"),
         "clean_days": _whole(gate.get("clean_days"), 1, 30, "gate.clean_days"),
         "schedule_utc": when,
+        "dedi_check_utc": dedi_check,
         "cron": f"{int(match.group(2))} {int(match.group(1))} * * *",
     }
 

@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "{base_url}/dedi/schemas/snapshot-edition.v1.json",
+  "title": "lei-commons snapshot edition",
+  "description": "One day's edition of the lei-commons directory: its signed manifest and root, whether it is a full snapshot or only the day's changes, the full snapshot it builds on, the sealed decision log it carries, and where to fetch it whole.",
+  "type": "object",
+  "required": ["date", "kind", "anchor", "snapshot_root", "records", "relationships", "manifest_url", "manifest_sha256", "recipe_url"],
+  "additionalProperties": false,
+  "properties": {
+    "date": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"},
+    "kind": {"type": "string", "enum": ["full", "changes"]},
+    "anchor": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "description": "The full snapshot this day's state starts from."},
+    "base": {"type": ["string", "null"], "description": "The previous day, whose state this day's changes apply to."},
+    "snapshot_root": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "records": {"type": "integer", "minimum": 0},
+    "relationships": {"type": "integer", "minimum": 0},
+    "changes": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+    "manifest_url": {"type": "string", "format": "uri"},
+    "manifest_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "signature_url": {"type": ["string", "null"], "description": "The manifest's Sigstore bundle, once the release has signed it."},
+    "recipe_url": {"type": "string", "format": "uri", "description": "Every file needed to assemble this day, in order, with SHA-256s."},
+    "relationship_parts": {"type": "array", "items": {"type": "object"}, "description": "On full days: the relationship files (url, sha256, bytes, records, root)."},
+    "decision_log": {"type": ["object", "null"], "description": "The decision log's seal carried by this manifest (days sealed and chain head)."}
+  }
+}
