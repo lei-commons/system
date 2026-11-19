@@ -201,3 +201,17 @@ def test_a_company_file_that_stays_bad_stops_the_run_after_three_tries():
             log=events.append, sleep=lambda s: None)
     assert [e["attempt"] for e in events if e["event"] == "bad-download"] == [1, 2]
     assert [e["attempts"] for e in events if e["event"] == "download-failed"] == [3]
+
+
+def test_a_month_already_loaded_says_so_and_downloads_nothing():
+    """A quiet night is recorded (the System page and the decision log see it) and fetches no file."""
+    MemLookup.built, MemLookup.shards = 0, {}
+    store, gw, events = MemStore(), FakeGateway(), []
+    run(gw, store, lambda m: MemLookup(), today=date(2026, 11, 9), gate=lambda: None, allowlist=AllowList.load(),
+        log=events.append)
+    gw.fetched.clear()
+    events.clear()
+    assert run(gw, store, lambda m: MemLookup(), today=date(2026, 11, 9), gate=lambda: None,
+               allowlist=AllowList.load(), log=events.append) == "already-done"
+    assert [e for e in events if e["event"] == "already-done"] == [{"event": "already-done", "source": "br", "publish": "2026-10"}]
+    assert not [t for t in gw.fetched if t.endswith(".zip")]  # neither Municipios nor any establishment file

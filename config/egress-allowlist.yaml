@@ -71,6 +71,12 @@ browser_hosts:
   # Owner approved 2026-11-16: the narrow exception for Japan's NTA corporate-number download form
   # (one-time token and session cookie), given per-record attribution (done, #84/#88).
   - {host: www.houjin-bangou.nta.go.jp, source: jp-nta, approved: "owner 2026-11-16"}
+  # Owner approved 2026-11-19: browser fallback (docs/browser-downloads.md) when the regular download fails
+  # consistently, even after retries, and never around a refusal. These hosts stay registry hosts for the
+  # regular download; the browser profile applies only to the browser's own requests.
+  - {host: opendata.cro.ie, source: ie-cro, approved: "owner 2026-11-19 (browser fallback)"}
+  - {host: nl-ams-1.linodeobjects.com, source: ie-cro, approved: "owner 2026-11-19 (browser fallback)"}
+  - {host: data.gov.au, source: au-asic, approved: "owner 2026-11-19 (browser fallback)"}
 
 browser_policy:
   honour_robots_txt: true

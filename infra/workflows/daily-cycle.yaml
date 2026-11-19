@@ -22,6 +22,9 @@ main:
         - ingest-jp
         - ingest-ca
       - failed: []
+      - fallbacks:
+          ingest-ie: ingest-ie-browser
+          ingest-au: ingest-au-browser
   - first_try:
       for:
         value: job
@@ -95,6 +98,56 @@ main:
                             job: ${job}
                             round: ${retry_round}
                             error: ${e}
+  - browser_fallbacks:
+      steps:
+      - take_still_failing:
+          assign:
+          - trying: ${failed}
+          - failed: []
+      - fallback_each:
+          for:
+            value: job
+            in: ${trying}
+            steps:
+            - has_fallback:
+                switch:
+                - condition: ${job in fallbacks}
+                  next: fallback_run
+                next: no_fallback
+            - no_fallback:
+                assign:
+                - failed: ${list.concat(failed, job)}
+                next: continue
+            - fallback_run:
+                try:
+                  steps:
+                  - fallback_job:
+                      call: googleapis.run.v2.projects.locations.jobs.run
+                      args:
+                        name: ${"projects/" + project + "/locations/" + region + "/jobs/" + fallbacks[job]}
+                        connector_params:
+                          timeout: 7200
+                  - fallback_log:
+                      call: sys.log
+                      args:
+                        severity: WARNING
+                        json:
+                          event: source-recovered-by-browser
+                          job: ${job}
+                except:
+                  as: e
+                  steps:
+                  - fallback_note_failure:
+                      assign:
+                      - failed: ${list.concat(failed, job)}
+                  - fallback_log_failure:
+                      call: sys.log
+                      args:
+                        severity: WARNING
+                        json:
+                          event: browser-fallback-failed
+                          job: ${job}
+                          error: ${e}
   - build_snapshot:
       call: googleapis.run.v2.projects.locations.jobs.run
       args:

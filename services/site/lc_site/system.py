@@ -213,7 +213,9 @@ class SystemView:
                               "relationships": (relationships or {}).get("records"),
                               "jobStatus": _execution_status(row) if row else UNKNOWN,
                               "lastRun": latest.get("createTime"), "finished": latest.get("completionTime"),
-                              "health": None if runs_error else source_health(r, run_names, src["job"], today.isoformat())})
+                              "health": None if runs_error else source_health(
+                                  r, run_names, src["job"], today.isoformat(),
+                                  latest.get("completionTime") if row and _execution_status(row) == OK else None)})
         steps = [src["job"] for src in self._sources] + AFTER_INGEST
         judged = judge_cycles(cycles, lambda day, jobs, until: refused_only(r, day, jobs, until))
         feed, feed_error = _try(lambda: self._feed(r), [])
@@ -292,7 +294,7 @@ def _events(reader, name: str) -> list:
     return out
 
 
-def source_health(reader, names: list, job: str, today: str):
+def source_health(reader, names: list, job: str, today: str, succeeded_at: str = None):
     """How a source's job is doing, from its run objects in the decision log (today's and yesterday's).
 
     state is "failed" if its newest run failed, else "ok". With a failure: the error, when, and the newest
@@ -312,6 +314,11 @@ def source_health(reader, names: list, job: str, today: str):
     if last_failed is None and any(e["decision"] == "failed" for e in newest_events):
         last_failed = (runs[-1], newest_events)  # yesterday's newest run failed and nothing ran today
     newest_failed = any(e["decision"] == "failed" for e in newest_events)
+    # A later run that succeeded but had nothing to record (no decision-log object) still counts: the job's
+    # own latest execution (Cloud Run) is newer than the failure and succeeded.
+    failed_at = next((e["ts"] for e in reversed(newest_events) if e["decision"] == "failed"), None)
+    if newest_failed and succeeded_at and failed_at and succeeded_at > failed_at:
+        newest_failed = False
     health = {"state": BAD if newest_failed else OK, "lastRunAt": (newest_events[-1]["ts"] if newest_events else None),
               "failedRunsToday": failed_today, "runsToday": len(todays)}
     if last_failed:
