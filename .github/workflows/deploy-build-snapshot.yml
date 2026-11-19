@@ -41,3 +41,7 @@ jobs:
           else
             echo "::notice::build-snapshot doesn't exist yet; the image is pushed"
           fi
+          # The DeDi watchdog runs the same image (python -m lc_publish.dedi_job check --repair; infra/terraform/dedi.tf).
+          if gcloud run jobs describe dedi-check --region "${{ vars.GCP_REGION }}" >/dev/null 2>&1; then
+            gcloud run jobs update dedi-check --region "${{ vars.GCP_REGION }}" --image "$IMAGE:$GITHUB_SHA"
+          fi

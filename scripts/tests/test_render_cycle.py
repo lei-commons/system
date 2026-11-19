@@ -14,7 +14,7 @@ spec.loader.exec_module(rc)
 
 REGISTRY = {"sources": [{"id": "a", "pipeline": {"job": "ingest-aa"}}, {"id": "b"}, {"id": "c", "pipeline": {"job": "ingest-cc"}}]}
 CONFIG = {"schedule_utc": "02:00", "sources": {"retry_wait_minutes": 10, "retries": 5, "browser_fallback_after_failures": 3},
-          "gate": {"clean_days": 4}}
+          "gate": {"clean_days": 4}, "watchdogs": {"dedi_check_utc": "14:17"}}
 
 
 def steps(doc):
@@ -131,3 +131,15 @@ def test_terraform_deploys_the_rendered_file_and_takes_the_schedule_from_the_con
     tf = (ROOT / "infra" / "terraform" / "cycle.tf").read_text()
     assert 'file("${path.module}/../workflows/daily-cycle.yaml")' in tf
     assert "local.cycle_cron" in tf and '"0 2 * * *"' not in tf
+
+
+
+def test_the_dedi_check_runs_after_the_load_and_never_fails_the_cycle():
+    doc = rc.render(REGISTRY, CONFIG, dedi=True)
+    names = [next(iter(step)) for step in doc["main"]["steps"]]
+    assert names[names.index("load_db") + 1] == "dedi_check" and names.index("dedi_check") < names.index("report")
+    step = steps(doc)["dedi_check"]
+    assert "try" in step and "except" in step and "dedi-check-failed" in str(step["except"])
+    assert "list.concat(failed" not in str(step["except"])  # never adds to the failed sources
+    assert "dedi_check" not in steps(rc.render(REGISTRY, CONFIG))  # DeDi off: no step
+    assert "dedi_check" not in steps(rc.render(REGISTRY, CONFIG, selftest=True, dedi=True))  # the self-test never

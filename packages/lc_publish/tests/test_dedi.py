@@ -23,6 +23,8 @@ from lc_publish.testing import FakeBucket
 T0 = datetime(2026, 11, 19, 4, 0, tzinfo=timezone.utc)
 ROOT = Path(__file__).resolve().parents[3]
 CLI = os.environ.get("DEDI_CLI") or shutil.which("dedi-cli")
+if os.environ.get("LC_REQUIRE_DEDI_CLI") and not (CLI and os.access(CLI, os.X_OK)):
+    raise RuntimeError("LC_REQUIRE_DEDI_CLI is set (CI) but dedi-cli isn't installed: the DeDi files would go unchecked")
 
 
 def h(text):
@@ -410,6 +412,8 @@ def test_a_lasting_kms_outage_fails_after_the_retries_and_keeps_the_previous_set
     assert all(objects(bucket)[k] == v for k, v in before.items() if k != "dedi/status.json")
     status = read(bucket, "dedi/status.json")
     assert not status["ok"] and status["lastGood"] == dd.utc(T0)
+    # the set still published (the last good one) stays listed on the System page
+    assert status["files"] and status["files"] == read(bucket, "dedi/status.json")["files"] and status["date"]
 
 
 class CorruptingBucket(FakeBucket):
@@ -578,3 +582,4 @@ def test_a_key_with_another_kid_or_an_unreadable_secret_stops_publication(cfg):
     with pytest.raises(PermissionError):  # never a new key because the old one couldn't be read
         dedi.make_signer(cfg, denied, store.write)
     assert len(store.versions) == 1
+

@@ -592,7 +592,9 @@ def publish(bucket, cfg: Config, signer: jws.Signer, *, sources: list, effective
     except Exception:
         previous = {}
     _status(bucket, {"ok": False, "failedAt": dd.utc(clock()), "error": message[:500],
-                     "lastGood": previous.get("publishedAt") if previous.get("ok") else previous.get("lastGood")})
+                     "lastGood": previous.get("publishedAt") if previous.get("ok") else previous.get("lastGood"),
+                     # the set still published (the last good one) stays listed on the System page
+                     "files": previous.get("files") or {}, "date": previous.get("date")})
     record({"event": "dedi-failed", "error": message[:300]})
     raise PublishError(message)
 

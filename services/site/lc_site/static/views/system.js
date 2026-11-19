@@ -227,7 +227,9 @@ function dediCard(dd) {
     h("p", { class: "muted", style: { marginTop: 0 } },
       "lei-commons described as signed DeDi files (Decentralized Directory protocol): its data sources, where every country's data is, "
       + "and its daily editions, plus the signed index that DeDi verifiers start from. Re-issued every day after the snapshot. Click to view."),
-    dd.files.length ? table(["File", "Path", "Records", "Content changed", "Fresh until"], rows) : h("p", {}, "Nothing published yet."),
+    // On a narrow screen the table scrolls sideways inside the card rather than running off it.
+    dd.files.length ? h("div", { class: "table-scroll" }, table(["File", "Path", "Records", "Content changed", "Fresh until"], rows))
+      : h("p", {}, "Nothing published yet."),
     ...notes.map((n) => h("p", { class: "muted", style: { marginBottom: 0 } }, n)));
 }
 
