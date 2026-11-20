@@ -124,7 +124,10 @@ function sourceCards(d, meta) {
       h("div", {}, h("div", { class: "source-name" }, s.label), h("div", { class: "muted" }, s.name))),
     h("div", { class: "source-records num" }, s.records ? fmt(s.records) : "–"),
     h("div", { class: "muted" }, s.relationships ? `records · ${fmt(s.relationships)} relationships` : "records"),
-    h("div", { class: "share", title: `${Math.round(((s.records || 0) / total) * 100)}% of source records` },
+    // The source's share of every source's records added up: its size next to the others, not how much of
+    // the source is loaded (every source is loaded in full). An entity in two sources counts in both.
+    h("div", { class: "share", title: `${Math.round(((s.records || 0) / total) * 100)}% of all records across the sources `
+      + `(${fmt(s.records || 0)} of ${fmt(total)}; an entity listed by two sources counts in both)` },
       h("div", { class: "share-bar", style: { width: `${((s.records || 0) / total) * 100}%` } })),
     h("dl", { class: "mini" },
       h("div", {}, h("dt", {}, "Refresh"), h("dd", {}, s.refresh)),
