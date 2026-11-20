@@ -79,6 +79,36 @@ def test_source_filter(snap):
     assert ids(snap.search("example", source="gleif")) == [ID] and snap.search("many", source="gleif")["total"] == 0
 
 
+def test_status_filter_and_facet_are_the_category_and_the_word_is_shown(snap):
+    found = snap.search("example", status="active")
+    assert ids(found) == [ID] and found["results"][0]["legalStatus"] == "Active"
+    assert found["results"][0]["statusCategory"] == "active"
+    assert found["facets"]["status"] == [{"value": "active", "records": 1}]
+    assert snap.search("example", status="Active")["total"] == 0  # the register's word is never the filter
+    assert snap.search("many", status="unknown")["total"] == 150  # no word at all
+    r = snap.entity(ID)
+    assert r["legalStatus"] == "Active" and r["statusCategory"] == "active"
+    s = snap.stats()
+    assert {x["value"]: x["records"] for x in s["byStatusCategory"]} == {"unknown": 151, "active": 1}
+    g = snap.graph(ID)
+    assert {n["id"]: n["statusCategory"] for n in g["nodes"]}[ID] == "active"
+
+
+def test_a_snapshot_from_before_the_category_still_serves(tmp_path):
+    import pyarrow.parquet as pq
+
+    out = tmp_path / "snap"
+    m = build(records(), out, "2026-11-07")
+    files = []
+    for f in m["parts"]:
+        path = out / "parts" / f["name"]
+        table = pq.read_table(path)
+        pq.write_table(table.drop(["statusCategory"]), path)
+        files.append(str(path))
+    old = Snapshot(files, {"date": m["date"], "snapshotRoot": m["snapshotRoot"]})
+    assert old.search("example", status="unknown")["total"] == 1 and old.entity(ID)["legalStatus"] == "Active"
+
+
 def test_paging(snap):
     first, second = snap.search("many", limit=100), snap.search("many", limit=100, page=2)
     assert first["total"] == 150 and len(first["results"]) == 100 and len(second["results"]) == 50

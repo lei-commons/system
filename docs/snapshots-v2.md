@@ -128,11 +128,48 @@ holds only its changes, manifest and signature, about 1–2 MB on a GLEIF-only d
 retention keeps the 14 newest days, the newest of each month, and every full release that a
 kept release needs. The signature bundle is also copied back to the bucket.
 
+## Status category (owner decision 2026-11-20)
+
+Every register words a status its own way: GLEIF writes `ACTIVE`, Companies House `Active`,
+Colorado `Good Standing`, Ireland `Normal`, Brazil (as lc_ingest translates its code) `Closed`.
+Each record keeps its register's word in `legalStatus`, untouched (Article 4.3; until this change
+GLEIF's `ACTIVE`/`INACTIVE` were respelled `Active`/`Inactive`, and no longer are). Next to it,
+`statusCategory` is one of `config/labels.yaml` `legal_status`: active, inactive, dissolved,
+in-liquidation, struck-off, merged or unknown.
+
+- **The map:** `config/status.yaml`, per source: `{category: [register words]}`. Words match
+  case-insensitively and trimmed; a word ending in `*` matches by prefix (Japan's `Closed: …`).
+  It is checked when build-snapshot starts (`lc_core.status`): a category outside `legal_status`,
+  or a word mapped twice, stops the job before it writes anything.
+- **Which word:** the category comes from the map of the source whose `legalStatus` the merged
+  record keeps (a register's, when it gives one; otherwise GLEIF's).
+- **Unmapped words** get `unknown` and are counted in the manifest, `stats.unmappedStatus`
+  (`"<source>: <word>"`, top 50), so they can be added to the map. A record with no word is
+  `unknown` and isn't counted there.
+- **Stats:** `stats.byStatusCategory` (every category) beside `stats.byStatus` (the registers'
+  words, top 15).
+- **Database and site:** column `status_category`; the search filter `status=<category>`, its index
+  term (`s=<category>`), the status facet and the dashboards' "Entities by status" use the
+  category. Search results, the entity page and the graph show the category with the register's
+  word ("Active (register: Good Standing)"); the entity page lists the word on its own too.
+- **Changing the map** changes the category of every record it touches, so those records are that
+  day's changes. A large change (more than `full_when_changes_exceed`) makes the day a full snapshot.
+
+**Columns.** The manifest lists the parts' columns (`columns`: entities, relationships). When the
+previous day's columns differ from today's (as on the day `statusCategory` arrived, whose previous
+manifest had no `columns`), build-snapshot starts a new chain: a full snapshot with no base
+(event `no-previous-state`, reason "the record columns changed"), rather than publish every
+record as a change. Every leaf changes with a new column, so a changes file would have held the
+whole directory again. The days before stay rebuildable from their own files: a leaf is the hash
+of the row as published that day.
+
 ## Compatibility
 
 Readers accept both formats: days built before v2 (schemaVersion 1, a full copy per day) stay
 readable, downloadable and loadable until they age out. The first v2 build is a full snapshot
-with no base. The load version is 5, so the database reloads once in full.
+with no base. The load version is 6 (5 was v2; 6 adds `status_category` and makes the status
+filter terms the category), so the database reloads once in full. The site's in-memory path
+serves a snapshot from before `statusCategory` with every record `unknown`.
 
 ## Measured (local, 2026-11-15, about 0.93M records, 0.1% changing)
 

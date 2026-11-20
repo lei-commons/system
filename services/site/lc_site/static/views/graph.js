@@ -1,12 +1,12 @@
 import cytoscape from "../vendor/cytoscape-3.34.4.esm.min.js";
-import { api, cssVar, errorBox, flag, fmt, h, REL, REL_TYPES, relColor, statusPill } from "../lib.js";
+import { api, categoryPill, cssVar, errorBox, flag, fmt, h, REL, REL_TYPES, relColor } from "../lib.js";
 import { searchBox } from "./search.js";
 
 const short = (s, n = 34) => (!s ? "" : s.length <= n ? s : `${s.slice(0, n - 1)}…`);
 
 function elements(data) {
   const nodes = data.nodes.map((n) => ({ group: "nodes", data: { id: n.id, label: short(n.name || `LEI ${n.lei}`),
-    name: n.name, lei: n.lei, country: n.country, status: n.status, inDirectory: n.inDirectory } }));
+    name: n.name, lei: n.lei, country: n.country, status: n.status, statusCategory: n.statusCategory, inDirectory: n.inDirectory } }));
   const edges = data.edges.map((e) => ({ group: "edges", data: { id: e.id, source: e.source, target: e.target, type: e.type,
     status: e.status, percentage: e.percentage, label: (REL[e.type] ? REL[e.type].label : e.type) + (e.percentage ? ` · ${e.percentage}%` : "") } }));
   return [...nodes, ...edges];
@@ -141,7 +141,7 @@ function panel(cy, node, focus, actions) {
   return [
     h("div", {}, h("span", { class: "flag" }, flag(d.country)), " ", h("span", { class: "muted" }, d.country || "")),
     h("h2", {}, d.name || `LEI ${d.lei}`),
-    d.inDirectory ? statusPill(d.status) : h("span", { class: "pill idle" }, "Not in the directory"),
+    d.inDirectory ? categoryPill(d.statusCategory, d.status) : h("span", { class: "pill idle" }, "Not in the directory"),
     h("p", { class: "mono muted" }, d.lei ? `LEI ${d.lei}` : ""),
     h("div", { class: "actions" },
       d.inDirectory ? h("a", { class: "btn primary", href: `#/entity/${encodeURIComponent(d.id)}` }, "Open record") : null,

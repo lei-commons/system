@@ -1,4 +1,4 @@
-import { api, errorBox, flag, fmt, h, REL, relColor, sourceChips, statusPill } from "../lib.js";
+import { api, categoryPill, errorBox, flag, fmt, h, REL, relColor, sourceChips } from "../lib.js";
 import { layoutOptions, makeGraph } from "./graph.js";
 
 function address(a) {
@@ -56,7 +56,7 @@ export async function render(root, id) {
         h("div", { class: "muted" }, h("span", { class: "flag" }, flag(record.country)), " ", record.country || "", " · ",
           h("span", { class: "mono" }, record.directoryId)),
         h("h1", {}, record.legalName),
-        h("div", { class: "toolbar" }, statusPill(record.legalStatus), ...sourceChips(record.sources))),
+        h("div", { class: "toolbar" }, categoryPill(record.statusCategory, record.legalStatus), ...sourceChips(record.sources))),
       h("div", { class: "toolbar" },
         h("a", { class: "btn primary", href: `#/graph/${encodeURIComponent(record.directoryId)}` }, "Explore graph"),
         h("a", { class: "btn", href: `/api/v1/entities/${encodeURIComponent(record.directoryId)}`, target: "_blank" }, "JSON"))),
@@ -66,6 +66,7 @@ export async function render(root, id) {
           fact("LEI", record.lei, true), fact("Directory ID", record.directoryId, true),
           fact("Registration number", record.registrationNumber, true), fact("Registration authority", record.registrationAuthority),
           fact("Legal form", record.legalForm), fact("Jurisdiction", record.legalJurisdiction),
+          fact("Status at the register", record.legalStatus),
           fact("Incorporated", record.incorporationDate), fact("Dissolved", record.dissolutionDate),
           fact("Source", record.registryUrl ? h("a", { href: record.registryUrl, target: "_blank", rel: "noopener noreferrer" }, "View at the source") : null))),
       h("section", { class: "card card-pad" }, h("h3", {}, "Ownership and funds"), mini,

@@ -1,7 +1,7 @@
 // Dashboards. Chart rules (dataviz skill): one axis, thin bars with a rounded
 // data end anchored to the baseline, a 2px gap between bars, hover tooltips,
 // a table view for every chart, and colour only where it carries identity.
-import { api, cssVar, errorBox, flag, fmt, h, REL, REL_TYPES, sourcesLabel, svg, tooltip } from "../lib.js";
+import { api, categoryName, cssVar, errorBox, flag, fmt, h, REL, REL_TYPES, sourcesLabel, svg, tooltip } from "../lib.js";
 
 
 function barPath(x, y, w, hgt, r = 4) {
@@ -83,7 +83,10 @@ export async function render(root) {
           { label: (r) => (REL[r.value] ? REL[r.value].label : r.value), colour: (r) => cssVar(`--s${(REL[r.value] || { slot: 8 }).slot}`),
             total: s.relationships, labelWidth: 130 },
           "Colours match the graph explorer."),
-        chartCard("Entities by status", s.byStatus.slice(0, 12), { label: (r) => r.value || "Unknown", colour: single, total: s.records, labelWidth: 210 }),
+        (s.byStatusCategory || []).length
+          ? chartCard("Entities by status", s.byStatusCategory, { label: (r) => categoryName(r.value), colour: single,
+            total: s.records, labelWidth: 130 }, "Harmonised across registers. Each record also keeps its register's own word.")
+          : chartCard("Entities by status", s.byStatus.slice(0, 12), { label: (r) => r.value || "Unknown", colour: single, total: s.records, labelWidth: 210 }),
         chartCard("Entities by source", s.bySources,
           { label: (r) => sourcesLabel(r.value), colour: single, total: s.records, labelWidth: 150 },
           "A company in both sources is one merged record."))));

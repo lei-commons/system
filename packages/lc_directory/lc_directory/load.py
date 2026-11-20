@@ -21,12 +21,14 @@ from psycopg import sql
 LIVE = "live"
 # Bump when the schema or indexes change, so the next run reloads the same snapshot.
 # 5: snapshot format v2 (country from the parts, stats from the manifest, incremental loads).
-LOAD_VERSION = 5
+# 6: status_category (config/status.yaml); the status filter terms are the category.
+LOAD_VERSION = 6
 ENTITY_COLUMNS = [  # (parquet column, table column, kind)
     ("directoryId", "directory_id", "text"), ("lei", "lei", "text"), ("legalName", "legal_name", "text"),
     ("legalForm", "legal_form", "text"), ("legalJurisdiction", "legal_jurisdiction", "text"),
     ("registrationAuthority", "registration_authority", "text"), ("registrationNumber", "registration_number", "text"),
-    ("legalStatus", "legal_status", "text"), ("incorporationDate", "incorporation_date", "text"),
+    ("legalStatus", "legal_status", "text"), ("statusCategory", "status_category", "text"),
+    ("incorporationDate", "incorporation_date", "text"),
     ("dissolutionDate", "dissolution_date", "text"), ("recordMode", "record_mode", "text"),
     ("registryUrl", "registry_url", "text"), ("otherNames", "other_names", "json"), ("legalAddress", "legal_address", "json"),
     ("headquartersAddress", "headquarters_address", "json"), ("industryCodes", "industry_codes", "json"),
@@ -41,7 +43,7 @@ COUNTRY = re.compile(r"([A-Z]{2})\.parquet$")
 TABLES = """
 CREATE TABLE {s}.entities (
   directory_id text PRIMARY KEY, lei text, legal_name text NOT NULL, legal_form text, legal_jurisdiction text,
-  registration_authority text, registration_number text, legal_status text, incorporation_date text,
+  registration_authority text, registration_number text, legal_status text, status_category text, incorporation_date text,
   dissolution_date text, record_mode text, registry_url text, other_names jsonb, legal_address jsonb,
   headquarters_address jsonb, industry_codes jsonb, labels jsonb, sources text[] NOT NULL, country text NOT NULL,
   names_text text NOT NULL, filter_terms text[] NOT NULL,
@@ -79,10 +81,8 @@ def filter_term(kind: str, value: str) -> str:
     """A filter as a search term. The '=' keeps it apart from words: the parser
     splits on it, so no word in a name or a query can ever produce one.
 
-    Status and source keep their case. Registers spell the same status
-    differently ("Active" at Companies House, "ACTIVE" at GLEIF), and the site
-    filters on the exact value. A case-folded term would match both, and on
-    most records a term narrows nothing (load test 6, 2026-11-08)."""
+    Status (the record's status category, e.g. "in-liquidation") and source keep
+    their case: the site filters on the exact value."""
     value = (value or "none").strip()
     if kind == "country":
         value = value.lower()
@@ -126,7 +126,7 @@ def _entity_rows(path, with_op=False):
                 continue
             sources = row[-1]  # sources is the last entity column
             country = (data["country"][i] if has_country else named) or "XX"
-            status = data["legalStatus"][i] if "legalStatus" in data else None
+            status = data["statusCategory"][i] if "statusCategory" in data else None  # the category, not the word
             row += [country, _names_text(data["legalName"][i], data["otherNames"][i] if "otherNames" in data else None),
                     _filter_terms(country, status, sources)]
             yield ([data["op"][i]] + row) if with_op else row
@@ -296,7 +296,7 @@ def _stats(cur, schema):
     cur.execute(sql.SQL("SELECT relationship_type, count(*) FROM {}.relationships GROUP BY 1 ORDER BY 2 DESC").format(sql.Identifier(schema)))
     rel = [{"value": v, "records": n} for v, n in cur.fetchall()]
     return {"byCountry": top("country", 30), "bySources": top("array_to_string(sources, ',')", 10),
-            "byStatus": top("legal_status", 15), "relationshipTypes": rel}
+            "byStatus": top("legal_status", 15), "byStatusCategory": top("status_category", 15), "relationshipTypes": rel}
 
 
 def vacuum(conn, schema: str):

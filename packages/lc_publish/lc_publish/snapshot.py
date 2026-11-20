@@ -27,6 +27,8 @@ from lc_core.snapshot_format import (CHANGES_KIND, ENTITY_KIND, RELATIONSHIP_CHA
 
 from lc_core.attribution import record_url
 
+from lc_core.status import UNKNOWN as UNKNOWN_STATUS
+
 from .merkle import StreamingRoot, leaf, root
 
 def sources(path=None) -> list:
@@ -51,7 +53,8 @@ def sources(path=None) -> list:
 
 
 SCALARS = ["directoryId", "lei", "legalName", "legalForm", "legalJurisdiction", "registrationAuthority",
-           "registrationNumber", "legalStatus", "incorporationDate", "dissolutionDate", "recordMode", "registryUrl"]
+           "registrationNumber", "legalStatus", "statusCategory", "incorporationDate", "dissolutionDate", "recordMode",
+           "registryUrl"]
 NESTED = ["otherNames", "legalAddress", "headquartersAddress", "industryCodes", "labels"]
 COLUMNS = SCALARS + NESTED + ["sources", "country"]
 RELATIONSHIP_COLUMNS = ["relationshipId", "startNode", "endNode", "startId", "endId", "relationshipType",
@@ -62,18 +65,27 @@ CHANGE_SCHEMA = pa.schema([("op", pa.string())] + [(c, pa.string()) for c in COL
 RELATIONSHIP_CHANGE_SCHEMA = pa.schema([("op", pa.string())] + [(c, pa.string()) for c in RELATIONSHIP_COLUMNS])
 STATE_SCHEMA = pa.schema([("shard", pa.int16()), ("id", pa.string()), ("h", pa.binary(16))])
 STATE_FILES = {ENTITY_KIND: "entities.parquet", RELATIONSHIP_KIND: "relationships.parquet"}
-STATS_TOP = {"byCountry": 30, "bySources": 10, "byStatus": 15}
+STATS_TOP = {"byCountry": 30, "bySources": 10, "byStatus": 15, "unmappedStatus": 50}
 
 
-def merge(records_by_source: dict, order: list = None) -> dict:
-    """{source id: {directory id: record}} to {directory id: record}, in merge order (``order``: source ids)."""
-    merged = {}
+def merge(records_by_source: dict, order: list = None, statuses=None, unmapped: Counter = None) -> dict:
+    """{source id: {directory id: record}} to {directory id: record}, in merge order (``order``: source ids).
+
+    Each merged record gets ``statusCategory``: its legalStatus mapped by the map of the source that
+    supplied that legalStatus (``statuses``, an lc_core.status.StatusMap; config/status.yaml by default).
+    Words the map doesn't list are counted in ``unmapped`` as "<source>: <word>"."""
+    from lc_core import status as status_config
+
+    merged, status_from = {}, {}
     order = order or [s["id"] for s in sources()]
+    statuses = statuses or status_config.default()
     unknown = set(records_by_source) - set(order)
     if unknown:  # a source the registry doesn't list must never be merged in an arbitrary order
         raise ValueError(f"sources not in the registry: {sorted(unknown)}")
     for source in ({"id": sid} for sid in order):
         for directory_id, record in records_by_source.get(source["id"], {}).items():
+            if "legalStatus" in record and directory_id not in status_from:
+                status_from[directory_id] = source["id"]  # the source whose legalStatus the record keeps
             current = merged.get(directory_id)
             if current is None:
                 merged[directory_id] = {**record, "sources": [source["id"]]}
@@ -81,23 +93,17 @@ def merge(records_by_source: dict, order: list = None) -> dict:
             for field, value in record.items():
                 current.setdefault(field, value)  # the earlier, register source keeps its value
             current["sources"].append(source["id"])
+    for directory_id, record in merged.items():
+        sid = status_from.get(directory_id)
+        record["statusCategory"], mapped = statuses.category(sid, record.get("legalStatus"))
+        if not mapped and unmapped is not None:
+            unmapped[f"{sid}: {record['legalStatus']}"] += 1
     return merged
 
 
 def country_of(record: dict) -> str:
     country = (record.get("legalJurisdiction") or "")[:2] or (record.get("legalAddress") or {}).get("country", "")
     return country.upper() if len(country) == 2 and country.isalpha() else "XX"
-
-
-# Registers spell the same status differently: GLEIF writes ACTIVE and INACTIVE,
-# Companies House and the others write Active. One spelling everywhere downstream,
-# so the database, search filters, facets and dashboards count them together
-# (owner request 2026-11-11).
-STATUS_SPELLINGS = {"ACTIVE": "Active", "INACTIVE": "Inactive"}
-
-
-def normalise_status(value):
-    return STATUS_SPELLINGS.get(value, value) if isinstance(value, str) else value
 
 
 def entity_row(record: dict, by_id: dict = None) -> dict:
@@ -111,7 +117,9 @@ def entity_row(record: dict, by_id: dict = None) -> dict:
         row[c] = None if value is None else str(value)
     if not row["registryUrl"] and by_id and record.get("sources"):
         row["registryUrl"] = record_url(record, by_id.get(record["sources"][0]) or {})
-    row["legalStatus"] = normalise_status(row["legalStatus"])
+    # legalStatus is the register's own word, untouched (Article 4.3); statusCategory is set by merge
+    # (config/status.yaml), and a record that never went through it has none to show: unknown.
+    row["statusCategory"] = row["statusCategory"] or UNKNOWN_STATUS
     for c in NESTED:
         value = record.get(c)
         row[c] = json.dumps(value, sort_keys=True, ensure_ascii=False) if value not in (None, [], {}) else None
@@ -338,7 +346,8 @@ def build_sharded(readers: dict, out: Path, date: str, *, settings, previous: di
     order = [s["id"] for s in registered]
     by_id = {s["id"]: s for s in registered}
     per_source = {s["id"]: 0 for s in registered}
-    stats = {"byCountry": Counter(), "bySources": Counter(), "byStatus": Counter(), "relationshipTypes": Counter()}
+    stats = {"byCountry": Counter(), "bySources": Counter(), "byStatus": Counter(), "byStatusCategory": Counter(),
+             "unmappedStatus": Counter(), "relationshipTypes": Counter()}
     lei_to_id = {}
     total = shared = resolved = 0
 
@@ -385,7 +394,7 @@ def build_sharded(readers: dict, out: Path, date: str, *, settings, previous: di
             mark = clock()
             for sid, records in shard.items():
                 per_source[sid] += len(records)
-            merged = merge(shard, order)
+            merged = merge(shard, order, unmapped=stats["unmappedStatus"])
             rows = [entity_row(merged[d], by_id) for d in sorted(merged)]
             del shard, merged
             spent["rows_s"] += clock() - mark
@@ -408,6 +417,7 @@ def build_sharded(readers: dict, out: Path, date: str, *, settings, previous: di
                 stats["byCountry"][row["country"]] += 1
                 stats["bySources"][row["sources"]] += 1
                 stats["byStatus"][row["legalStatus"]] += 1
+                stats["byStatusCategory"][row["statusCategory"]] += 1
             for name in sorted(part_rows):
                 parts[ENTITY_KIND].add(name, part_rows[name], part_leaves[name], part_info[name])
             total += len(rows)
@@ -484,6 +494,7 @@ def build_sharded(readers: dict, out: Path, date: str, *, settings, previous: di
         "layout": {"targetRecords": settings.part_target_records, "shards": shards,
                    "groups": {p["group"]: p["of"] for p in part_entries}},
         "stats": {k: _top(v, STATS_TOP.get(k)) for k, v in stats.items()},
+        "columns": {ENTITY_KIND: COLUMNS, RELATIONSHIP_KIND: RELATIONSHIP_COLUMNS},
         "settings": {"fullEveryDays": settings.full_every_days, "fullWhenChangesExceed": settings.full_when_changes_exceed},
         "sources": [{k: s[k] for k in ("id", "name", "publisher", "licence", "licenceUrl", "datasetUrl", "recordUrl",
                                         "attribution", "citation")} for s in registered if per_source[s["id"]]],

@@ -1,0 +1,114 @@
+# Harmonised status category (owner decision 2026-11-20; docs/snapshots-v2.md, "Status category").
+#
+# Each record keeps its register's own word in legalStatus, untouched (Article 4.3). The snapshot adds
+# statusCategory, one of config/labels.yaml legal_status, mapped here per source. The site shows both;
+# its status filter, facets and dashboards use the category.
+#
+# sources: <source id in config/sources.yaml>: {<category>: [<register word>, ...]}
+#   Words match case-insensitively, with spaces trimmed and runs of spaces read as one.
+#   A word ending in * matches every word starting with it (the longest such prefix wins; an exact word
+#   always wins over a prefix).
+#   Checked when read: every category must be in labels.yaml legal_status, every source must be in
+#   sources.yaml, and no word may be mapped to two categories.
+# A record with no status word gets unknown. A word not listed here gets unknown too, and is counted in
+# the day's manifest (stats.unmappedStatus, "<source>: <word>"), so it can be added here.
+# Judgement calls (see the PR that added this file): a company still on the register while in
+# administration, receivership, a voluntary arrangement or restructuring, or with a strike-off only
+# proposed, is active (GLEIF's convention: ACTIVE until the entity ceases to exist).
+
+version: 1
+
+sources:
+  gleif:
+    active: [ACTIVE]
+    inactive: [INACTIVE]
+    unknown: ["NULL"]
+
+  gb-coh:
+    active:
+      - Active
+      - Active - Proposal to Strike off
+      - In Administration
+      - Administration Order
+      - In Administration/Administrative Receiver
+      - In Administration/Receiver Manager
+      - Administrative Receiver
+      - Receivership
+      - Receiver Action
+      - Receiver Manager / Administrative Receiver
+      - Live but Receiver Manager on at least one charge
+      - Voluntary Arrangement
+      - Voluntary Arrangement / Administrative Receiver
+      - Voluntary Arrangement / Receiver Manager
+    in-liquidation: [Liquidation]
+    dissolved: [Dissolved]
+    inactive: [Converted/Closed, Closed]
+    struck-off: [Removed]
+
+  us-ny-dos:
+    active: [Active]           # the dataset lists active corporations only
+
+  us-or-sos:
+    active: [Active]           # the dataset lists active businesses only
+
+  us-co-sos:
+    active: [Good Standing, Exists, "Delinquent*", "Noncompliant*"]
+    dissolved: [Voluntarily Dissolved, Administratively Dissolved, Judicially Dissolved, Dissolved]
+    struck-off: [Revoked]
+    merged: [Merged]
+    inactive: [Withdrawn, Expired]
+    unknown: [Converted]
+
+  us-ct-sots:
+    active: [Active]
+    dissolved: [Dissolved]
+    struck-off: [Forfeited, Revoked]
+    merged: [Merged, Consolidated]
+    inactive: [Withdrawn, Cancelled, Inactive, Surrendered]
+    unknown: [Converted]
+
+  br-rfb-cnpj:                 # lc_ingest.receita translates the code: 01 Null, 02 Active, 03 Suspended, 04 Unfit, 08 Closed
+    active: [Active, ATIVA]
+    inactive: [Suspended, SUSPENSA, Unfit, INAPTA, "Null", NULA]
+    dissolved: [Closed, BAIXADA]
+
+  sg-acra:
+    active: [Live, Live Company, Registered]
+    in-liquidation: ["In Liquidation*"]
+    dissolved: ["Dissolved*"]
+    struck-off: ["Struck Off*", "Gazetted to be Struck Off*"]
+    merged: [Amalgamated]
+    inactive: [Cancelled, Ceased Registration, Terminated, Expired, Withdrawn]
+    unknown: ["Converted*"]
+
+  fi-prh:                      # no current situation means Active (lc_ingest.bulk.fi_record)
+    active: [Active, Restructuring, "Restructuring*", Corporate restructuring]
+    in-liquidation: [In liquidation, Liquidation, "Liquidation*", Bankruptcy, Bankrupt, "Bankruptcy*"]
+
+  ie-cro:
+    active: [Normal, Strike Off Listed, Receivership, Examinership, Examination]
+    in-liquidation: [Liquidation]
+    dissolved: [Dissolved]
+    struck-off: [Struck Off]
+    merged: [Amalgamated]
+    inactive: [Deregistered, Closed]
+    unknown: [Converted]
+
+  au-asic:                     # lc_ingest.bulk.AU_STATUS spells out ASIC's codes
+    active: [Registered, Strike-off action in progress]
+    dissolved: [Deregistered, Dissolved]
+    inactive: [Not active, Cancelled]
+    unknown: [External administration]
+
+  jp-nta:                      # lc_ingest.nta: Active, or Closed with its cause
+    active: [Active]
+    dissolved: ["Closed: liquidation completed", "Closed: other liquidation completed"]
+    merged: ["Closed: dissolved by merger"]
+    struck-off: [Closed by the registrar]
+    inactive: [Closed, "Closed:*"]
+
+  ca-ised:
+    active: [Active, "Dissolution Pending*"]
+    dissolved: ["Dissolved*"]
+    merged: [Amalgamated, Inactive - Amalgamated]
+    inactive: [Inactive, Discontinued, Inactive - Discontinued, "Inactive -*"]

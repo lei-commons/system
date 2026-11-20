@@ -113,6 +113,41 @@ def test_a_full_load_then_incremental_days_including_across_full_snapshots(tmp_p
     assert {s["value"]: s["records"] for s in stats["byCountry"]} == by_country
 
 
+def test_the_status_category_day_is_a_new_chain_and_a_full_reload(tmp_path):
+    """The day statusCategory arrives: the snapshot starts a new chain (full, no base) and load-db, finding a
+    database loaded by the previous load version, reloads in full; every row then has its category."""
+    env, world = Env(tmp_path), World(n=300)
+    first = env.publish(world)
+    env.load()
+    key = f"{first['date']}/manifest.json"
+    old = json.loads(env.snapshots.objects[key]["data"])
+    old.pop("columns")  # as every manifest before this change
+    env.snapshots.objects[key]["data"] = json.dumps(old).encode()
+    with psycopg.connect(DSN) as conn:
+        conn.execute("UPDATE live.meta SET load_version = 5")
+        conn.commit()
+    world.mutate()
+    m = env.publish(world)
+    assert m["kind"] == "full" and m["base"] is None and not m["changes"]["files"]
+    outcome, events = env.load()
+    loaded = [e for e in events if e["event"] == "loaded"][0]
+    assert outcome == "loaded" and loaded["mode"] == "full" and "another load version" in loaded["why"], events
+    meta = check(world, m)
+    assert meta[5] == 6
+    with psycopg.connect(DSN) as conn:
+        rows = conn.execute("SELECT legal_status, status_category, filter_terms FROM live.entities").fetchall()
+    assert rows and all(category and f"s={category}" in terms for _, category, terms in rows)
+    assert {(word, category) for word, category, _ in rows} <= {("Active", "active"), ("ATIVA", "active"),
+                                                                ("ACTIVE", "active"), (None, "unknown")}
+    counted = {}
+    for _, category, _ in rows:
+        counted[category] = counted.get(category, 0) + 1
+    assert {s["value"]: s["records"] for s in meta[4]["byStatusCategory"]} == counted and counted["active"]
+    world.mutate()
+    env.publish(world)
+    assert [e for e in env.load()[1] if e["event"] == "loaded"][0]["mode"] == "incremental"
+
+
 def test_several_days_behind_are_applied_in_order(tmp_path):
     env, world = Env(tmp_path), World(n=300)
     env.publish(world)
@@ -254,7 +289,7 @@ def test_old_format_snapshots_still_load(tmp_path):
     outcome, events = env.load()
     entities, _, meta = db_rows()
     assert outcome == "loaded" and entities == [("LECOZZ000000000000AA", "X LTD", None, "GB", "gb-coh", None)]
-    assert meta[6] == "full" and meta[5] == 5
+    assert meta[6] == "full" and meta[5] == 6
 
 
 def test_the_database_credits_every_record_through_its_sources(tmp_path):

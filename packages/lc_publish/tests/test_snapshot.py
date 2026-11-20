@@ -38,6 +38,26 @@ def test_register_values_win_and_gleif_adds_the_lei():
     assert m["lei"] == "5493001KJTIIGC8Y1R12" and m["sources"] == ["gb-coh", "gleif"]
 
 
+def test_status_category_follows_the_source_of_the_status_word():
+    from collections import Counter
+
+    s = sources()
+    m = merge(s)
+    assert m[GB_ID]["legalStatus"] == "Active" and m[GB_ID]["statusCategory"] == "active"  # Companies House's word
+    assert m[GLEIF_US["directoryId"]]["statusCategory"] == "unknown"  # no word at all
+    s["gb-coh"][GB_ID] = {k: v for k, v in CH.items() if k != "legalStatus"}  # the register gives none: GLEIF's
+    s["gleif"][GB_ID] = {**GLEIF_SAME, "legalStatus": "INACTIVE"}
+    assert {k: merge(s)[GB_ID][k] for k in ("legalStatus", "statusCategory")} == {"legalStatus": "INACTIVE",
+                                                                                 "statusCategory": "inactive"}
+    s["gb-coh"][GB_ID] = {**CH, "legalStatus": "  liquidation "}  # matched trimmed and in any case, kept as given
+    unmapped = Counter()
+    assert merge(s, unmapped=unmapped)[GB_ID]["statusCategory"] == "in-liquidation" and not unmapped
+    s["gb-coh"][GB_ID] = {**CH, "legalStatus": "Under Review"}
+    merged = merge(s, unmapped=unmapped)[GB_ID]
+    assert merged["legalStatus"] == "Under Review" and merged["statusCategory"] == "unknown"
+    assert unmapped == Counter({"gb-coh: Under Review": 1})
+
+
 def test_merge_leaves_the_inputs_alone():
     s = sources()
     merge(s)
@@ -67,7 +87,7 @@ def test_parquet_round_trips(tmp_path):
     (row,) = pq.read_table(tmp_path / "parts" / "GB.gb-coh_gleif.p0of1.parquet").to_pylist()
     assert row["lei"] == "5493001KJTIIGC8Y1R12" and json.loads(row["industryCodes"]) == ["62012"]
     assert row["sources"] == "gb-coh,gleif" and json.loads(row["legalAddress"]) == {"city": "LONDON", "country": "GB"}
-    assert row["country"] == "GB" and row["legalStatus"] == "Active"
+    assert row["country"] == "GB" and row["legalStatus"] == "Active" and row["statusCategory"] == "active"
 
 
 def test_same_input_same_roots(tmp_path):

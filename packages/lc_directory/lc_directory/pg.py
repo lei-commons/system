@@ -41,7 +41,7 @@ ID_LIKE = re.compile(r"^[0-9A-Z]{20}$")
 SCHEMA = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 CAMEL = {"directory_id": "directoryId", "legal_name": "legalName", "legal_form": "legalForm",
          "legal_jurisdiction": "legalJurisdiction", "registration_authority": "registrationAuthority",
-         "registration_number": "registrationNumber", "legal_status": "legalStatus",
+         "registration_number": "registrationNumber", "legal_status": "legalStatus", "status_category": "statusCategory",
          "incorporation_date": "incorporationDate", "dissolution_date": "dissolutionDate", "record_mode": "recordMode",
          "registry_url": "registryUrl", "other_names": "otherNames", "legal_address": "legalAddress",
          "headquarters_address": "headquartersAddress", "industry_codes": "industryCodes"}
@@ -52,7 +52,8 @@ DOWNWARD = {"IS_DIRECTLY_CONSOLIDATED_BY": "direct subsidiary", "IS_ULTIMATELY_C
             "IS_FUND-MANAGED_BY": "managed fund", "IS_SUBFUND_OF": "sub-fund", "IS_FEEDER_TO": "feeder fund",
             "IS_INTERNATIONAL_BRANCH_OF": "branch"}
 SUMMARY = ("directory_id AS \"directoryId\", legal_name AS \"legalName\", country, registration_number AS "
-           "\"registrationNumber\", lei, legal_status AS \"legalStatus\", array_to_string(sources, ',') AS sources")
+           "\"registrationNumber\", lei, legal_status AS \"legalStatus\", status_category AS \"statusCategory\", "
+           "array_to_string(sources, ',') AS sources")
 NAME_KEY = 'lower(legal_name) COLLATE "C"'  # matches the name index exactly; see lc_directory.load.INDEXES
 
 
@@ -63,7 +64,8 @@ def broad_values(stats: dict, records: int) -> set:
     """(kind, value) pairs covering at least BROAD of records, from the stats each load stores."""
     if not records:
         return set()
-    broad = {("status", r["value"]) for r in stats.get("byStatus", []) if r["value"] and r["records"] >= BROAD * records}
+    broad = {("status", r["value"]) for r in stats.get("byStatusCategory", [])
+             if r["value"] and r["records"] >= BROAD * records}
     sources = {}
     for r in stats.get("bySources", []):
         for source in (r["value"] or "").split(","):
@@ -78,7 +80,7 @@ def text_match(q: str, country: str = "", status: str = "", source: str = "", br
     is fast (load tests, 2026-11-08):
     - As a term in the index lookup, it intersects with the words' matches
       inside the index. This is fast for a narrow value. For a value on most
-      records ("ACTIVE", "gleif"), it adds a list of millions of entries to
+      records ("active", "gleif"), it adds a list of millions of entries to
       every search.
     - As a check on the rows the words matched, it costs nothing extra for a
       broad value. For a narrow one, it may read millions of rows to find a
@@ -93,7 +95,7 @@ def text_match(q: str, country: str = "", status: str = "", source: str = "", br
     parts, params = ["websearch_to_tsquery('simple', %s)"], [q]
     rows, row_params = "", []
     for kind, value, check in (("country", country.strip().upper()[:2], "country = %s"),
-                               ("status", status.strip()[:60], "legal_status = %s"),
+                               ("status", status.strip()[:60], "status_category = %s"),
                                ("source", source.strip()[:40], "%s = ANY(sources)")):
         if not value:
             continue
@@ -197,7 +199,7 @@ class Directory:
         limit = max(1, min(int(limit), MAX_LIMIT))
         page = max(1, min(int(page), MAX_PAGE))
         filters, filter_params = [], []
-        for column, value in (("country", country.strip().upper()[:2]), ("legal_status", status.strip()[:60])):
+        for column, value in (("country", country.strip().upper()[:2]), ("status_category", status.strip()[:60])):
             if value:
                 filters.append(f"{column} = %s")
                 filter_params.append(value)
@@ -224,7 +226,8 @@ class Directory:
         upper = q.upper()
         rows.sort(key=lambda r: (r["legalName"].upper() != upper, not r["legalName"].upper().startswith(upper),
                                  -float(r.pop("rank") or 0), r["legalName"]))
-        facets = {name: _facet(rows, key) for name, key in (("country", "country"), ("status", "legalStatus"), ("source", "sources"))}
+        facets = {name: _facet(rows, key) for name, key in (("country", "country"), ("status", "statusCategory"),
+                                                             ("source", "sources"))}
         return {"results": rows[(page - 1) * limit: page * limit], "total": min(len(rows), COUNT_CAP), "totalCapped": capped,
                 "cap": COUNT_CAP, "facets": facets}
 
@@ -302,17 +305,18 @@ class Directory:
                         visited.add(other)
                         nxt.append(other)
             frontier = nxt
-        known = self._rows("SELECT directory_id, lei, legal_name, country, legal_status FROM live.entities "
+        known = self._rows("SELECT directory_id, lei, legal_name, country, legal_status, status_category FROM live.entities "
                            "WHERE directory_id = ANY(%s)", [sorted(visited)])
         nodes = {k["directory_id"]: {"id": k["directory_id"], "lei": k["lei"], "name": k["legal_name"], "country": k["country"],
-                                     "status": k["legal_status"], "inDirectory": True} for k in known}
+                                     "status": k["legal_status"], "statusCategory": k["status_category"],
+                                     "inDirectory": True} for k in known}
         out = []
         for row in edges:
             ends = []
             for side, lei in (("start_id", row["start_node"]), ("end_id", row["end_node"])):
                 node_id = row[side] or f"LEI:{lei}"
                 nodes.setdefault(node_id, {"id": node_id, "lei": lei, "name": None, "country": None, "status": None,
-                                           "inDirectory": False})
+                                           "statusCategory": None, "inDirectory": False})
                 ends.append(node_id)
             out.append({"id": row["relationship_id"], "source": ends[0], "target": ends[1], "type": row["relationship_type"],
                         "status": row["relationship_status"], "percentage": row["percentage"]})
@@ -323,7 +327,8 @@ class Directory:
         stats = (meta or {}).get("stats") or {}
         return {"snapshot": self.meta, "records": self.count, "relationships": self.relationship_count,
                 "byCountry": stats.get("byCountry", []), "bySources": stats.get("bySources", []),
-                "byStatus": stats.get("byStatus", []), "relationshipTypes": stats.get("relationshipTypes", [])}
+                "byStatus": stats.get("byStatus", []), "byStatusCategory": stats.get("byStatusCategory", []),
+                "relationshipTypes": stats.get("relationshipTypes", [])}
 
 
 def token_pool(host: str, dbname: str, user: str, min_size: int = 1, max_size: int = 8):
