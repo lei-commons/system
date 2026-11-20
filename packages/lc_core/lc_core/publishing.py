@@ -30,6 +30,7 @@ SNAPSHOT_SETTINGS = {
     "state_kept": (int, 2, 30),
     "prune_grace_days": (int, 0, 30),
     "prune_dry_run": (bool, None, None),
+    "read_ahead_shards": (int, 0, 8),
 }
 STORAGE_SETTINGS = {
     "data_noncurrent_retain_days": (int, 1, 3660),
@@ -54,6 +55,7 @@ class SnapshotSettings:
     state_kept: int
     prune_grace_days: int
     prune_dry_run: bool
+    read_ahead_shards: int = 2
 
 
 @dataclass(frozen=True)

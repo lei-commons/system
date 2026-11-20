@@ -19,12 +19,15 @@ from .snapshot import build_sharded, sources
 
 def shard_reader(bucket, prefix: str):
     """Return read(n): a source's records in shard n, or {} if it has none."""
+    from google.api_core.exceptions import NotFound
+
     def read(n: int) -> dict:
-        blob = bucket.blob(f"{prefix}/records/{n:03d}.jsonl.gz")
-        if not blob.exists():
+        try:  # one round trip: a missing shard is NotFound, not a separate exists() call
+            data = bucket.blob(f"{prefix}/records/{n:03d}.jsonl.gz").download_as_bytes()
+        except NotFound:
             return {}
         records = {}
-        for line in gzip.decompress(blob.download_as_bytes()).decode("utf-8").splitlines():
+        for line in gzip.decompress(data).decode("utf-8").splitlines():
             record = json.loads(line)
             records[record["directoryId"]] = record
         return records

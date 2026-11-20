@@ -147,15 +147,52 @@ def _top(counter: Counter, n=None) -> list:
 
 
 class StateReader:
-    """The previous day's state: (directory id -> 16-byte hash) for each shard, read a shard at a time."""
+    """The previous day's state: (directory id -> 16-byte hash) for each shard, read a shard at a time.
+
+    The state is written in shard order, so shards asked for in order are read in one pass over the
+    file. A shard asked for out of order falls back to a filtered read of the whole file.
+    """
 
     def __init__(self, path: Path):
         self.path = path
         pq.ParquetFile(path)  # unreadable: fail now, before anything is built from it
+        import pyarrow.compute as pc
 
-    def shard(self, n: int) -> dict:
+        column = pq.read_table(path, columns=["shard"]).column("shard")
+        self._in_order = len(column) < 2 or pc.all(pc.greater_equal(column[1:], column[:-1])).as_py()
+        self._batches = None  # the one pass: an iterator over record batches
+        self._pending = None  # rows read past the shard last returned: (shards, ids, hashes)
+        self._last = -1
+
+    def _filtered(self, n: int) -> dict:
         table = pq.read_table(self.path, filters=[("shard", "=", n)], columns=["id", "h"])
         return dict(zip(table.column("id").to_pylist(), table.column("h").to_pylist()))
+
+    def shard(self, n: int) -> dict:
+        if not self._in_order or n <= self._last:
+            return self._filtered(n)
+        if self._batches is None:
+            self._batches = pq.ParquetFile(self.path).iter_batches(columns=["shard", "id", "h"], batch_size=65_536)
+        self._last = n
+        out = {}
+        while True:
+            if self._pending is None:
+                batch = next(self._batches, None)
+                if batch is None:
+                    return out
+                self._pending = (batch.column(0).to_pylist(), batch.column(1).to_pylist(), batch.column(2).to_pylist())
+            shards, ids, hashes = self._pending
+            i = 0
+            while i < len(shards) and shards[i] < n:
+                i += 1
+            j = i
+            while j < len(shards) and shards[j] == n:
+                j += 1
+            out.update(zip(ids[i:j], hashes[i:j]))
+            if j < len(shards):  # the batch goes past this shard: keep the rest for the next one
+                self._pending = (shards[j:], ids[j:], hashes[j:])
+                return out
+            self._pending = None
 
 
 class _ChangeWriter:
@@ -243,8 +280,39 @@ def plan(date: str, previous: dict | None, settings, force_full: str = None, sha
     return {"kind": "changes", "why": f"{since} days since the last full snapshot", "base": base, "layout": layout}
 
 
+def _read_ahead(readers: dict, shards: int, depth: int):
+    """Yield (n, {source id: records}) for each shard in order, reading up to ``depth`` shards ahead.
+
+    Reading a shard is mostly waiting for Cloud Storage, so the next shards download in threads
+    while this one is built. depth 0 reads each shard only when it is needed.
+    """
+    if depth <= 0:
+        for n in range(shards):
+            yield n, {sid: readers[sid](n) for sid in readers}
+        return
+    from collections import deque
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=min(32, (depth + 1) * max(1, len(readers)))) as pool:
+        queued, upcoming = deque(), iter(range(shards))
+
+        def queue_next():
+            n = next(upcoming, None)
+            if n is not None:
+                queued.append((n, {sid: pool.submit(readers[sid], n) for sid in readers}))
+
+        for _ in range(depth + 1):
+            queue_next()
+        while queued:
+            n, pending = queued.popleft()
+            shard = {sid: f.result() for sid, f in pending.items()}
+            queue_next()
+            yield n, shard
+
+
 def build_sharded(readers: dict, out: Path, date: str, *, settings, previous: dict = None, state: dict = None,
-                  relationships=None, decision_log=None, shards: int = SHARDS, force_full: str = None) -> dict:
+                  relationships=None, decision_log=None, shards: int = SHARDS, force_full: str = None,
+                  timings: dict = None) -> dict:
     """Build the day into ``out`` and return its manifest.
 
     ``readers`` maps a source id to ``read(n)``, its records in shard n. ``previous`` is the last
@@ -300,14 +368,31 @@ def build_sharded(readers: dict, out: Path, date: str, *, settings, previous: di
         if ids:
             state_writers[kind].write_table(pa.table({"shard": [n] * len(ids), "id": ids, "h": hashes}, schema=STATE_SCHEMA))
 
+    import time
+
+    clock = time.monotonic
+    spent = Counter()  # seconds per stage, for the job's timings event (never in the manifest)
+    depth = getattr(settings, "read_ahead_shards", 0)
     try:
-        for n in range(shards):
-            shard = {sid: readers[sid](n) for sid in readers}
+        shards_in = _read_ahead(readers, shards, depth)
+        while True:
+            mark = clock()
+            got = next(shards_in, None)
+            spent["read_s"] += clock() - mark
+            if got is None:
+                break
+            n, shard = got
+            mark = clock()
             for sid, records in shard.items():
                 per_source[sid] += len(records)
             merged = merge(shard, order)
             rows = [entity_row(merged[d], by_id) for d in sorted(merged)]
+            del shard, merged
+            spent["rows_s"] += clock() - mark
+            mark = clock()
             leaves = [leaf(r) for r in rows]
+            spent["leaf_s"] += clock() - mark
+            mark = clock()
             part_rows, part_leaves, part_info = defaultdict(list), defaultdict(list), {}
             for row, h in zip(rows, leaves):
                 if row["lei"]:
@@ -326,12 +411,16 @@ def build_sharded(readers: dict, out: Path, date: str, *, settings, previous: di
             for name in sorted(part_rows):
                 parts[ENTITY_KIND].add(name, part_rows[name], part_leaves[name], part_info[name])
             total += len(rows)
+            spent["parts_s"] += clock() - mark
+            mark = clock()
             diff(ENTITY_KIND, n, rows, "directoryId", leaves)
+            spent["diff_s"] += clock() - mark
         rel_total = 0
+        mark = clock()
         if relationships is not None:
             of = layout.get(RELATIONSHIP_GROUP, 1)
-            for n in range(shards):
-                records = relationships(n)
+            for n, got in _read_ahead({"r": relationships}, shards, depth):
+                records = got["r"]
                 rows = [relationship_row(k, records[k], lei_to_id) for k in sorted(records)]
                 leaves = [leaf(r) for r in rows]
                 if rows:
@@ -345,11 +434,13 @@ def build_sharded(readers: dict, out: Path, date: str, *, settings, previous: di
         elif state:  # no relationships today: every one from yesterday is deleted
             for n in range(shards):
                 diff(RELATIONSHIP_KIND, n, [], "relationshipId", [])
+        spent["relationships_s"] += clock() - mark
     finally:
         for p in parts.values():
             p.close()
         for w in state_writers.values():
             w.close()
+    mark = clock()
     change_files = changes[ENTITY_KIND].finish() + changes[RELATIONSHIP_KIND].finish()
     part_entries = parts[ENTITY_KIND].entries() + parts[RELATIONSHIP_KIND].entries()
     change_total = sum(counted.values())
@@ -410,6 +501,9 @@ def build_sharded(readers: dict, out: Path, date: str, *, settings, previous: di
     (out / "state" / "state.json").write_text(json.dumps(
         {"date": date, "snapshotRoot": manifest["snapshotRoot"], "schemaVersion": SCHEMA_VERSION,
          "files": {name: sha256_file(out / "state" / name) for name in STATE_FILES.values()}}, indent=2) + "\n")
+    spent["finish_s"] += clock() - mark
+    if timings is not None:
+        timings.update({k: round(v) for k, v in spent.items()})
     return manifest
 
 
