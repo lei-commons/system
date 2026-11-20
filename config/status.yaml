@@ -52,20 +52,21 @@ sources:
     active: [Active]           # the dataset lists active businesses only
 
   us-co-sos:
-    active: [Good Standing, Exists, "Delinquent*", "Noncompliant*"]
-    dissolved: [Voluntarily Dissolved, Administratively Dissolved, Judicially Dissolved, Dissolved]
+    active: [Good Standing, Exists, "Delinquent*", "Noncompliant*", Registered Agent Resigned]
+    dissolved: [Voluntarily Dissolved, Administratively Dissolved, Judicially Dissolved, Dissolved,
+                Dissolved (Term Expired)]
     struck-off: [Revoked]
-    merged: [Merged]
-    inactive: [Withdrawn, Expired]
+    merged: [Merged, Consolidated]
+    inactive: [Withdrawn, Expired, Effectiveness Prevented]
     unknown: [Converted]
 
   us-ct-sots:
-    active: [Active]
+    active: [Active, Pending Withdrawal]
     dissolved: [Dissolved]
     struck-off: [Forfeited, Revoked]
-    merged: [Merged, Consolidated]
-    inactive: [Withdrawn, Cancelled, Inactive, Surrendered]
-    unknown: [Converted]
+    merged: [Merged, Consolidated, Consolidation]
+    inactive: [Withdrawn, Cancelled, Inactive, Surrendered, Renunciated, Converted Out]
+    unknown: [Converted, Domesticated, Redomesticated]   # into or out of Connecticut: unclear from the word alone
 
   br-rfb-cnpj:                 # lc_ingest.receita translates the code: 01 Null, 02 Active, 03 Suspended, 04 Unfit, 08 Closed
     active: [Active, ATIVA]
@@ -73,12 +74,13 @@ sources:
     dissolved: [Closed, BAIXADA]
 
   sg-acra:
-    active: [Live, Live Company, Registered]
+    active: [Live, Live Company, Registered, "Live (*"]
     in-liquidation: ["In Liquidation*"]
     dissolved: ["Dissolved*"]
     struck-off: ["Struck Off*", "Gazetted to be Struck Off*"]
     merged: [Amalgamated]
-    inactive: [Cancelled, Ceased Registration, Terminated, Expired, Withdrawn]
+    inactive: [Cancelled, "Cancelled (*", Ceased Registration, Terminated, Expired, Withdrawn, Suspended,
+               Registration expired and has not been renewed]
     unknown: ["Converted*"]
 
   fi-prh:                      # no current situation means Active (lc_ingest.bulk.fi_record)
@@ -88,11 +90,11 @@ sources:
   ie-cro:
     active: [Normal, Strike Off Listed, Receivership, Examinership, Examination]
     in-liquidation: [Liquidation]
-    dissolved: [Dissolved]
+    dissolved: [Dissolved, Dissolved-20 years]
     struck-off: [Struck Off]
-    merged: [Amalgamated]
-    inactive: [Deregistered, Closed]
-    unknown: [Converted]
+    merged: [Amalgamated, Dissolved PostMerger, Deleted CB Merger]
+    inactive: [Deregistered, Closed, Ceased, Ceased IRL, De-Registered ICAV]
+    unknown: [Converted, "Conv. to*"]
 
   au-asic:                     # lc_ingest.bulk.AU_STATUS spells out ASIC's codes
     active: [Registered, Strike-off action in progress]
