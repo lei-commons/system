@@ -24,7 +24,7 @@ MAX_LIMIT = 100
 MAX_PAGE = 100
 FACET_LIMIT = 15
 NESTED = ("otherNames", "legalAddress", "headquartersAddress", "industryCodes", "labels")
-SUMMARY = "directoryId, legalName, country, registrationNumber, lei, legalStatus, sources"
+SUMMARY = "directoryId, legalName, country, registrationNumber, lei, legalStatus, statusCategory, sources"
 ID_LIKE = re.compile(r"^[0-9A-Z]{20}$")
 EXTENSIONS = os.environ.get("LC_DUCKDB_EXTENSIONS", "")
 GRAPH_LIMIT = 40
@@ -71,6 +71,8 @@ class Snapshot:
             self._con.execute(
                 "CREATE TABLE e AS SELECT * EXCLUDE (filename), regexp_extract(filename, '([A-Z]{2})\\.parquet$', 1) AS country "
                 "FROM read_parquet(?, filename = true)", [list(entity_files)])
+        if "statusCategory" not in columns:  # a snapshot from before config/status.yaml: no category yet
+            self._con.execute("ALTER TABLE e ADD COLUMN statusCategory VARCHAR DEFAULT 'unknown'")
         if relationship_files:
             self._con.execute("CREATE TABLE r AS SELECT * FROM read_parquet(?)", [list(relationship_files)])
         else:
@@ -110,7 +112,7 @@ class Snapshot:
         limit = max(1, min(int(limit), MAX_LIMIT))
         page = max(1, min(int(page), MAX_PAGE))
         filters, params = [], []
-        for column, value in (("country", country.strip().upper()[:2]), ("legalStatus", status.strip()[:60])):
+        for column, value in (("country", country.strip().upper()[:2]), ("statusCategory", status.strip()[:60])):
             if value:
                 filters.append(f"{column} = ?")
                 params.append(value)
@@ -135,7 +137,8 @@ class Snapshot:
         results = self._rows(f"SELECT {SUMMARY} FROM ({base}) ORDER BY {order} LIMIT ? OFFSET ?",
                              match_params + params + order_params + [limit, (page - 1) * limit])
         facets = {}
-        for name, expr in (("country", "country"), ("status", "legalStatus"), ("source", "unnest(string_split(sources, ','))")):
+        for name, expr in (("country", "country"), ("status", "statusCategory"),
+                           ("source", "unnest(string_split(sources, ','))")):
             # The expression goes in an inner query, because DuckDB can't group by an unnest directly.
             facets[name] = self._rows(f"SELECT value, count(*) AS records FROM (SELECT {expr} AS value FROM ({base})) "
                                       f"GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT {FACET_LIMIT}", match_params + params)
@@ -222,10 +225,11 @@ class Snapshot:
                         visited.add(other)
                         nxt.append(other)
             frontier = nxt
-        known = self._rows("SELECT directoryId, lei, legalName, country, legalStatus, legalJurisdiction FROM e "
+        known = self._rows("SELECT directoryId, lei, legalName, country, legalStatus, statusCategory, legalJurisdiction FROM e "
                            "WHERE list_contains(?, directoryId)", [sorted(visited)])
         nodes = {k["directoryId"]: {"id": k["directoryId"], "lei": k["lei"], "name": k["legalName"], "country": k["country"],
-                                    "status": k["legalStatus"], "inDirectory": True} for k in known}
+                                    "status": k["legalStatus"], "statusCategory": k["statusCategory"],
+                                    "inDirectory": True} for k in known}
         out_edges = []
         for row in edges:
             ends = []
@@ -233,7 +237,7 @@ class Snapshot:
                 node_id = row[side] or f"LEI:{lei}"
                 if node_id not in nodes:
                     nodes[node_id] = {"id": node_id, "lei": lei, "name": None, "country": None, "status": None,
-                                      "inDirectory": False}
+                                      "statusCategory": None, "inDirectory": False}
                 ends.append(node_id)
             out_edges.append({"id": row["relationshipId"], "source": ends[0], "target": ends[1],
                               "type": row["relationshipType"], "status": row["relationshipStatus"],
@@ -247,4 +251,5 @@ class Snapshot:
         rel_types = self._rows("SELECT relationshipType AS value, count(*) AS records FROM r GROUP BY 1 ORDER BY 2 DESC", [])
         return {"snapshot": self.meta, "records": self.count, "relationships": self.relationship_count,
                 "byCountry": top("country", 30), "bySources": top("sources", 10), "byStatus": top("legalStatus", 15),
+                "byStatusCategory": top("statusCategory", 15),
                 "relationshipTypes": rel_types}

@@ -98,6 +98,7 @@ jobs:
           docker run --rm load-db python -c "from lc_core.publishing import load; print(load().load)"
           docker build -f services/build_snapshot/Dockerfile -t build-snapshot .
           docker run --rm build-snapshot python -c "from lc_core.publishing import load; import lc_publish.job; print(load().snapshots)"
+          docker run --rm build-snapshot python -c "from lc_core import status; m = status.load(); print(len(m.sources()), 'status maps')"
           docker run --rm build-snapshot python -c "from lc_publish import dedi; c = dedi.load_config(); print(c.domain); [dedi.record_schema(r, c) for r in dedi.REGISTRIES]; print(len(dedi.country_names()))"
       - run: pip install -e services/site
       - run: pytest -q services/site

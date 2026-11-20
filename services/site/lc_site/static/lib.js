@@ -74,6 +74,26 @@ export function statusPill(status) {
   return h("span", { class: `pill ${kind}` }, icon, " ", status || "unknown");
 }
 
+// The harmonised status category (config/status.yaml; the words are config/labels.yaml legal_status).
+// Filters, facets and dashboards use it; the register's own word is shown beside it when it says more.
+const CATEGORY_KIND = { active: "good", "in-liquidation": "warn", inactive: "bad", dissolved: "bad", "struck-off": "bad",
+  merged: "bad", unknown: "idle" };
+
+export function categoryName(category) {
+  const c = category || "unknown";
+  return c.charAt(0).toUpperCase() + c.slice(1).replace(/-/g, " ");
+}
+
+export function categoryPill(category, word) {
+  if (!category) return statusPill(word);  // a record from before the category
+  const kind = CATEGORY_KIND[category] || "idle";
+  const icon = { good: "●", bad: "■", warn: "▲", idle: "○" }[kind];
+  const name = categoryName(category);
+  const says = word && word.trim().toLowerCase() !== name.toLowerCase();
+  return h("span", { class: `pill ${kind}`, title: word ? `The register's own word: ${word}` : "The register gives no status" },
+    icon, " ", name, says ? ` (register: ${word})` : "");
+}
+
 // One name per source, used everywhere a source is shown. The names come from the sources
 // registry (config/sources.yaml, each built source's label), loaded once when the app starts,
 // so a new source needs no change here.

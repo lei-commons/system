@@ -24,11 +24,11 @@ from lc_core.approvals import approved_record_sources
 from lc_core.decisions import Recorder, failure, log_bucket_name, seal_through, yesterday
 from lc_core.lease import Busy, lease
 from lc_core.publishing import load as load_settings
-from lc_core.snapshot_format import is_v2
+from lc_core.snapshot_format import ENTITY_KIND, RELATIONSHIP_KIND, is_v2
 
 from .__main__ import shard_reader
 from .prune import prune
-from .snapshot import STATE_FILES, StateReader, build_sharded, sha256_file, sources
+from .snapshot import COLUMNS, RELATIONSHIP_COLUMNS, STATE_FILES, StateReader, build_sharded, sha256_file, sources
 from .upload import STATE_PREFIX, point_latest, upload_day, upload_state
 
 COMPONENT = "job:build-snapshot"
@@ -57,6 +57,10 @@ def previous_state(snapshots, data, today: str, work: Path):
             return None, None, "today was built before, with no usable base"
     if previous is None or not is_v2(previous):
         return None, None, "the previous snapshot is in the old format" if previous else "the previous manifest is missing"
+    if previous.get("columns") != {ENTITY_KIND: COLUMNS, RELATIONSHIP_KIND: RELATIONSHIP_COLUMNS}:
+        # Another set of columns changes every record's leaf: start a new chain with a full snapshot and no
+        # base, rather than publish every record as a change (and load-db then reloads in full).
+        return None, None, "the record columns changed"
     folder = f"{STATE_PREFIX}/{previous['date']}"
     meta_blob = data.blob(f"{folder}/state.json")
     if not meta_blob.exists():

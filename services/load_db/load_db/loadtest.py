@@ -78,7 +78,7 @@ def build(conn, schema: str, target: int, max_gb: float, log=log) -> dict:
         cur.execute(sql.SQL(TABLES.replace("CREATE TABLE", "CREATE UNLOGGED TABLE")).format(s=s))
         conn.commit()
         cols = ("lei, legal_name, legal_form, legal_jurisdiction, registration_authority, registration_number, legal_status, "
-                "incorporation_date, dissolution_date, record_mode, registry_url, other_names, legal_address, "
+                "status_category, incorporation_date, dissolution_date, record_mode, registry_url, other_names, legal_address, "
                 "headquarters_address, industry_codes, labels, sources, country, names_text, filter_terms")
         loaded = 0
         for copy in range(copies):
@@ -92,7 +92,7 @@ def build(conn, schema: str, target: int, max_gb: float, log=log) -> dict:
             number = "registration_number" if copy == 0 else f"registration_number || '-{copy}'"
             cur.execute(sql.SQL(
                 f"INSERT INTO {{s}}.entities (directory_id, {cols}) SELECT {_mapped('directory_id', copy)}, {lei}, {name}, "
-                "legal_form, legal_jurisdiction, registration_authority, " + number + ", legal_status, incorporation_date, "
+                "legal_form, legal_jurisdiction, registration_authority, " + number + ", legal_status, status_category, incorporation_date, "
                 "dissolution_date, record_mode, registry_url, other_names, legal_address, headquarters_address, "
                 f"industry_codes, labels, sources, country, {names_text}, filter_terms FROM live.entities LIMIT %s").format(s=s), [take])
             loaded += cur.rowcount
@@ -163,8 +163,8 @@ def cases(directory, samples: dict) -> list:
     out += [("search: common word", lambda q=q: d.search(q)) for q in COMMON_WORDS]
     out += [("search: common word, page 40", lambda q=q: d.search(q, page=40)) for q in COMMON_WORDS]
     out += [("search: common word + country", lambda q=q: d.search(q, country="GB")) for q in COMMON_WORDS]
-    out += [("search: common word + narrow status", lambda q=q: d.search(q, status="Active")) for q in COMMON_WORDS]
-    out += [("search: common word + broad status", lambda q=q: d.search(q, status="ACTIVE")) for q in COMMON_WORDS]
+    out += [("search: common word + narrow status", lambda q=q: d.search(q, status="dissolved")) for q in COMMON_WORDS]
+    out += [("search: common word + broad status", lambda q=q: d.search(q, status="active")) for q in COMMON_WORDS]
     out += [("search: ID or number", lambda q=q: d.search(q)) for q in s["ids"][:10] + s["numbers"][:10]]
     out += [("suggest", lambda q=q: d.suggest(q)) for q in s["prefixes"]]
     out += [("entity", lambda q=q: d.entity(q)) for q in s["ids"]]
@@ -196,8 +196,8 @@ def plans(conn, schema: str, broad=frozenset()) -> list:
 
     out = []
     for word in COMMON_WORDS[:4]:
-        for label, filters in (("", {}), ("+country", {"country": "GB"}), ("+Active", {"status": "Active"}),
-                               ("+ACTIVE", {"status": "ACTIVE"}), ("+DE+ACTIVE", {"country": "DE", "status": "ACTIVE"}),
+        for label, filters in (("", {}), ("+country", {"country": "GB"}), ("+dissolved", {"status": "dissolved"}),
+                               ("+active", {"status": "active"}), ("+DE+active", {"country": "DE", "status": "active"}),
                                ("+gleif", {"source": "gleif"})):
             match, params, row_filter, row_params = text_match(word, broad=broad, **filters)
             query = (f"SELECT {SUMMARY}, ts_rank(search, {match}) AS rank FROM {schema}.entities "

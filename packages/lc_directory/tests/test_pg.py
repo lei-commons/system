@@ -145,12 +145,14 @@ def test_graph_neighbourhood(d):
     g = d.graph(ID)
     nodes = {n["id"]: n for n in g["nodes"]}
     assert len(g["edges"]) == 2 and nodes[OTHER]["inDirectory"] and nodes["LEI:NOTINDIRECTORY000000"]["inDirectory"] is False
+    assert nodes[ID]["statusCategory"] in ("active", "dissolved") and nodes[ID]["status"] in ("Active", "Dissolved")
     assert d.graph(ID, per_node=1)["truncated"] and d.graph("NOPE") is None
 
 
 def test_stats_are_precomputed(d):
     s = d.stats()
     assert s["records"] == 152 and s["byCountry"][0] == {"value": "GB", "records": 151}
+    assert {r["value"]: r["records"] for r in s["byStatusCategory"]} in ({"unknown": 151, "active": 1}, {"unknown": 151, "dissolved": 1})
     assert {r["value"] for r in s["relationshipTypes"]} == {"IS_DIRECTLY_CONSOLIDATED_BY", "IS_ULTIMATELY_CONSOLIDATED_BY"}
 
 
@@ -173,6 +175,7 @@ def test_reload_swaps_atomically_and_cleans_up(loaded, tmp_path):
     assert "live" in schemas and "live_old" not in schemas and not any(s.startswith("load_") for s in schemas)
     fresh = Directory(Pool())
     assert fresh.meta["date"] == "2026-11-08" and fresh.entity(ID)["legalStatus"] == "Dissolved"
+    assert fresh.entity(ID)["statusCategory"] == "dissolved"
 
 
 def test_failed_load_leaves_the_live_directory_serving(loaded, tmp_path):
@@ -233,10 +236,14 @@ def test_filters_are_index_terms_that_no_word_can_produce(d):
     assert filter_term("country", "gb") == "c=gb" and filter_term("status", "In Liquidation") == "s=In_Liquidation"
     assert filter_term("source", "gb-coh") == "src=gb-coh" and filter_term("status", None) == "s=none"
     assert filter_term("status", "ACTIVE") != filter_term("status", "Active") and filter_term("country", "GB") == "c=gb"
-    # by now the reload test has made the EXAMPLE record "Dissolved"
-    assert d.search("example", status="Dissolved")["total"] == 1 and d.search("example", status="DISSOLVED")["total"] == 0
+    # by now the reload test has made the EXAMPLE record "Dissolved": the status filter is its category
+    found = d.search("example", status="dissolved")
+    assert found["total"] == 1 and found["results"][0]["legalStatus"] == "Dissolved"
+    assert found["results"][0]["statusCategory"] == "dissolved" and found["facets"]["status"] == [{"value": "dissolved", "records": 1}]
+    assert d.search("example", status="Dissolved")["total"] == 0  # the register's word is shown, never filtered on
     assert d.search("c=gb")["total"] == 0 and d.search("src gleif")["total"] == 0  # words never match filter terms
-    assert d.search("many", country="gb")["total"] == 150 and d.search("many", status="Active", source="gb-coh")["total"] == 0
+    assert d.search("many", country="gb")["total"] == 150 and d.search("many", status="active", source="gb-coh")["total"] == 0
+    assert d.search("many", status="unknown")["total"] == 150  # no status word: unknown
 
 
 def test_a_filtered_word_search_is_one_index_lookup(loaded, d):
@@ -251,14 +258,14 @@ def test_a_filtered_word_search_is_one_index_lookup(loaded, d):
     p = "\n".join(r[0] for r in rows)
     assert "Bitmap Index Scan" in p and "Filter" not in p, p
     assert hits == 150
-    assert d.search("many", country="GB", status="Active")["total"] == 0  # the MANY records have no status
+    assert d.search("many", country="GB", status="active")["total"] == 0  # the MANY records have no status
 
 
-def test_status_terms_in_the_index_keep_their_case(loaded):
+def test_status_terms_in_the_index_are_the_category(loaded):
     with psycopg.connect(DSN) as conn:
-        count = conn.execute("SELECT count(*) FROM live.entities WHERE search @@ quote_literal(%s)::tsquery", ["s=Dissolved"]).fetchone()[0]
-        folded = conn.execute("SELECT count(*) FROM live.entities WHERE search @@ quote_literal(%s)::tsquery", ["s=dissolved"]).fetchone()[0]
-    assert count >= 1 and folded == 0
+        count = conn.execute("SELECT count(*) FROM live.entities WHERE search @@ quote_literal(%s)::tsquery", ["s=dissolved"]).fetchone()[0]
+        word = conn.execute("SELECT count(*) FROM live.entities WHERE search @@ quote_literal(%s)::tsquery", ["s=Dissolved"]).fetchone()[0]
+    assert count >= 1 and word == 0
 
 
 def test_a_reload_shows_without_restarting_the_site(loaded):

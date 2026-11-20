@@ -172,10 +172,37 @@ def test_nothing_outside_the_columns_is_published_in_parts_or_changes(env):
     assert not any(b"MR PERSON" in o["data"] for o in env.snapshots.objects.values())
 
 
-def test_statuses_are_normalised(env):
-    m = env.publish(World())
-    statuses = {s["value"] for s in m["stats"]["byStatus"]}
-    assert "Active" in statuses and "ACTIVE" not in statuses
+def test_status_words_are_kept_and_categorised(env):
+    world = World()
+    world.sources["gb-coh"][did(1)] = {**world.sources["gb-coh"][did(1)], "legalStatus": "Liquidation"}
+    world.sources["gb-coh"][did(2)] = {**world.sources["gb-coh"][did(2)], "legalStatus": "Something New"}
+    m = env.publish(world)
+    words = {s["value"]: s["records"] for s in m["stats"]["byStatus"]}
+    assert {"Active", "ACTIVE", "ATIVA", "Liquidation"} <= set(words)  # each register's own word (Article 4.3)
+    categories = {s["value"]: s["records"] for s in m["stats"]["byStatusCategory"]}
+    assert categories == {"active": m["records"] - 2, "in-liquidation": 1, "unknown": 1}
+    assert m["stats"]["unmappedStatus"] == [{"value": "gb-coh: Something New", "records": 1}]
+    assert m["columns"]["entities"].index("statusCategory") == m["columns"]["entities"].index("legalStatus") + 1
+
+
+def test_new_columns_start_a_new_chain(env):
+    """A day after one published with other columns is a full snapshot with no base: every record's leaf
+    changed, so publishing them all as changes would only double the day."""
+    world = World()
+    first = env.publish(world)
+    key = f"{first['date']}/manifest.json"
+    old = json.loads(env.snapshots.objects[key]["data"])
+    old.pop("columns")  # as every manifest before statusCategory
+    env.snapshots.objects[key]["data"] = json.dumps(old).encode()
+    world.mutate()
+    second = env.publish(world)
+    assert second["kind"] == "full" and second["base"] is None and second["why"] == "the record columns changed"
+    assert not second["changes"]["files"] and second["anchor"] == second["date"]
+    assert {"event": "no-previous-state", "reason": "the record columns changed"} in env.events
+    report, rows = env.rebuilt_rows(second["date"])
+    assert report["ok"] and rows == world.truth()
+    world.mutate()
+    assert env.publish(world)["kind"] == "changes"  # and the next day builds on it as usual
 
 
 def test_same_input_same_bytes_and_roots(tmp_path):

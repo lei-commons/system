@@ -1,4 +1,4 @@
-import { api, debounce, flag, fmt, h, sourceChips, statusPill, errorBox, SOURCE_NAMES } from "../lib.js";
+import { api, categoryName, categoryPill, debounce, flag, fmt, h, sourceChips, errorBox, SOURCE_NAMES } from "../lib.js";
 
 const PAGE = 25;
 
@@ -64,7 +64,7 @@ function result(r) {
     h("span", { class: "mono muted" }, r.lei || ""),
     h("span", { class: "meta" }, h("span", { class: "flag" }, flag(r.country)), r.country || "",
       r.registrationNumber ? h("span", { class: "mono" }, `No. ${r.registrationNumber}`) : null,
-      statusPill(r.legalStatus), ...sourceChips((r.sources || "").split(",").filter(Boolean))));
+      categoryPill(r.statusCategory, r.legalStatus), ...sourceChips((r.sources || "").split(",").filter(Boolean))));
 }
 
 export async function render(root, _arg, params) {
@@ -101,7 +101,8 @@ export async function render(root, _arg, params) {
       h("span", { class: "muted" }, `for “${q}”`)),
     h("div", { class: "card card-pad facets" },
       facetRow("Country", "country", found.facets.country, params),
-      facetRow("Status", "status", found.facets.status, params),
+      facetRow("Status", "status", found.facets.status, params,
+        Object.fromEntries((found.facets.status || []).map((r) => [r.value, categoryName(r.value)]))),
       facetRow("Source", "source", found.facets.source, params, sourceNames)),
     found.results.length ? h("div", { class: "results" }, ...found.results.map(result))
       : h("div", { class: "empty" }, "No matches. Try fewer words, or remove a filter."),
