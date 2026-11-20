@@ -206,3 +206,56 @@ def test_placeholders_are_not_addresses():
     assert us_address("Hartford", "CT", "06103", "United States", ("No information provided", "")) == {
         "city": "HARTFORD", "region": "CT", "postalCode": "06103", "country": "US"}
     assert us_address("", "", "", None, ("N/A",)) == {}
+
+
+# ---- health.json beside the store (as ingest_bulk), for every source's job ----
+
+class _FakeStorage:
+    class Client:
+        def bucket(self, name):
+            return name
+
+
+def _main_with(monkeypatch, run_result):
+    import contextlib
+    import sys
+    import types
+
+    import ingest_socrata.job as job
+
+    notes = []
+    cloud = types.ModuleType("google.cloud")
+    cloud.storage = _FakeStorage
+    monkeypatch.setitem(sys.modules, "google.cloud", cloud)
+    monkeypatch.setitem(sys.modules, "google.cloud.storage", _FakeStorage)
+    monkeypatch.setattr(job, "Gateway", lambda url, actor: None)
+    monkeypatch.setattr(job.AllowList, "load", staticmethod(lambda path: None))
+    monkeypatch.setattr(job, "GcsStore", lambda bucket, prefix: f"store:{prefix}")
+    monkeypatch.setattr(job, "lease", lambda bucket, name: contextlib.nullcontext())
+    monkeypatch.setattr(job.Recorder, "write", lambda self, bucket: None)
+    monkeypatch.setattr(job.health, "note", lambda store, outcome=None, failure=None, log=None:
+                        notes.append((store, outcome, (failure or {}).get("error"))))
+
+    def run(*args, **kwargs):
+        if isinstance(run_result, Exception):
+            raise run_result
+        return run_result
+
+    monkeypatch.setattr(job, "run", run)
+    for name, value in {"LC_SOURCE": "us-co-sos", "LC_GATEWAY_URL": "http://gw", "LC_FIELDS_CONFIG": "x",
+                        "LC_DATA_BUCKET": "lei-commons-test-data"}.items():
+        monkeypatch.setenv(name, value)
+    return job, notes
+
+
+def test_a_successful_run_records_its_health(monkeypatch):
+    job, notes = _main_with(monkeypatch, "done")
+    assert job.main() == 0
+    assert notes == [(f"store:{PROFILES['us-co-sos'].store}", "done", None)]
+
+
+def test_a_failed_run_records_the_failure_in_its_health(monkeypatch):
+    job, notes = _main_with(monkeypatch, ConnectionError("reset"))
+    with pytest.raises(ConnectionError):
+        job.main()
+    assert notes == [(f"store:{PROFILES['us-co-sos'].store}", None, "ConnectionError")]
