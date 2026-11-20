@@ -49,6 +49,29 @@ export async function render(root, id) {
     root.replaceChildren(h("div", { class: "wrap" }, errorBox(error)));
     return;
   }
+  if (record.mergedInto) {
+    // An old ID that merged into another (a tombstone): say so, and link to the record it is now.
+    const into = `#/entity/${encodeURIComponent(record.mergedInto)}`;
+    root.replaceChildren(h("div", { class: "wrap" },
+      h("div", { class: "entity-head" },
+        h("div", {},
+          h("div", { class: "muted" }, h("span", { class: "flag" }, flag(record.country)), " ", record.country || "", " · ",
+            h("span", { class: "mono" }, record.directoryId)),
+          h("h1", {}, record.legalName),
+          h("div", { class: "toolbar" }, categoryPill(record.statusCategory, null), ...sourceChips(record.sources))),
+        h("div", { class: "toolbar" },
+          h("a", { class: "btn primary", href: into }, "Go to the current record"),
+          h("a", { class: "btn", href: `/api/v1/entities/${encodeURIComponent(record.directoryId)}`, target: "_blank" }, "JSON"))),
+      h("section", { class: "card card-pad" }, h("h3", {}, "Merged"),
+        h("p", {}, "This directory ID was merged into ", h("a", { class: "mono", href: into }, record.mergedInto),
+          ". It stays here so links to it keep working; the record now lives under that ID."),
+        h("dl", { class: "facts" },
+          fact("Directory ID", record.directoryId, true), fact("Merged into", record.mergedInto, true),
+          fact("Registration number", record.registrationNumber, true), fact("Registration authority", record.registrationAuthority),
+          fact("Jurisdiction", record.legalJurisdiction))),
+      creditsCard(record.credits || [])));
+    return;
+  }
   const mini = h("div", { class: "mini-graph" });
   root.replaceChildren(h("div", { class: "wrap" },
     h("div", { class: "entity-head" },

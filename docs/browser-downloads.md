@@ -43,7 +43,7 @@ A source whose regular download fails consistently, for a reason a browser can g
 
 ## Japan (jp-nta)
 
-The download page is `https://www.houjin-bangou.nta.go.jp/download/zenken/`. The flow picks 全国 (nationwide) under CSV形式・Unicode. The file `00_zenkoku_all_YYYYMMDD.zip` is updated monthly and is about 270 MB. It holds a headerless 30-column CSV following the NTA's specification, and `lc_ingest/nta.py` reads it. Records are keyed with GLEIF's RA001075 (Corporate Number Publication Site) and the 13-digit corporate number. LEI holders that GLEIF lists under RA000412 (commercial registration, the corporate number without its check digit) merge once the GLEIF re-key adds that alias.
+The download page is `https://www.houjin-bangou.nta.go.jp/download/zenken/`. The flow picks 全国 (nationwide) under CSV形式・Unicode. The file `00_zenkoku_all_YYYYMMDD.zip` is updated monthly and is about 270 MB. It holds a headerless 30-column CSV following the NTA's specification, and `lc_ingest/nta.py` reads it. Records are keyed with GLEIF's RA001075 (Corporate Number Publication Site) and the 13-digit corporate number. LEI holders that GLEIF lists under RA000412 (commercial registration, the corporate number without its check digit) merge too: `config/sources.yaml` `gleif_identity` reads RA000412 as RA001075 and adds the check digit (2026-11-20; docs/snapshots-v2.md, "GLEIF identity and the re-key").
 
 ### Daily difference files (差分)
 

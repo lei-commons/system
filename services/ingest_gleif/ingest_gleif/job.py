@@ -12,6 +12,7 @@ import os
 import sys
 from datetime import datetime, timedelta
 
+from lc_core import gleif_identity
 from lc_core.allowlist import AllowList
 from lc_core.control import SystemHalted, require_running
 from lc_core.approvals import require_approved
@@ -22,6 +23,7 @@ from lc_ingest.gleif import to_record
 from lc_ingest.gleif_csv import read_zip
 from lc_ingest.gleif_rr import read_zip as read_rr_zip
 from lc_ingest.gleif_rr import to_relationship
+from lc_ingest.rekey import rekey
 from lc_ingest.runner import run_ingest
 from lc_ingest.store import GcsStore
 from lc_ingest import health
@@ -83,8 +85,22 @@ find = finder("lei2")
 
 
 def run(gateway, store, gate=gate, allowlist=None, log=log) -> str:
+    # The identity rules (config/sources.yaml gleif_identity), checked before anything is fetched: a bad entry
+    # must stop the run, never turn into records skipped one by one as malformed.
+    gleif_identity.default()
     return run_ingest(gateway=gateway, store=store, gate=gate, find=find, read=read_zip, mapper=to_record,
                       source="gleif", maker="ingestion@gleif", allowlist=allowlist or AllowList.load(), log=log)
+
+
+def run_entities(gateway, store, gate=gate, allowlist=None, log=log, identity=None) -> str:
+    """The day's entity file, then, once per set of identity rules (config/sources.yaml gleif_identity),
+    the re-key of every stored record (lc_ingest.rekey; event gleif-rekeyed). The re-key runs only after
+    the file went in cleanly, so it always works on the newest records."""
+    outcome = run(gateway, store, gate=gate, allowlist=allowlist, log=log)
+    if outcome not in ("done", "already-done"):
+        return outcome
+    rekeyed = rekey(store, identity=identity, gate=gate, log=log, maker="ingestion@gleif")
+    return rekeyed if rekeyed in ("held", "halted") else outcome
 
 
 def run_relationships(gateway, store, gate=gate, allowlist=None, log=log) -> str:
@@ -107,7 +123,7 @@ def main() -> int:
             # Entities and relationships are separate files: one failing doesn't stop the other.
             outcomes, errors = [], []
             entities, relationships = GcsStore(bucket, "gleif"), GcsStore(bucket, "gleif-rr")
-            for store, work in ((entities, lambda: run(gateway, entities, allowlist=allowlist, log=record)),
+            for store, work in ((entities, lambda: run_entities(gateway, entities, allowlist=allowlist, log=record)),
                                 (relationships, lambda: run_relationships(gateway, relationships, allowlist=allowlist,
                                                                           log=record))):
                 try:

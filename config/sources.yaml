@@ -41,6 +41,17 @@
 #   (as the job names it: New York's is the ISO week, e.g. 2026-W48), the reason, approved_by: owner and
 #   approved_on. Only that publication goes through past the guard, logged as a mapping-upgrade decision;
 #   any other still trips. Remove an entry once its publication is processed.
+# gleif_identity: how a GLEIF record's registration authority and number become the key of a register we
+#   read directly, so a company with an LEI and its register record mint one directory ID and merge
+#   (lc_core.gleif_identity; checked when read; owner decision 2026-11-20). Per GLEIF code:
+#   registry: the code the register's own records are minted under (default: the same code);
+#   country: the register's country (default: the record's address country);
+#   number: rules applied in order (strip-leading-zeros, jp-corporate-number). A number a rule doesn't fit
+#   is minted as GLEIF writes it, under GLEIF's own code. An authority not listed mints as GLEIF writes it.
+#   Changing this section re-keys the stored GLEIF records once (ingest-gleif, event gleif-rekeyed): a record
+#   whose ID changes leaves a tombstone at its old ID, labelled merged:<new ID> (docs/snapshots-v2.md).
+#   The re-key is held by volume_guard like any publication; its key for mapping_upgrades is
+#   "rekey <fingerprint>" (the fingerprint is in the held event).
 
 version: 1
 
@@ -55,6 +66,24 @@ volume_guard:
         so every record with one changes once. Owner decisions 2026-11-16 and 2026-11-20.
       approved_by: owner
       approved_on: "2026-11-20"
+
+gleif_identity:
+  RA000585: {registry: GB-COH, country: GB, note: "Companies House, England and Wales"}
+  RA000586: {registry: GB-COH, country: GB, note: "Companies House, Northern Ireland"}
+  RA000587: {registry: GB-COH, country: GB, note: "Companies House, Scotland"}
+  # Oregon's register writes numbers without leading zeros; GLEIF keeps them ("057491-14" is 5749114 there,
+  # "2125331-94" is 212533194 in both). Checked against data.oregon.gov, 2026-11-20.
+  RA000631: {country: US, number: [strip-leading-zeros], note: "Oregon Secretary of State"}
+  # Corporations Canada's numbers include the check digit and no leading zeros; GLEIF keeps the zeros
+  # ("046311-6" is 463116 there). Checked against the register's active files, 2026-11-20.
+  RA000072: {country: CA, number: [strip-leading-zeros], note: "Corporations Canada"}
+  # GLEIF files Norwegian organisation numbers under both codes for the Brønnøysund register.
+  RA000472: {country: "NO", note: "Brønnøysund Register Centre"}
+  RA000473: {registry: RA000472, country: "NO", note: "Brønnøysund Register Centre (second code)"}
+  # The commercial registration number (会社法人等番号, 12 digits) is the corporate number without its check
+  # digit; jp-nta mints with RA001075 and the 13-digit corporate number.
+  RA001075: {country: JP, note: "Japan corporate number (National Tax Agency)"}
+  RA000412: {registry: RA001075, country: JP, number: [jp-corporate-number], note: "Japan commercial registration"}
 
 sources:
   - id: gleif
@@ -203,8 +232,9 @@ sources:
         restrictions on use. About 453,000 active businesses. The dataset lists one row per associated name
         (registered agents, representatives); the query asks for one row per business with only its principal
         place of business's city, state and ZIP, so no person's name or address is downloaded. Assumed business
-        names (often people) and name reservations are dropped. GLEIF writes Oregon numbers with a two-digit
-        suffix ("115676-17") the dataset lacks, so about 1,600 Oregon companies with an LEI don't merge yet.
+        names (often people) and name reservations are dropped. GLEIF writes Oregon numbers with a dash and keeps
+        leading zeros ("057491-14"); the dataset has neither (5749114). gleif_identity (above) reads GLEIF's form
+        as the register's, so Oregon companies with an LEI merge (2026-11-20).
       verified: false
     pipeline: {job: ingest-or, image: ingest-socrata, store: us-or, records_as: us-or-sos, label: Oregon Secretary of State, refresh: weekly,
                dataset: "Active Businesses - ALL (data.oregon.gov)",

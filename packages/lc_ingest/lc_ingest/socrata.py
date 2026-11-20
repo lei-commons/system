@@ -9,9 +9,9 @@ proprietorships, assumed business names and name reservations are dropped (they 
 not entities), and so is any type the register adds later until it is reviewed.
 
 GLEIF codes checked against api.gleif.org on 2026-11-15: RA000599 Colorado, RA000631 Oregon,
-RA000600 Connecticut. Colorado and Connecticut numbers match GLEIF's ``registeredAs`` exactly;
-Oregon's don't (GLEIF adds a two-digit suffix, "115676-17"), so Oregon companies with an LEI
-don't merge yet (see config/sources.yaml).
+RA000600 Connecticut. Colorado and Connecticut numbers match GLEIF's ``registeredAs`` exactly.
+Oregon's match once GLEIF's dash is dropped (it always is) and its leading zeros too: GLEIF writes
+"057491-14" for the dataset's 5749114 (config/sources.yaml gleif_identity, checked 2026-11-20).
 """
 
 from __future__ import annotations
