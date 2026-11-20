@@ -78,8 +78,8 @@ Validated when read; a bad value stops the DeDi step, never the snapshot.
 
 ## Not yet (proposals)
 
-- Keep the full snapshot of each month for good (a pruning rule), so the monthly editions' URLs stay
-  valid forever, not only while referenced.
+- ~~Keep the full snapshot of each month for good~~: built (`snapshots.keep_monthly_full`, config/publishing.yaml),
+  so the monthly editions' URLs stay valid forever, not only while referenced.
 - Anchor each day's digests file in Rekor too (as the snapshot manifest is): a public, append-only record
   of every key and content change, which closes the protocol's acknowledged "host compromise" gap.
 - More registries: registration authorities (GLEIF RA codes used in directory ids), the agents that run
