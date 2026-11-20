@@ -4,7 +4,8 @@ data.ny.gov refreshes the dataset daily, but the list barely changes from one
 day to the next, and comparing 4.3 million records takes most of an hour. So
 a run processes the dataset once per ISO week ("2026-W46"). Only the columns
 in lc_ingest.registers.NY_COLUMNS are requested, so no agent, process or
-chairman name or address is ever downloaded.
+chairman name or address, and no mailing address, is ever downloaded. The
+company's own street address is (owner decision 2026-11-20).
 """
 
 from __future__ import annotations

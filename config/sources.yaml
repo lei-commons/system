@@ -33,8 +33,28 @@
 #   (registryUrl), and the snapshot and database carry each source's licence, attribution and a
 #   citation (owner requirement 2026-11-16).
 #   The daily cycle's steps (Terraform), the snapshot, the site and the workflows all read these.
+# volume_guard: read by every ingestion job (lc_core.guard; checked, so a bad value stops a run before it
+#   fetches anything). A publication that would change more than max_fraction of a store's existing records
+#   is held, unless the store has fewer than minimum records.
+#   mapping_upgrades: one-time exceptions the owner approved, when a mapping gains a field and one
+#   publication changes most records at once. Each names the source (its id here), the one publication key
+#   (as the job names it: New York's is the ISO week, e.g. 2026-W48), the reason, approved_by: owner and
+#   approved_on. Only that publication goes through past the guard, logged as a mapping-upgrade decision;
+#   any other still trips. Remove an entry once its publication is processed.
 
 version: 1
+
+volume_guard:
+  max_fraction: 0.1
+  minimum: 100
+  mapping_upgrades:
+    - source: us-ny-dos
+      publish: 2026-W48
+      reason: >-
+        New York records gain the company's street address (location_address_1 and _2; c/o lines dropped),
+        so every record with one changes once. Owner decisions 2026-11-16 and 2026-11-20.
+      approved_by: owner
+      approved_on: "2026-11-20"
 
 sources:
   - id: gleif
@@ -116,7 +136,7 @@ sources:
         Reported as permissive: no attribution or share-alike requirement and no ban on commercial use,
         but users agree to hold the State harmless (indemnification). Individual datasets can add terms;
         this one lists none. Only non-personal columns are requested (no agents, chairmen or process
-        addresses).
+        addresses). The company's own street address is kept, without c/o lines (owner decision 2026-11-20).
       verified: false
     approval: approved
     approved_by: owner
