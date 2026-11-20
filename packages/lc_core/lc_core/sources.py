@@ -70,6 +70,30 @@ def names(path=None) -> dict:
     return {p["records_as"]: p["label"] for p in pipelines(path)}
 
 
+DAILY_DIFFS = {"enabled": bool, "page": str, "section": str, "file_date_format": str, "max_per_run": int,
+               "overlap_days": int}
+
+
+def daily_diffs(source_id: str, path=None):
+    """A browser source's daily difference files (pipeline.daily_diffs), or None if it has none: whether they
+    are on, the public page that lists them (on the source's own host), the section of that page to read,
+    how the file's name gives its date, how many files one run takes, and how many days before the full
+    file's date its diffs are applied again (docs/browser-downloads.md)."""
+    data = yaml.safe_load(Path(_path(path)).read_text(encoding="utf-8"))
+    source = next((s for s in data.get("sources", []) if s.get("id") == source_id), None)
+    config = ((source or {}).get("pipeline") or {}).get("daily_diffs")
+    if not config:
+        return None
+    for key, kind in DAILY_DIFFS.items():
+        if not isinstance(config.get(key), kind) or (kind is int and isinstance(config.get(key), bool)):
+            raise ValueError(f"source {source_id}: daily_diffs.{key} must be a {kind.__name__}")
+    if not config["page"].startswith("https://"):
+        raise ValueError(f"source {source_id}: daily_diffs.page must be an https address")
+    if config["max_per_run"] < 1 or config["overlap_days"] < 0:
+        raise ValueError(f"source {source_id}: daily_diffs needs max_per_run >= 1 and overlap_days >= 0")
+    return {k: config[k] for k in DAILY_DIFFS}
+
+
 def browser_fallbacks(path=None, egress_path=None, approved_only: bool = True) -> dict:
     """Sources with a browser fallback (pipeline.browser_fallback) whose every host the owner approved as
     a browser host for that source (config/egress-allowlist.yaml browser_hosts): {regular job: {source,

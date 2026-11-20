@@ -457,7 +457,12 @@ sources:
     pipeline: {job: ingest-jp, image: ingest-browser, store: jp, records_as: jp-nta, label: National Tax Agency (Japan),
                refresh: monthly, dataset: "Corporate Number Publication Site: nationwide full data (CSV, Unicode)",
                record_url: "https://www.houjin-bangou.nta.go.jp/en/henkorireki-johoto.html?selHouzinNo={registrationNumber}",
-               attribution: "Source: National Tax Agency Corporate Number Publication Site (https://www.houjin-bangou.nta.go.jp/). Edited by lei-commons: text normalised (NFKC) and mapped to an LEI-compatible format; corporations excluded from the NTA's search are left out."}
+               attribution: "Source: National Tax Agency Corporate Number Publication Site (https://www.houjin-bangou.nta.go.jp/). Edited by lei-commons: text normalised (NFKC) and mapped to an LEI-compatible format; corporations excluded from the NTA's search are left out.",
+               # The daily difference files (差分), same host and form, so Japan stays current between monthly
+               # full files (docs/browser-downloads.md, "Japan (jp-nta)"). Off until the owner turns it on for
+               # a first watched run: the diff page's layout below is not yet confirmed from the live page.
+               daily_diffs: {enabled: false, page: "https://www.houjin-bangou.nta.go.jp/download/sabun/",
+                             section: "CSV形式・Unicode", file_date_format: "%Y%m%d", max_per_run: 5, overlap_days: 7}}
 
   - id: ca-ised
     name: Canada federal corporations (Corporations Canada)
