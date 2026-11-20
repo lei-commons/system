@@ -24,6 +24,7 @@ from lc_ingest.gleif_rr import read_zip as read_rr_zip
 from lc_ingest.gleif_rr import to_relationship
 from lc_ingest.runner import run_ingest
 from lc_ingest.store import GcsStore
+from lc_ingest import health
 
 COMPONENT = "job:ingest-gleif"
 SOURCE_ID = "gleif"  # its entry in config/sources.yaml
@@ -105,14 +106,19 @@ def main() -> int:
         with lease(client.bucket(bucket), "ingest-gleif"):
             # Entities and relationships are separate files: one failing doesn't stop the other.
             outcomes, errors = [], []
-            for work in (lambda: run(gateway, GcsStore(bucket, "gleif"), allowlist=allowlist, log=record),
-                         lambda: run_relationships(gateway, GcsStore(bucket, "gleif-rr"), allowlist=allowlist, log=record)):
+            entities, relationships = GcsStore(bucket, "gleif"), GcsStore(bucket, "gleif-rr")
+            for store, work in ((entities, lambda: run(gateway, entities, allowlist=allowlist, log=record)),
+                                (relationships, lambda: run_relationships(gateway, relationships, allowlist=allowlist,
+                                                                          log=record))):
                 try:
-                    outcomes.append(work())
+                    outcome = work()
+                    outcomes.append(outcome)
+                    health.note(store, outcome=outcome, log=record)  # each file's health beside its own store
                 except SystemHalted:
                     raise
                 except Exception as exc:  # recorded below, after the other part has had its turn
                     errors.append(exc)
+                    health.note(store, failure=failure(exc), log=record)
             if errors:
                 raise errors[0]
     except Busy as exc:

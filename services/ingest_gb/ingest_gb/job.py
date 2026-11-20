@@ -34,6 +34,7 @@ from lc_ingest.companies_house import read_zip, to_record
 from lc_ingest.ledger import VolumeGuardTripped, diff, volume_guard
 from lc_ingest.runner import run_ingest
 from lc_ingest.store import SHARDS, GcsStore, encode_records
+from lc_ingest import health
 
 COMPONENT = "job:ingest-gb"
 SOURCE_ID = "gb-coh"  # its entry in config/sources.yaml
@@ -154,10 +155,11 @@ def main() -> int:
     bucket = os.environ["LC_DATA_BUCKET"]
     client = storage.Client()
     record = Recorder(COMPONENT, log)  # every decision goes to the decision log too
+    store = GcsStore(bucket, "gb")
     try:
         with lease(client.bucket(bucket), "ingest-gb"):
-            store = GcsStore(bucket, "gb")
             outcome = run(gateway, store, allowlist=allowlist, log=record)
+            health.note(store, outcome=outcome, log=record)  # the download's health, before reconciling
             if outcome in ("done", "already-done"):
                 reconciled = reconcile(store, log=record)
                 if reconciled == "held":
@@ -166,7 +168,9 @@ def main() -> int:
         record({"event": "busy", "reason": str(exc)})  # another run is doing this work
         outcome = "busy"
     except Exception as exc:
-        record(failure(exc))
+        failed = failure(exc)
+        record(failed)
+        health.note(store, failure=failed, log=record)  # beside the store: a browser fallback reads it
         raise
     finally:
         record.write(client.bucket(log_bucket_name(bucket)))
