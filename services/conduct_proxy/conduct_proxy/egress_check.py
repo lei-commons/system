@@ -14,6 +14,11 @@ import sys
 import urllib.error
 import urllib.request
 
+from conduct_proxy.upstream import UPSTREAM_TIMEOUT_S
+
+# Wait longer than the gateway waits for its target, so a slow target comes back as the
+# gateway's own 502 upstream-error instead of a timeout here.
+FETCH_TIMEOUT_S = UPSTREAM_TIMEOUT_S + 10
 METADATA = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity"
 DIRECT_TARGETS = (("1.1.1.1", 443), ("example.org", 443))
 
@@ -26,11 +31,11 @@ def tcp_connects(host: str, port: int, timeout: float = 5.0) -> bool:
         return False
 
 
-def http_get(url: str, headers: dict):
+def http_get(url: str, headers: dict, timeout: float = FETCH_TIMEOUT_S):
     """Return (status, headers). Error statuses are results here, not failures."""
     req = urllib.request.Request(url, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.status, dict(resp.headers)
     except urllib.error.HTTPError as exc:
         return exc.code, dict(exc.headers)
@@ -64,7 +69,10 @@ def gateway_checks(label: str, gateway: str, audience: str, get=http_get, token=
         status, headers = get(f"{gateway}/fetch", {**auth, "X-LC-Target": "https://api.gleif.org/api/v1/lei-records?page%5Bsize%5D=1",
                                                    "X-LC-Actor": "job:egress-check"})
         denied = {k.lower(): v for k, v in headers.items()}.get("x-lc-denied", "")
-        results.append((f"{label}: applies the control state", status == 200 or denied == "system-not-running", f"{status} {denied}".strip()))
+        # 502 upstream-error means the gateway let the request through (the system is running)
+        # and the target was slow or down: the control state was applied all the same.
+        applied = status == 200 or denied == "system-not-running" or (status == 502 and denied == "upstream-error")
+        results.append((f"{label}: applies the control state", applied, f"{status} {denied}".strip()))
     except OSError as exc:
         results.append((f"{label}: connects", False, type(exc).__name__))
     return results

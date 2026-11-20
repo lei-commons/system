@@ -60,8 +60,12 @@ class _PinnedHTTPS(http.client.HTTPSConnection):
         self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
 
 
+# How long the gateway waits for a target before answering 502 upstream-error.
+UPSTREAM_TIMEOUT_S = 30.0
+
+
 class Upstream:
-    def __init__(self, timeout: float = 30.0, resolve=resolve_public):
+    def __init__(self, timeout: float = UPSTREAM_TIMEOUT_S, resolve=resolve_public):
         self._timeout = timeout
         self._resolve = resolve
         self._tls = ssl.create_default_context()
