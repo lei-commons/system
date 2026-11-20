@@ -29,6 +29,10 @@ def settings(config: dict) -> dict:
     """Validated settings: retry_wait_minutes, retries, clean_days, schedule_utc ("HH:MM"), cron."""
     config = config or {}
     sources, gate = config.get("sources") or {}, config.get("gate") or {}
+    timeouts = config.get("timeouts_minutes") or {}
+    if "default" not in timeouts:
+        raise CycleConfigError("timeouts_minutes needs a default")
+    timeout_minutes = {str(job): _whole(v, 10, 1440, f"timeouts_minutes.{job}") for job, v in timeouts.items()}
     watchdogs = config.get("watchdogs") or {}
     dedi_check = str(watchdogs.get("dedi_check_utc", ""))
     if not TIME.match(dedi_check):
@@ -45,6 +49,7 @@ def settings(config: dict) -> dict:
         "clean_days": _whole(gate.get("clean_days"), 1, 30, "gate.clean_days"),
         "schedule_utc": when,
         "dedi_check_utc": dedi_check,
+        "timeout_minutes": timeout_minutes,
         "cron": f"{int(match.group(2))} {int(match.group(1))} * * *",
     }
 
@@ -63,3 +68,9 @@ def default_path() -> Path:
 
 def load(path=None) -> dict:
     return settings(yaml.safe_load(Path(path or default_path()).read_text()))
+
+
+def timeout_seconds(settings: dict, job: str) -> int:
+    """How long ``job`` may run (config/cycle.yaml timeouts_minutes), in seconds."""
+    minutes = settings["timeout_minutes"]
+    return 60 * minutes.get(job, minutes["default"])

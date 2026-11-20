@@ -154,7 +154,7 @@ main:
       args:
         name: ${"projects/" + project + "/locations/" + region + "/jobs/" + "build-snapshot"}
         connector_params:
-          timeout: 7200
+          timeout: 10800
   - load_db:
       call: googleapis.run.v2.projects.locations.jobs.run
       args:

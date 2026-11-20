@@ -24,7 +24,6 @@ REGISTRY = ROOT / "config" / "sources.yaml"
 CONFIG = ROOT / "config" / "cycle.yaml"
 OUT = ROOT / "infra" / "workflows" / "daily-cycle.yaml"
 REGION = "us-central1"
-JOB_TIMEOUT = 7200  # seconds the connector waits for one job run
 AFTER_INGEST = ["build-snapshot", "load-db"]
 
 HEADER = """\
@@ -37,7 +36,7 @@ HEADER = """\
 
 sys.path.insert(0, str(ROOT / "packages" / "lc_core"))
 from lc_core.cycle import CycleConfigError as ConfigError  # noqa: E402
-from lc_core.cycle import settings  # noqa: E402
+from lc_core.cycle import settings, timeout_seconds  # noqa: E402
 
 
 def ingest_jobs(registry: dict) -> list:
@@ -50,17 +49,18 @@ def ingest_jobs(registry: dict) -> list:
     return jobs
 
 
-def _run(job_expr: str) -> dict:
+def _run(job_expr: str, timeout: int) -> dict:
+    """Run a job and wait for it, up to ``timeout`` seconds (config/cycle.yaml timeouts_minutes)."""
     return {"call": "googleapis.run.v2.projects.locations.jobs.run",
             "args": {"name": '${"projects/" + project + "/locations/" + region + "/jobs/" + ' + job_expr + "}",
-                     "connector_params": {"timeout": JOB_TIMEOUT}}}
+                     "connector_params": {"timeout": timeout}}}
 
 
-def _try_source(round_expr: str, prefix: str) -> list:
+def _try_source(round_expr: str, prefix: str, timeout: int) -> list:
     """Run ``job``; on failure log it and add it to ``failed`` (the loop carries on). Step names are
     prefixed: Workflows wants every step name unique."""
     return [{f"{prefix}_run": {
-        "try": _run("job"),
+        "try": _run("job", timeout),
         "except": {"as": "e", "steps": [
             {f"{prefix}_note_failure": {"assign": [{"failed": "${list.concat(failed, job)}"}]}},
             {f"{prefix}_log_failure": {"call": "sys.log", "args": {"severity": "WARNING", "json": {
@@ -77,7 +77,9 @@ SELFTEST_JOBS = ["egress-check", "ingest-selftest-missing", "ingest-selftest-gon
 def render(registry: dict, config: dict, selftest: bool = False, fallbacks: dict = None, dedi: bool = False) -> dict:
     """The cycle. ``selftest``: the same logic over SELFTEST_JOBS, one retry after a minute, and no snapshot
     or load, to prove in Workflows itself that a failing source is retried and skipped (deploy-cycle.yml)."""
-    s, jobs = settings(config), ingest_jobs(registry)
+    s_all = s = settings(config)
+    default_timeout = timeout_seconds(s_all, "default")
+    jobs = ingest_jobs(registry)
     fallbacks = dict(fallbacks or {})  # {regular job: fallback job}, only those the owner approved
     if selftest:
         s, jobs = {"retry_wait_minutes": 1, "retries": 1}, SELFTEST_JOBS
@@ -89,14 +91,14 @@ def render(registry: dict, config: dict, selftest: bool = False, fallbacks: dict
             {"sources": jobs},
             {"failed": []},
         ] + ([{"fallbacks": fallbacks}] if fallbacks else [])}},
-        {"first_try": {"for": {"value": "job", "in": "${sources}", "steps": _try_source("${0}", "first")}}},
+        {"first_try": {"for": {"value": "job", "in": "${sources}", "steps": _try_source("${0}", "first", default_timeout)}}},
     ]
     if s["retries"]:
         steps.append({"retry_rounds": {"for": {"value": "retry_round", "range": [1, s["retries"]], "steps": [
             {"all_done": {"switch": [{"condition": "${len(failed) == 0}", "next": "break"}]}},
             {"wait": {"call": "sys.sleep", "args": {"seconds": s["retry_wait_minutes"] * 60}}},
             {"take_failed": {"assign": [{"trying": "${failed}"}, {"failed": []}]}},
-            {"retry_each": {"for": {"value": "job", "in": "${trying}", "steps": _try_source("${retry_round}", "retry")}}},
+            {"retry_each": {"for": {"value": "job", "in": "${trying}", "steps": _try_source("${retry_round}", "retry", default_timeout)}}},
         ]}}})
     if fallbacks:
         # A source still failing after its retries, with an approved browser fallback: its fallback job runs
@@ -109,7 +111,7 @@ def render(registry: dict, config: dict, selftest: bool = False, fallbacks: dict
                 {"no_fallback": {"assign": [{"failed": "${list.concat(failed, job)}"}], "next": "continue"}},
                 {"fallback_run": {
                     "try": {"steps": [
-                        {"fallback_job": _run("fallbacks[job]")},
+                        {"fallback_job": _run("fallbacks[job]", default_timeout)},
                         {"fallback_log": {"call": "sys.log", "args": {"severity": "WARNING", "json": {
                             "event": "source-recovered-by-browser", "job": "${job}"}}}},
                     ]},
@@ -121,12 +123,12 @@ def render(registry: dict, config: dict, selftest: bool = False, fallbacks: dict
                 }},
             ]}}},
         ]}})
-    steps += [{job.replace("-", "_"): _run(f'"{job}"')} for job in ([] if selftest else AFTER_INGEST)]
+    steps += [{job.replace("-", "_"): _run(f'"{job}"', timeout_seconds(s_all, job))} for job in ([] if selftest else AFTER_INGEST)]
     if dedi and not selftest:
         # The DeDi watchdog (docs/dedi.md): checks the published set and republishes if needed. Non-fatal: the
         # day's data is already served; a failure is logged here and the job's own alert emails the owner.
         steps.append({"dedi_check": {
-            "try": _run('"dedi-check"'),
+            "try": _run('"dedi-check"', timeout_seconds(s_all, "dedi-check")),
             "except": {"as": "e", "steps": [{"dedi_check_failed": {"call": "sys.log", "args": {
                 "severity": "WARNING", "json": {"event": "dedi-check-failed", "error": "${e}"}}}}]},
         }})
