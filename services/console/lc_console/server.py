@@ -315,12 +315,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def _site(url: str, hosts=None):
-    """The site's address, if ``url`` is one: https and a run.app host, or one of the site's own hosts
-    (LC_SITE_HOSTS, from config/site.yaml), so the link can't lead elsewhere."""
+    """The site's address, if ``url`` is one: https and one of the site's own hosts (LC_SITE_HOSTS, from
+    config/site.yaml), so the link can't lead elsewhere. The site answers only at its domain since step 2
+    (2026-11-20), so a run.app address is no longer the site."""
     url = (url or "").strip().rstrip("/")
-    m = re.fullmatch(r"https://[a-z0-9-]+(\.[a-z0-9-]+)*\.run\.app", url)
-    if m:
-        return m.group(0)
     allowed = hosts if hosts is not None else [h.strip().lower() for h in os.environ.get("LC_SITE_HOSTS", "").split(",") if h.strip()]
     m = re.fullmatch(r"https://([a-z0-9-]+(\.[a-z0-9-]+)+)", url)
     return m.group(0) if m and m.group(1) in allowed else None

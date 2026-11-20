@@ -409,9 +409,12 @@ def test_login_accepts_the_same_clock_drift_as_setup(env):
     assert call(env, "/verify", "POST", body=f"code={code(env, -3)}").status == 303
 
 
-def test_the_way_back_only_goes_to_a_run_app_site(act):
-    r = call(act, "/act?do=pause&back=https%3A%2F%2Flei-commons-site-abc-uc.a.run.app")
-    assert 'href="https://lei-commons-site-abc-uc.a.run.app/#/system"' in r.body
+def test_the_way_back_only_goes_to_the_site(act, monkeypatch):
+    monkeypatch.setenv("LC_SITE_HOSTS", "lei-commons.nfh.global")
+    r = call(act, "/act?do=pause&back=https%3A%2F%2Flei-commons.nfh.global")
+    assert 'href="https://lei-commons.nfh.global/#/system"' in r.body
+    r = call(act, "/act?do=pause&back=https%3A%2F%2Flei-commons-site-abc-uc.a.run.app")  # no longer the site
+    assert "run.app" not in r.body and 'href="https://site.test/#/system"' in r.body
     r = call(act, "/act?do=pause&back=https%3A%2F%2Fevil.example%2F")
     assert "evil.example" not in r.body and 'href="https://site.test/#/system"' in r.body
 
@@ -454,12 +457,11 @@ def test_a_cross_site_post_is_refused_even_with_a_good_code(act):
     assert status == 403 and act.app.backend.state["state"] == "running"
 
 
-def test_the_back_link_accepts_only_run_app_and_the_sites_own_domain():
+def test_the_back_link_accepts_only_the_sites_own_domain():
     from lc_console.server import _site
     hosts = ["lei-commons.nfh.global"]
     assert _site("https://lei-commons.nfh.global/", hosts) == "https://lei-commons.nfh.global"
-    assert _site("https://lei-commons-site-abc-uc.a.run.app", hosts) == "https://lei-commons-site-abc-uc.a.run.app"
-    for bad in ("https://evil.example", "http://lei-commons.nfh.global", "https://lei-commons.nfh.global.evil.example",
+    for bad in ("https://lei-commons-site-abc-uc.a.run.app", "https://evil.example", "http://lei-commons.nfh.global", "https://lei-commons.nfh.global.evil.example",
                 "https://lei-commons.nfh.global/x?y", "javascript:alert(1)", "https://x.nfh.global"):
         assert _site(bad, hosts) is None, bad
     assert _site("https://lei-commons.nfh.global", []) is None  # not configured: not accepted
