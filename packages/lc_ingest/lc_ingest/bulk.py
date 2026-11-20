@@ -20,8 +20,9 @@ separate dataset); no addresses or officers. GLEIF RA000014 writes ACNs with spa
 
 Canada (Corporations Canada, open.canada.ca, OGL-Canada 2.0): four daily CSVs (active and inactive,
 business and other federal corporations), all processed each week, one after another. The
-registered office's street lines are kept when given (owner decision 2026-11-16). GLEIF RA000072 writes numbers with a check digit the files lack ("1561061-3"), so about
-7,900 federal corporations with an LEI don't merge yet.
+registered office's street lines are kept when given (owner decision 2026-11-16). The files' corporation
+numbers include the check digit, as GLEIF RA000072's do ("454461-7" is 4544617), but never a leading zero,
+which GLEIF sometimes keeps ("046311-6" is 463116): config/sources.yaml gleif_identity drops it (2026-11-20).
 """
 
 from __future__ import annotations

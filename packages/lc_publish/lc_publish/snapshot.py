@@ -25,6 +25,7 @@ from lc_core.snapshot_format import (CHANGES_KIND, ENTITY_KIND, RELATIONSHIP_CHA
                                      RELATIONSHIP_KIND, SCHEMA_VERSION, SHARDS, days_between, group_of, part_name,
                                      parts_for)
 
+from lc_core import tombstone
 from lc_core.attribution import record_url
 
 from lc_core.status import UNKNOWN as UNKNOWN_STATUS
@@ -73,10 +74,14 @@ def merge(records_by_source: dict, order: list = None, statuses=None, unmapped: 
 
     Each merged record gets ``statusCategory``: its legalStatus mapped by the map of the source that
     supplied that legalStatus (``statuses``, an lc_core.status.StatusMap; config/status.yaml by default).
-    Words the map doesn't list are counted in ``unmapped`` as "<source>: <word>"."""
+    Words the map doesn't list are counted in ``unmapped`` as "<source>: <word>".
+
+    A tombstone (lc_core.tombstone: an ID that merged into another) is never merged with anything: it is
+    published on its own, from the first source that holds it, with the category ``merged``. Should a live
+    record hold the same ID in any source, the live record keeps the ID and the tombstone is left out."""
     from lc_core import status as status_config
 
-    merged, status_from = {}, {}
+    merged, status_from, tombstones = {}, {}, {}
     order = order or [s["id"] for s in sources()]
     statuses = statuses or status_config.default()
     unknown = set(records_by_source) - set(order)
@@ -84,6 +89,10 @@ def merge(records_by_source: dict, order: list = None, statuses=None, unmapped: 
         raise ValueError(f"sources not in the registry: {sorted(unknown)}")
     for source in ({"id": sid} for sid in order):
         for directory_id, record in records_by_source.get(source["id"], {}).items():
+            if tombstone.is_tombstone(record):
+                tombstones.setdefault(directory_id, {**record, "sources": [source["id"]],
+                                                     "statusCategory": tombstone.CATEGORY})
+                continue
             if "legalStatus" in record and directory_id not in status_from:
                 status_from[directory_id] = source["id"]  # the source whose legalStatus the record keeps
             current = merged.get(directory_id)
@@ -98,6 +107,8 @@ def merge(records_by_source: dict, order: list = None, statuses=None, unmapped: 
         record["statusCategory"], mapped = statuses.category(sid, record.get("legalStatus"))
         if not mapped and unmapped is not None:
             unmapped[f"{sid}: {record['legalStatus']}"] += 1
+    for directory_id, record in tombstones.items():
+        merged.setdefault(directory_id, record)
     return merged
 
 
