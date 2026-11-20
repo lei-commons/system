@@ -19,4 +19,4 @@
 
 domain: lei-commons.nfh.global
 load_balancer: true
-only_through_load_balancer: false
+only_through_load_balancer: true
