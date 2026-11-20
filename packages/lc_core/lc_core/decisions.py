@@ -56,6 +56,15 @@ def _event(actor: str, record: dict) -> Event | None:
                   f"{record.get('max_fraction', '?')}; a one-time mapping upgrade approved by the "
                   f"{record.get('approved_by', '?')} on {record.get('approved_on', '?')}" + (f": {why}" if why else ""))
         return Event(actor, "let a mapping upgrade through for", subject, "approved", reason, refs=_refs(record))
+    if kind == "gleif-rekeyed":  # lc_ingest.rekey: the identity rules reached every stored GLEIF record
+        by = record.get("movedByAuthority") or {}
+        per = ", ".join(f"{k} {_n(v)}" for k, v in sorted(by.items())) or "none"
+        reason = (f"{_n(record.get('moved', 0))} records moved to their register's ID ({per}); "
+                  f"{_n(record.get('tombstones', 0))} old IDs kept as merged tombstones; "
+                  f"{_n(record.get('keptApart', 0))} kept apart as possible duplicates; "
+                  f"{_n(record.get('total', 0))} records stored")
+        refs = {**_refs(record), **{f"moved_{k}": v for k, v in by.items() if isinstance(v, int)}}
+        return Event(actor, "re-keyed", f"{subject} rules {record.get('rules', '?')}", "done", reason, refs=refs)
     if kind == "already-done":
         return Event(actor, "checked", subject, "skipped", "already ingested", refs=_refs(record))
     if kind == "built":

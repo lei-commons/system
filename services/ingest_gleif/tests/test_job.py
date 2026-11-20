@@ -9,7 +9,7 @@ import pytest
 from lc_core.control import SystemHalted
 from lc_core.fetch import Denied
 from lc_ingest.store import decode_records, shard_of
-from ingest_gleif.job import LISTING, choose, run
+from ingest_gleif.job import LISTING, choose, run, run_entities
 
 FIELDS = ["LEI", "Entity.LegalName", "Entity.LegalAddress.FirstAddressLine", "Entity.LegalAddress.City",
           "Entity.LegalAddress.Country", "Entity.RegistrationAuthority.RegistrationAuthorityID",
@@ -55,6 +55,7 @@ class FakeGateway:
 class MemStore:
     def __init__(self):
         self.manifest, self.shards, self.changes, self.sources, self.writes = {"records": 0, "processed": []}, {}, {}, [], []
+        self.markers = {}
 
     def read_manifest(self):
         return json.loads(json.dumps(self.manifest))
@@ -78,6 +79,13 @@ class MemStore:
 
     def keep_source(self, name, path):
         self.sources.append(name)
+
+    def has_marker(self, name):
+        return name in self.markers
+
+    def write_marker(self, name, body):
+        self.writes.append("marker")
+        self.markers[name] = body
 
 
 def all_records(store):
@@ -256,3 +264,39 @@ def test_relationships_load_into_their_own_store():
     assert out == "done" and gw.fetched == ["https://goldencopy.gleif.org/rr-full.zip"] and len(rels) == 2
     assert {r["endNode"] for r in rels.values()} == {lei(2)} and all(k.startswith("REL") for k in rels)
     assert store.sources == ["2026-11-07T080000-rr-full.zip"]
+
+
+def test_the_entity_run_then_rekeys_every_stored_record_once():
+    from lc_core import tombstone
+    from lc_core.directory_id import mint
+
+    store = MemStore()
+    go(FakeGateway([zipped([row(lei(i), f"{i:08d}") for i in range(1, 120)])]), store)
+    # A record stored before gleif_identity listed Oregon: minted as GLEIF writes its number.
+    old = {"directoryId": mint("US", "RA000631", "057491-14"), "lei": lei(500), "legalName": "PRECISION CASTPARTS CORP.",
+           "registrationAuthority": "RA000631", "registrationNumber": "057491-14", "legalAddress": {"country": "US"}}
+    store.shards.setdefault(shard_of(old["directoryId"]), {})[old["directoryId"]] = old
+    store.manifest["records"] += 1
+    logs = []
+    gw = FakeGateway([zipped([row(lei(1), "00000001", name="RENAMED LIMITED")])], publish="2026-11-08 08:00:00")
+    assert run_entities(gw, store, gate=lambda: None, log=logs.append) == "done"
+    assert [e["event"] for e in logs] == ["done", "gleif-rekeyed"] and store.writes[-2:] == ["manifest", "marker"]
+    assert logs[1]["movedByAuthority"] == {"RA000631": 1} and logs[1]["tombstones"] == 1
+    records = all_records(store)
+    new = mint("US", "RA000631", "5749114")
+    assert records[new]["lei"] == lei(500) and tombstone.merged_into(records[old["directoryId"]]) == new
+    assert store.manifest["records"] == len(records) == 121
+    logs.clear()
+    gw = FakeGateway([zipped([row(lei(2), "00000002", name="RENAMED TOO LIMITED")])], publish="2026-11-09 08:00:00")
+    assert run_entities(gw, store, gate=lambda: None, log=logs.append) == "done"
+    assert [e["event"] for e in logs] == ["done"]  # the same rules: no second re-key
+
+
+def test_no_rekey_after_a_run_that_did_not_finish():
+    def gate():
+        raise SystemHalted("system is paused")
+
+    store = MemStore()
+    logs = []
+    assert run_entities(FakeGateway([]), store, gate=gate, log=logs.append) == "halted"
+    assert [e["event"] for e in logs] == ["halted"] and not store.markers

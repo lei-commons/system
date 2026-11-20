@@ -18,6 +18,7 @@ import tempfile
 import threading
 
 import duckdb
+from lc_core import tombstone
 from lc_core.attribution import credits
 
 MAX_LIMIT = 100
@@ -119,6 +120,9 @@ class Snapshot:
         if source:
             filters.append("list_contains(string_split(sources, ','), ?)")
             params.append(source.strip()[:40])
+        if status.strip() != tombstone.CATEGORY:  # tombstones only when asked for, or by their own ID
+            filters.append("(statusCategory IS DISTINCT FROM ? OR directoryId = ?)")
+            params += [tombstone.CATEGORY, q.upper()]
         where = "".join(f" AND {f}" for f in filters)
 
         # IDs and registration numbers are looked up exactly; "3M" is still a name.
@@ -154,6 +158,8 @@ class Snapshot:
                 record[field] = json.loads(record[field])
         record["sources"] = record["sources"].split(",")
         record["credits"] = credits(record, self._sources)
+        if tombstone.merged_into(record):  # an old ID: the record it merged into
+            record["mergedInto"] = tombstone.merged_into(record)
         return record
 
     def relationships(self, directory_id: str):
@@ -179,7 +185,8 @@ class Snapshot:
             return []
         prefix = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
         return self._rows("SELECT directoryId, legalName, country FROM e WHERE legalName ILIKE ? ESCAPE '\\' "
-                          "ORDER BY length(legalName), legalName LIMIT ?", [prefix, max(1, min(int(limit), 20))])
+                          "AND statusCategory IS DISTINCT FROM ? ORDER BY length(legalName), legalName LIMIT ?",
+                          [prefix, tombstone.CATEGORY, max(1, min(int(limit), 20))])
 
     def graph(self, directory_id: str, depth: int = 1, per_node: int = GRAPH_PER_NODE, max_edges: int = GRAPH_MAX_EDGES):
         """The neighbourhood of an entity: nodes and edges ready to draw.
