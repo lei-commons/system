@@ -15,6 +15,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -91,26 +92,36 @@ def combined(readers):
 def publish(snapshots, data, date: str, readers: dict, relationships, settings, work: Path, record,
             decision_log=None, shards: int = None, now=None, dedi: bool = False) -> dict:
     """Build the day against the last published state, upload it, point latest.json at it, then prune."""
+    clock, timings = time.monotonic, {}
+    started = clock()
     previous, state, why_not = previous_state(snapshots, data, date, work)
+    timings["previous_s"] = round(clock() - started)
     if why_not:
         record({"event": "no-previous-state", "reason": why_not})
     extra = {"shards": shards} if shards else {}
+    mark = clock()
     manifest = build_sharded(readers, work / "out", date, settings=settings.snapshots, previous=previous, state=state,
                              relationships=relationships, decision_log=decision_log, force_full=why_not, **extra)
+    timings["build_s"] = round(clock() - mark)
     shutil.rmtree(work / "previous-state", ignore_errors=True)
+    mark = clock()
     sent = upload_day(snapshots, work / "out", manifest)
     upload_state(data, work / "out", date)
     latest = point_latest(snapshots, manifest)
+    timings["upload_s"] = round(clock() - mark)
     changes = manifest["changes"]
     record({"event": "built", **{k: manifest[k] for k in ("date", "kind", "why", "anchor", "records", "recordsPerSource",
                                                            "inMoreThanOneSource", "relationships", "snapshotRoot")},
             "base": (manifest.get("base") or {}).get("date"), "parts": len(manifest["parts"]), "files": len(manifest["files"]),
             **{k: changes[k] for k in ("added", "changed", "deleted", "relationshipsAdded", "relationshipsChanged",
                                        "relationshipsDeleted")}, **sent})
+    mark = clock()
     try:  # retention: a failure here never undoes the day; the next run tries again
         prune(snapshots, data, date, latest, settings.snapshots, now=now, log=record)
     except Exception as exc:
         record({"event": "prune-skipped", "error": type(exc).__name__, "reason": str(exc)[:200]})
+    timings["prune_s"] = round(clock() - mark)
+    mark = clock()
     if dedi:  # the DeDi files describe the new day (docs/dedi.md); a failure never undoes the day
         try:
             from .dedi_job import publish_after_build  # here: only the job needs lc-dedi
@@ -121,6 +132,9 @@ def publish(snapshots, data, date: str, readers: dict, relationships, settings, 
             record({"event": "dedi-busy", "reason": str(exc)})
         except Exception as exc:  # e.g. the lease couldn't be taken: the dedi-check step repairs it
             record({"event": "dedi-failed", "error": f"{type(exc).__name__}: {str(exc)[:200]}"})
+        timings["dedi_s"] = round(clock() - mark)
+    # Where the build's time goes (it grows with the directory; the job's limit is in infra/terraform/cycle.tf).
+    record({"event": "timings", **timings, "total_s": round(clock() - started)})
     return manifest
 
 

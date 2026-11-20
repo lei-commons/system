@@ -5,7 +5,7 @@ name: deploy-load-db
 on:
   push:
     branches: [main]
-    paths: ["services/load_db/**", "packages/lc_core/**", "packages/lc_directory/**", "services/load_db/Dockerfile", ".github/workflows/deploy-load-db.yml", "config/publishing.yaml"]
+    paths: ["services/load_db/**", "packages/lc_core/**", "packages/lc_directory/**", "services/load_db/Dockerfile", ".github/workflows/deploy-load-db.yml", "config/cycle.yaml", "config/publishing.yaml"]
   workflow_dispatch:
 
 permissions:
@@ -37,7 +37,7 @@ jobs:
       - name: Roll out, if the job exists
         run: |
           if gcloud run jobs describe load-db --region "${{ vars.GCP_REGION }}" >/dev/null 2>&1; then
-            gcloud run jobs update load-db --region "${{ vars.GCP_REGION }}" --image "$IMAGE:$GITHUB_SHA" --task-timeout 7200s --memory 16Gi --cpu 4
+            gcloud run jobs update load-db --region "${{ vars.GCP_REGION }}" --image "$IMAGE:$GITHUB_SHA" --task-timeout "$(( $(yq '.timeouts_minutes."load-db" // .timeouts_minutes.default' config/cycle.yaml) * 60 ))s" --memory 16Gi --cpu 4
           else
             echo "::notice::load-db doesn't exist yet; the image is pushed"
           fi

@@ -14,7 +14,7 @@ spec.loader.exec_module(rc)
 
 REGISTRY = {"sources": [{"id": "a", "pipeline": {"job": "ingest-aa"}}, {"id": "b"}, {"id": "c", "pipeline": {"job": "ingest-cc"}}]}
 CONFIG = {"schedule_utc": "02:00", "sources": {"retry_wait_minutes": 10, "retries": 5, "browser_fallback_after_failures": 3},
-          "gate": {"clean_days": 4}, "watchdogs": {"dedi_check_utc": "14:17"}}
+          "gate": {"clean_days": 4}, "watchdogs": {"dedi_check_utc": "14:17"}, "timeouts_minutes": {"default": 120}}
 
 
 def steps(doc):
@@ -143,3 +143,17 @@ def test_the_dedi_check_runs_after_the_load_and_never_fails_the_cycle():
     assert "list.concat(failed" not in str(step["except"])  # never adds to the failed sources
     assert "dedi_check" not in steps(rc.render(REGISTRY, CONFIG))  # DeDi off: no step
     assert "dedi_check" not in steps(rc.render(REGISTRY, CONFIG, selftest=True, dedi=True))  # the self-test never
+
+
+
+def test_each_jobs_time_limit_comes_from_the_config():
+    config = {**CONFIG, "timeouts_minutes": {"default": 120, "build-snapshot": 180}}
+    s = steps(rc.render(REGISTRY, config, dedi=True))
+    assert s["build_snapshot"]["args"]["connector_params"]["timeout"] == 10800
+    assert s["load_db"]["args"]["connector_params"]["timeout"] == 7200
+    run = s["first_try"]["for"]["steps"][0]["first_run"]["try"]
+    assert run["args"]["connector_params"]["timeout"] == 7200
+    with pytest.raises(rc.ConfigError, match="default"):
+        rc.render(REGISTRY, {**CONFIG, "timeouts_minutes": {"build-snapshot": 180}})
+    with pytest.raises(rc.ConfigError, match="build-snapshot"):
+        rc.render(REGISTRY, {**CONFIG, "timeouts_minutes": {"default": 120, "build-snapshot": 5}})
