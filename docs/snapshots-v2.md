@@ -163,6 +163,57 @@ record as a change. Every leaf changes with a new column, so a changes file woul
 whole directory again. The days before stay rebuildable from their own files: a leaf is the hash
 of the row as published that day.
 
+## GLEIF identity and the re-key (owner decision 2026-11-20)
+
+A company with an LEI merges with its register record when both mint the same directory ID: country,
+GLEIF's code for the register and the register's number. Where GLEIF writes these differently from the
+register, `config/sources.yaml` `gleif_identity` says how to read GLEIF's form (`lc_core.gleif_identity`,
+checked when read):
+
+| GLEIF code | Read as | Why |
+|---|---|---|
+| RA000585/6/7 | GB-COH, country GB | Companies House (as before) |
+| RA000631 | leading zeros dropped, country US | Oregon writes 5749114 where GLEIF writes "057491-14" |
+| RA000072 | leading zeros dropped, country CA | Canada writes 463116 where GLEIF writes "046311-6" |
+| RA000473 | RA000472, country NO | GLEIF files Brønnøysund numbers under both codes |
+| RA000412 | RA001075 with the check digit added, country JP | the commercial registration number is the corporate number without its check digit |
+
+(Checked 2026-11-20 against data.oregon.gov and Corporations Canada's files: the earlier notes that Oregon's
+"-NN" suffix and Canada's check digit were missing from the registers were wrong; both registers keep them,
+and only the leading zeros differ.) A number a rule doesn't fit is minted as GLEIF writes it.
+
+**The re-key.** A day's GLEIF file holds only the LEIs that changed, so new rules would reach the rest of
+the store slowly. After its entity file, ingest-gleif re-keys every stored record once per set of rules
+(`lc_ingest.rekey`; the rules' 12-character fingerprint names the pass, and a marker
+`markers/rekey-<fingerprint>.json` in the gleif store records it as done). A record whose ID changes:
+- moves to its new ID, every field kept. If another LEI already holds that ID, the two are kept apart as on
+  any day (Article 4.2): it gets its own LEI-based ID and `possible-duplicate:<ID>`;
+- leaves a **tombstone** at its old ID (`lc_core.tombstone`): the name, jurisdiction, registration and
+  country it was published with, and the label `merged:<new ID>` (labels.yaml `merged`). No LEI: the LEI
+  belongs to the record it merged into, so an LEI always resolves to one record.
+
+The pass is held by the volume guard like any publication (key `rekey <fingerprint>` for
+`mapping_upgrades`). It logs one decision, `gleif-rekeyed`: `moved`, `movedByAuthority`, `tombstones`,
+`added`, `thereAlready` (the day's file had already put the record at its new ID), `keptApart`, `changes`
+and the store's recounted `total`. Its ledger lines are in `changes/rekey-<fingerprint>.jsonl.gz`. A
+second run does nothing; a run cut short before its marker finds its own work done and finishes the rest.
+Measured locally on a full GLEIF store (the 2026-11-07 golden copy, 3,361,146 records): 6,135 records
+moved (RA000412 3,523, RA000473 2,058, RA000072 386, RA000631 162, RA000472 6), 18 kept apart, 3 relabelled,
+in 115 s and 210 MB; 0.18% of the store, far under the guard's 10%. A second run moved nothing.
+
+**In the snapshot.** A tombstone is never merged with anything: it is published as its own row, sources
+`gleif`, `statusCategory` `merged`, no `legalStatus` and no `lei`. (Should a live record of any source
+hold the same ID, the live record keeps it.) No column is added, so the manifest's `columns` don't change
+and the day of the re-key is an ordinary changes day: each moved record is two changed rows (its old ID,
+now a tombstone, and the register record it joined, or an added row where there is none). Relationships
+link LEIs to IDs afresh every day, so they follow the move. `records` and `recordsPerSource.gleif` count
+tombstones too; `stats.byStatusCategory.merged` says how many.
+
+**Serving.** `GET /api/v1/entities/<old ID>` answers with the tombstone and `mergedInto`; the entity page
+says it merged and links to the record. Search and suggestions leave tombstones out, except a search for
+the old ID itself or with `status=merged`. Dashboards count them under `merged`. The database needs no
+change (load version 6 stays).
+
 ## Compatibility
 
 Readers accept both formats: days built before v2 (schemaVersion 1, a full copy per day) stay

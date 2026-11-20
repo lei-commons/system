@@ -7,18 +7,12 @@ address, so those records are dropped here, before anything is stored.
 
 from __future__ import annotations
 
+from lc_core import gleif_identity
 from lc_core.directory_id import mint
 
-# GLEIF Registration Authority codes for registers we also read directly, so
-# both sources mint the same directory ID for the same company.
-REGISTRIES = {
-    "RA000585": "GB-COH",  # Companies House, England and Wales
-    "RA000586": "GB-COH",  # Companies House, Northern Ireland
-    "RA000587": "GB-COH",  # Companies House, Scotland
-}
-# A register's own country, so a company with a foreign address still gets the
-# same ID from GLEIF as from the register itself.
-REGISTRY_COUNTRY = {"GB-COH": "GB"}
+# How GLEIF's registration authority and number map to a register we read directly (Companies House's
+# three codes, Oregon, Canada, Norway, Japan), so both sources mint the same directory ID for the same
+# company, lives in config/sources.yaml ``gleif_identity`` (lc_core.gleif_identity).
 NATURAL_PERSON_CATEGORIES = {"SOLE_PROPRIETOR"}
 ADDRESS_FIELDS = ("addressLines", "city", "region", "country", "postalCode")
 
@@ -51,6 +45,21 @@ def record_country(record: dict) -> str:
     return (record.get("legalAddress") or {}).get("country") or (record.get("legalJurisdiction") or "")[:2]
 
 
+def directory_id(lei: str, authority, number, country: str, identity=None) -> str:
+    """The ID for a GLEIF record: its register's key when GLEIF gives one, else its LEI.
+    ``identity`` (lc_core.gleif_identity.Identity) defaults to config/sources.yaml's rules."""
+    if authority and number:
+        return mint(*(identity or gleif_identity.default()).key(authority, number, country))
+    return lei_id(country, lei)
+
+
+def stored_id(record: dict, identity=None) -> str:
+    """The ID ``to_record`` gives a stored GLEIF record under ``identity``, from the record's own fields
+    (lc_ingest.rekey). Before any collision is kept apart (pipeline.separate_collision)."""
+    return directory_id(record["lei"], record.get("registrationAuthority"), record.get("registrationNumber"),
+                        record_country(record), identity)
+
+
 def to_record(raw: dict) -> dict:
     """Map one record from the GLEIF API to directory fields. Raises Skip to drop it."""
     attributes = raw["attributes"]
@@ -65,14 +74,8 @@ def to_record(raw: dict) -> dict:
     authority = (entity.get("registeredAt") or {}).get("id")
     number = entity.get("registeredAs")
 
-    if authority and number:
-        registry = REGISTRIES.get(authority, authority)
-        directory_id = mint(REGISTRY_COUNTRY.get(registry, country), registry, number)
-    else:
-        directory_id = lei_id(country, lei)
-
     record = {
-        "directoryId": directory_id,
+        "directoryId": directory_id(lei, authority, number, country),
         "lei": lei,
         "legalName": (entity.get("legalName") or {}).get("name"),
         "otherNames": _names(entity),

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import re
 
+from lc_core import tombstone
 from lc_core.attribution import credits
 from psycopg.rows import dict_row
 
@@ -206,6 +207,11 @@ class Directory:
         if source:
             filters.append("%s = ANY(sources)")
             filter_params.append(source.strip()[:40])
+        hide = []  # tombstones (old IDs that merged into another) only when asked for, or by their own ID
+        if status.strip() != tombstone.CATEGORY:
+            filters.append("(status_category IS DISTINCT FROM %s OR directory_id = %s)")
+            hide = [tombstone.CATEGORY, q.upper()]
+            filter_params += hide
         extra = "".join(f" AND {f}" for f in filters)
 
         if ID_LIKE.match(q.upper()) or (q.isalnum() and len(q) >= 6 and any(c.isdigit() for c in q)):
@@ -214,6 +220,8 @@ class Directory:
         else:
             # The matches, at most COUNT_CAP + 1 of them, each with its rank...
             match, match_params, row_filter, row_params = text_match(q, country, status, source, self.broad)
+            if hide:
+                row_filter, row_params = row_filter + " AND status_category IS DISTINCT FROM %s", row_params + hide[:1]
             rows = self._rows(f"SELECT {SUMMARY}, ts_rank(search, {match}) AS rank FROM live.entities "
                               f"WHERE search @@ {match}{row_filter} LIMIT {COUNT_CAP + 1}", match_params * 2 + row_params,
                               settings=SEARCH_SETTINGS)
@@ -236,8 +244,8 @@ class Directory:
         if len(q) < 2:
             return []
         return self._rows("SELECT directory_id AS \"directoryId\", legal_name AS \"legalName\", country FROM live.entities "
-                          f"WHERE {NAME_KEY} LIKE %s ORDER BY {NAME_KEY} LIMIT %s",
-                          [_like(q.lower()) + "%", max(1, min(int(limit), 20))])
+                          f"WHERE {NAME_KEY} LIKE %s AND status_category IS DISTINCT FROM %s ORDER BY {NAME_KEY} LIMIT %s",
+                          [_like(q.lower()) + "%", tombstone.CATEGORY, max(1, min(int(limit), 20))])
 
     def entity(self, directory_id: str):
         row = self._one("SELECT * FROM live.entities WHERE directory_id = %s", [directory_id.strip().upper()])
@@ -245,6 +253,8 @@ class Directory:
             return None
         record = {CAMEL.get(k, k): v for k, v in row.items() if v is not None and k not in ("search", "names_text")}
         record["credits"] = credits(record, self.sources())
+        if tombstone.merged_into(record):  # an old ID: the record it merged into
+            record["mergedInto"] = tombstone.merged_into(record)
         return record
 
     def sources(self) -> dict:
