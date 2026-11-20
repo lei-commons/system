@@ -89,3 +89,64 @@ def test_the_pages_date_is_the_unicode_files():
     assert nta.page_date(html) == "2026-10-30"
     with pytest.raises(ValueError):
         nta.page_date("<h2>something else</h2>")
+
+
+# ---- daily difference files ----
+
+DIFF_PAGE = """<h1>差分データダウンロード</h1>
+<h2>CSV形式・Shift_JIS</h2><table><tr><th>更新日</th><th>ファイル</th></tr>
+<tr><td>令和8年11月19日</td><td><a href="#" onclick="return doDownload(30001);">zip 12KB</a></td></tr></table>
+<h2 class="title">CSV形式・<span>Unicode</span></h2><table><tr><th>更新日</th><th>ファイル</th></tr>
+<tr><td>令和8年11月19日</td><td><a href="#" onclick="return doDownload(30103);">zip 14KB</a></td></tr>
+<tr><td>令和8年 11月 17日</td><td><a href="#" onclick="return doDownload(30101);">zip 13KB</a></td></tr>
+<tr><td>2026年11月18日</td><td><a href="#" onclick="return doDownload(30102);">zip 2MB</a></td></tr>
+<tr><td>令和8年11月1日～令和8年11月30日</td><td><a href="#" onclick="return doDownload(30199);">zip</a></td></tr>
+<tr><td>令和8年11月16日</td><td>no file</td></tr></table>
+<h2>XML形式・Unicode</h2><table><tr><td>令和8年11月19日</td><td><a onclick="return doDownload(30201);">zip</a></td></tr></table>"""
+
+
+def test_the_daily_files_are_the_dated_rows_under_the_section_oldest_first():
+    files = nta.daily_files(DIFF_PAGE, "CSV形式・Unicode")
+    assert files == [{"day": "2026-11-17", "number": "30101", "label": "令和8年11月17日"},
+                     {"day": "2026-11-18", "number": "30102", "label": "2026年11月18日"},
+                     {"day": "2026-11-19", "number": "30103", "label": "令和8年11月19日"}]
+    # a row with two dates (a period) or no link is not a daily file; other sections are never read
+    with pytest.raises(ValueError, match="heading"):
+        nta.daily_files(DIFF_PAGE, "CSV形式・UTF-16")
+    with pytest.raises(ValueError, match="no dated daily files"):
+        nta.daily_files("<h2>CSV形式・Unicode</h2><p>準備中</p>", "CSV形式・Unicode")
+
+
+def test_a_diff_row_is_the_latest_state_and_every_change_is_an_upsert():
+    assert nta.nta_diff_record(row(process="11", name="株式会社新名"))["legalName"] == "株式会社新名"
+    closed = nta.nta_diff_record(row(process="71", closeDate="2026-11-18", closeCause="11"))
+    assert closed["legalStatus"] == "Closed: dissolved by merger" and closed["dissolutionDate"] == "2026-11-18"
+    assert nta.nta_diff_record(row(process="22"))["legalStatus"] == "Active"
+    assert "labels" not in nta.nta_diff_record(row(process="01"))
+
+
+@pytest.mark.parametrize("over,why", [
+    ({"latest": "0"}, "earlier state"), ({"process": "55"}, "unknown process code 55"),
+    ({"process": ""}, "unknown process code"), ({"hihyoji": "1"}, "excluded"),
+])
+def test_diff_rows_left_out(over, why):
+    with pytest.raises(Skip, match=why):
+        nta.nta_diff_record(row(**over))
+
+
+def test_a_deletion_labels_the_record_and_never_adds_one():
+    from collections import Counter
+    deleted = nta.nta_diff_record(row(process="99"))
+    assert deleted["labels"] == [nta.ABSENT] and deleted["legalName"]  # kept, labelled, never removed
+    other = nta.nta_diff_record(row(process="99", corporateNumber="5010001000001"))
+    counts = Counter()
+    kept = list(nta.keep_known_withdrawn(0, [deleted, other, nta.nta_diff_record(row(process="01", corporateNumber="7010001000002"))],
+                                         {deleted["directoryId"]: {}}, counts))
+    assert [r["registrationNumber"] for r in kept] == ["3010401016070", "7010001000002"]
+    assert counts["skipped: deleted, never held"] == 1
+
+
+def test_diffs_apply_on_the_latest_full_file_and_a_new_one_applies_them_again():
+    processed = ["2026-09-30 zenkoku-unicode", "2026-10-02 diff-unicode on 2026-09-30", "2026-10-30 zenkoku-unicode"]
+    assert nta.latest_full(processed) == "2026-10-30" and nta.latest_full(processed[1:2]) is None
+    assert nta.diff_key("2026-11-02", "2026-10-30") == "2026-11-02 diff-unicode on 2026-10-30"
