@@ -2,6 +2,7 @@
 
 - Keep every day from the last ``retain_days`` days, the latest day, and every earlier day a
   kept day needs to be rebuilt (back through its ``base`` links to its full snapshot).
+- With ``keep_monthly_full``, also keep the first full snapshot of every month, for good.
 - Delete every other day folder.
 - Delete parts no kept full snapshot uses, once older than ``prune_grace_days``.
 - Keep the newest ``state_kept`` days of build state, and the latest day's and its base's.
@@ -50,6 +51,18 @@ def plan(bucket, today: str, latest_date: str | None, settings) -> dict:
     keep = {d for d in days if d >= cutoff}
     if latest_date:
         keep.add(latest_date)
+    if getattr(settings, "keep_monthly_full", False):
+        # The first full snapshot of each month is kept for good, so a month's edition URLs stay valid.
+        # Days already being kept are checked first; a month with a kept full day needs nothing older.
+        months = {}
+        for day in days:
+            month = day[:7]
+            if month in months and months[month] < day:
+                continue
+            manifest = read(day)
+            if manifest and is_v2(manifest) and manifest["kind"] == "full":
+                months[month] = min(day, months.get(month, day))
+        keep.update(months.values())
     for day in sorted(keep):
         manifest = read(day)
         if manifest is None or not is_v2(manifest):

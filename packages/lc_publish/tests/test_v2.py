@@ -287,7 +287,7 @@ def test_pruning_keeps_what_kept_days_need_and_they_all_still_rebuild(tmp_path):
 
 
 def test_parts_are_kept_during_the_grace_period(tmp_path):
-    env = Env(tmp_path, settings(retain_days=1, full_every_days=1, prune_grace_days=3))
+    env = Env(tmp_path, settings(retain_days=1, full_every_days=1, prune_grace_days=3, keep_monthly_full=False))
     world = World(n=200)
     for _ in range(3):
         env.publish(world)
@@ -301,7 +301,7 @@ def test_parts_are_kept_during_the_grace_period(tmp_path):
 
 
 def test_dry_run_deletes_nothing(tmp_path):
-    env = Env(tmp_path, settings(retain_days=1, full_every_days=1, prune_dry_run=True))
+    env = Env(tmp_path, settings(retain_days=1, full_every_days=1, prune_dry_run=True, keep_monthly_full=False))
     world = World(n=200)
     for _ in range(4):
         env.publish(world)
@@ -459,3 +459,22 @@ def test_a_state_not_in_shard_order_is_still_read_right(tmp_path):
     reader = StateReader(path)
     assert not reader._in_order
     assert [len(reader.shard(n)) for n in range(4)] == [3, 3, 0, 6]
+
+
+def test_the_first_full_snapshot_of_each_month_is_kept_for_good(tmp_path):
+    # 2026-11-18 .. 2026-12-03: a full snapshot every 3 days, only 2 days retained.
+    (tmp_path / "on").mkdir(), (tmp_path / "off").mkdir()
+    kept = {}
+    for name, flag in (("on", True), ("off", False)):
+        env = Env(tmp_path / name, settings(retain_days=2, full_every_days=3, keep_monthly_full=flag))
+        world = World(n=200)
+        for _ in range(16):
+            env.publish(world)
+            world.mutate()
+        kept[name] = sorted(k.split("/")[0] for k in env.snapshots.objects if k[:2] == "20" and k.endswith("/manifest.json"))
+        if flag:
+            for date in ("2026-11-18", "2026-12-02"):  # November's and December's first full days
+                report, rows = env.rebuilt_rows(date)
+                assert report["ok"] and rows == env.truths[date]
+    assert "2026-11-18" in kept["on"] and "2026-11-18" not in kept["off"]
+    assert "2026-12-02" in kept["on"]
