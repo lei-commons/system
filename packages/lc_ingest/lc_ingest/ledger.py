@@ -9,6 +9,8 @@ from __future__ import annotations
 import hashlib
 import json
 
+from lc_core import guard
+
 CHECKS = ("schema", "invariants", "volume-guard")
 
 
@@ -44,16 +46,18 @@ def diff(old: dict, new: dict, source_id: str, maker: str, tier: int = 0) -> lis
     return changes
 
 
-def volume_guard(changed_records: int, total_records: int, max_fraction: float = 0.1, minimum: int = 100) -> None:
+def volume_guard(changed_records: int, total_records: int, settings=None) -> None:
     """Hold a batch that changes an implausible share of the records.
 
     A broken parser or a truncated source file looks like a mass change, so it
     is stopped here rather than rewriting the directory. A first load has no
-    baseline, and small batches are too noisy to judge.
+    baseline, and small batches are too noisy to judge. The share and the
+    minimum come from config/sources.yaml (``volume_guard``, lc_core.guard).
     """
-    if total_records < minimum:
+    settings = settings or guard.load()
+    if total_records < settings.minimum:
         return
-    if changed_records > total_records * max_fraction:
+    if changed_records > total_records * settings.max_fraction:
         raise VolumeGuardTripped(f"{changed_records} of {total_records} records changed")
 
 

@@ -153,6 +153,15 @@ def test_volume_guard_allows_normal_batches(changed, total):
     volume_guard(changed, total)
 
 
+def test_volume_guard_takes_its_share_and_minimum_from_settings():
+    from lc_core.guard import GuardSettings
+
+    volume_guard(250, 1000, GuardSettings(0.25, 100))
+    with pytest.raises(VolumeGuardTripped):
+        volume_guard(251, 1000, GuardSettings(0.25, 100))
+    volume_guard(900, 1000, GuardSettings(0.1, 1001))  # below the minimum: not judged
+
+
 def test_mass_change_returns_nothing():
     current = {}
     for i in range(200):
