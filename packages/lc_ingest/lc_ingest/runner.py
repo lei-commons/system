@@ -6,7 +6,9 @@
 4. Partition: map and filter every record, writing each to its shard's file on disk.
 5. Diff: one shard at a time, compare with the stored shard and stage the result.
    Only one shard's records are ever in memory, so file size doesn't matter.
-6. Guard: if an implausible share of existing records changed, stop with nothing written.
+6. Guard: if an implausible share of existing records changed, stop with nothing written,
+   unless the owner approved a one-time mapping upgrade for exactly this source and
+   publication (config/sources.yaml volume_guard.mapping_upgrades); that is logged.
 7. Write the changes, then the shards, then the manifest. A crash before the
    manifest leaves the file unprocessed, and the rerun finds the shards already
    updated, so nothing is applied twice.
@@ -22,6 +24,7 @@ import tempfile
 import time
 from collections import Counter, defaultdict
 
+from lc_core import guard
 from lc_core.allowlist import AllowList
 from lc_core.control import SystemHalted
 from lc_core.fetch import Denied, FetchError
@@ -62,7 +65,7 @@ class _Partitions:
 
 def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: str, allowlist: AllowList, log,
                kind: str = "entity", seen: bool = False, prepare=None, fetch=None, attempts: int = DOWNLOAD_ATTEMPTS,
-               check_as: str = None, sleep=time.sleep, backoff: float = 30.0) -> str:
+               check_as: str = None, sleep=time.sleep, backoff: float = 30.0, guard_settings=None) -> str:
     """Return the outcome: halted, denied, already-done, held or done.
 
     ``find(gateway, manifest)`` returns (key, url, filename). ``key`` identifies
@@ -79,6 +82,9 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
     ``fetch(gateway, url, file)``, if given, writes the publication into the
     open file instead of one download of ``url``. Singapore uses it to join 27
     files into one.
+
+    ``guard_settings`` (lc_core.guard.GuardSettings) defaults to config/sources.yaml's
+    ``volume_guard``. It is read before anything is fetched, so a bad setting stops the run.
     """
     try:
         gate()
@@ -86,6 +92,7 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
         log({"event": "halted", "source": source, "reason": str(exc)})
         return "halted"
 
+    settings = guard_settings or guard.load()
     manifest = store.read_manifest()
     try:
         key, url, filename = find(gateway, manifest)
@@ -190,10 +197,16 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
                 process(n, moved.pop(n), out)
 
         try:
-            volume_guard(changed_existing, manifest["records"])
+            volume_guard(changed_existing, manifest["records"], settings)
         except VolumeGuardTripped as exc:
-            log({"event": "held", "publish": key, "reason": str(exc)})
-            return "held"
+            upgrade = settings.upgrade_for(source, key)
+            if upgrade is None:
+                log({"event": "held", "publish": key, "reason": str(exc)})
+                return "held"
+            # A one-time mapping upgrade the owner approved for exactly this source and publication.
+            log({"event": "mapping-upgrade", "source": source, "publish": key, "changed": changed_existing,
+                 "total": manifest["records"], "max_fraction": settings.max_fraction, "reason": upgrade.reason,
+                 "approved_by": upgrade.approved_by, "approved_on": upgrade.approved_on})
 
         store.write_changes_file(filename.rsplit(".", 1)[0], changes_path)
         for n in sorted(staged):

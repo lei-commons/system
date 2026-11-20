@@ -24,6 +24,7 @@ from lc_core.lease import Busy, lease
 from lc_ingest.registers import read_csv, sg_record
 from lc_ingest.runner import run_ingest
 from lc_ingest.store import GcsStore
+from lc_ingest import health
 
 COMPONENT = "job:ingest-sg"
 SOURCE_ID = "sg-acra"  # its entry in config/sources.yaml
@@ -88,14 +89,18 @@ def main() -> int:
     bucket = os.environ["LC_DATA_BUCKET"]
     client = storage.Client()
     record = Recorder(COMPONENT, log)
+    store = GcsStore(bucket, "sg")
     try:
         with lease(client.bucket(bucket), "ingest-sg"):
-            outcome = run(gateway, GcsStore(bucket, "sg"), allowlist=allowlist, log=record)
+            outcome = run(gateway, store, allowlist=allowlist, log=record)
+        health.note(store, outcome=outcome, log=record)
     except Busy as exc:
         record({"event": "busy", "reason": str(exc)})
         outcome = "busy"
     except Exception as exc:
-        record(failure(exc))
+        failed = failure(exc)
+        record(failed)
+        health.note(store, failure=failed, log=record)  # beside the store: a browser fallback reads it
         raise
     finally:
         record.write(client.bucket(log_bucket_name(bucket)))

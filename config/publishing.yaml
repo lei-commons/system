@@ -16,6 +16,8 @@ snapshots:
   state_kept: 3                 # days of build state kept in the data bucket
   prune_grace_days: 2           # a part is deleted only after being unreferenced this long
   prune_dry_run: false          # true: log what pruning would delete, delete nothing
+  keep_monthly_full: true       # keep the first full snapshot of each month for good (its URLs stay valid; docs/dedi.md)
+  read_ahead_shards: 2         # the build downloads this many shards ahead while it works on one (0 = none); 0 to 8
 
 storage:
   # The data bucket is versioned too: every overwrite of an ingestion shard keeps the old

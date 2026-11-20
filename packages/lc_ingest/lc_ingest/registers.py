@@ -2,8 +2,15 @@
 
 New York (data.ny.gov, "Active Corporations: Beginning 1800"): only the
 columns below are ever requested. The process, chairman and registered-agent
-names and addresses are never downloaded. The business location is kept
-as city, state and ZIP only, because a small LLC's location is often a home.
+names and addresses, and the location's name, are never downloaded. The
+company's own street address (location_address_1 and _2) is kept with its
+city, state and ZIP (owner decisions 2026-11-16 and 2026-11-20): it is the
+entity's legalAddress, not a person's. A line sent in care of someone ("c/o",
+"care of", "attn"), which can name a person, is dropped. Until 2026-11-20 only
+city, state and ZIP were kept, because a small LLC's location can be a home;
+the owner approved the street as the company's published address. The upgrade
+changes most records once, so it went through the volume guard as a logged,
+one-time mapping upgrade (config/sources.yaml volume_guard).
 
 Singapore (data.gov.sg, "ACRA Information on Corporate Entities"): sole
 proprietorships and partnerships are registered business names held by
@@ -19,6 +26,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 
 from lc_core.directory_id import mint
 
@@ -26,7 +34,9 @@ from .gleif import Skip
 
 NY_GLEIF_REGISTRY, NY_REGISTRY = "RA000628", "US-NY-DOS"
 NY_COLUMNS = ["dos_id", "current_entity_name", "initial_dos_filing_date", "county", "jurisdiction", "entity_type",
-              "location_city", "location_state", "location_zip"]
+              "location_address_1", "location_address_2", "location_city", "location_state", "location_zip"]
+# A line sent in care of someone can name a person: never kept.
+CARE_OF = re.compile(r"c/o|\bcare of\b|\battn\b|\battention\b", re.IGNORECASE)
 SG_GLEIF_REGISTRY, SG_REGISTRY = "RA000523", "SG-ACRA"
 SG_PEOPLE = {"Sole Proprietorship/ Partnership"}
 SG_FORMER_NAMES = 15
@@ -50,12 +60,18 @@ def _clean(value) -> str:
     return " ".join((value or "").split())
 
 
+def street_lines(*values) -> list:
+    """The street lines that are there, without any line sent in care of someone."""
+    return [line for line in (_clean(v) for v in values) if line and not CARE_OF.search(line)]
+
+
 def ny_record(row: dict) -> dict:
     number, name = _clean(row.get("dos_id")), _clean(row.get("current_entity_name"))
     if not number or not name:
         raise Skip("no number or name")
     state = _clean(row.get("location_state")).upper()
-    address = {"city": _clean(row.get("location_city")).upper(), "region": state,
+    address = {"addressLines": street_lines(row.get("location_address_1"), row.get("location_address_2")),
+               "city": _clean(row.get("location_city")).upper(), "region": state,
                "postalCode": _clean(row.get("location_zip")), "country": "US" if state in US_CODES else ""}
     jurisdiction = US_STATES.get(_clean(row.get("jurisdiction")))
     record = {

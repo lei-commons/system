@@ -314,7 +314,7 @@ def test_pruning_keeps_what_kept_days_need_and_they_all_still_rebuild(tmp_path):
 
 
 def test_parts_are_kept_during_the_grace_period(tmp_path):
-    env = Env(tmp_path, settings(retain_days=1, full_every_days=1, prune_grace_days=3))
+    env = Env(tmp_path, settings(retain_days=1, full_every_days=1, prune_grace_days=3, keep_monthly_full=False))
     world = World(n=200)
     for _ in range(3):
         env.publish(world)
@@ -328,7 +328,7 @@ def test_parts_are_kept_during_the_grace_period(tmp_path):
 
 
 def test_dry_run_deletes_nothing(tmp_path):
-    env = Env(tmp_path, settings(retain_days=1, full_every_days=1, prune_dry_run=True))
+    env = Env(tmp_path, settings(retain_days=1, full_every_days=1, prune_dry_run=True, keep_monthly_full=False))
     world = World(n=200)
     for _ in range(4):
         env.publish(world)
@@ -437,3 +437,71 @@ def test_any_day_rebuilds_from_release_style_folders(env):
         part.unlink()
         with pytest.raises(VerifyError, match="missing"):
             rebuild(DirStore(folders), last, None, log=lambda r: None)
+
+
+# ---- build speed: reading ahead, the state in one pass, the stage timings ----
+
+def test_reading_ahead_builds_exactly_the_same_days(tmp_path):
+    (tmp_path / "a").mkdir(), (tmp_path / "b").mkdir()
+    a, b = Env(tmp_path / "a", settings(read_ahead_shards=0)), Env(tmp_path / "b", settings(read_ahead_shards=3))
+    wa, wb = World(), World()
+    for _ in range(3):
+        ma, mb = a.publish(wa), b.publish(wb)
+        assert ma["snapshotRoot"] == mb["snapshotRoot"] and ma["changes"] == mb["changes"] and ma["kind"] == mb["kind"]
+        wa.mutate(), wb.mutate()
+
+
+def test_the_timings_event_splits_the_build_into_stages(env):
+    env.publish(World())
+    timings = [e for e in env.events if e.get("event") == "timings"][-1]
+    for stage in ("read_s", "rows_s", "leaf_s", "parts_s", "diff_s", "relationships_s", "finish_s"):
+        assert isinstance(timings[stage], int)
+
+
+def _state_file(path, shards):
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    from lc_publish.snapshot import STATE_SCHEMA
+
+    rows = [(s, f"id-{s}-{k}-{i}", bytes([s % 256, i]) * 8) for k, s in enumerate(shards) for i in range(3)]
+    pq.write_table(pa.table({"shard": [r[0] for r in rows], "id": [r[1] for r in rows], "h": [r[2] for r in rows]},
+                            schema=STATE_SCHEMA), path, row_group_size=4)
+    return path
+
+
+def test_the_state_is_read_in_one_pass_and_matches_a_filtered_read(tmp_path):
+    from lc_publish.snapshot import StateReader
+
+    path = _state_file(tmp_path / "s.parquet", [0, 1, 1, 3, 7, 7, 9])
+    one_pass, filtered = StateReader(path), StateReader(path)
+    for n in range(12):
+        assert one_pass.shard(n) == filtered._filtered(n)
+    assert one_pass.shard(3) == filtered._filtered(3)  # asked again, out of order: still right
+
+
+def test_a_state_not_in_shard_order_is_still_read_right(tmp_path):
+    from lc_publish.snapshot import StateReader
+
+    path = _state_file(tmp_path / "s.parquet", [3, 0, 3, 1])
+    reader = StateReader(path)
+    assert not reader._in_order
+    assert [len(reader.shard(n)) for n in range(4)] == [3, 3, 0, 6]
+
+
+def test_the_first_full_snapshot_of_each_month_is_kept_for_good(tmp_path):
+    # 2026-11-18 .. 2026-12-03: a full snapshot every 3 days, only 2 days retained.
+    (tmp_path / "on").mkdir(), (tmp_path / "off").mkdir()
+    kept = {}
+    for name, flag in (("on", True), ("off", False)):
+        env = Env(tmp_path / name, settings(retain_days=2, full_every_days=3, keep_monthly_full=flag))
+        world = World(n=200)
+        for _ in range(16):
+            env.publish(world)
+            world.mutate()
+        kept[name] = sorted(k.split("/")[0] for k in env.snapshots.objects if k[:2] == "20" and k.endswith("/manifest.json"))
+        if flag:
+            for date in ("2026-11-18", "2026-12-02"):  # November's and December's first full days
+                report, rows = env.rebuilt_rows(date)
+                assert report["ok"] and rows == env.truths[date]
+    assert "2026-11-18" in kept["on"] and "2026-11-18" not in kept["off"]
+    assert "2026-12-02" in kept["on"]

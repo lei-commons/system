@@ -104,9 +104,12 @@ def publish(snapshots, data, date: str, readers: dict, relationships, settings, 
         record({"event": "no-previous-state", "reason": why_not})
     extra = {"shards": shards} if shards else {}
     mark = clock()
+    stages = {}  # build_s split into its stages: read_s, rows_s, leaf_s, parts_s, diff_s, relationships_s, finish_s
     manifest = build_sharded(readers, work / "out", date, settings=settings.snapshots, previous=previous, state=state,
-                             relationships=relationships, decision_log=decision_log, force_full=why_not, **extra)
+                             relationships=relationships, decision_log=decision_log, force_full=why_not,
+                             timings=stages, **extra)
     timings["build_s"] = round(clock() - mark)
+    timings.update(stages)
     shutil.rmtree(work / "previous-state", ignore_errors=True)
     mark = clock()
     sent = upload_day(snapshots, work / "out", manifest)

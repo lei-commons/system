@@ -7,7 +7,7 @@ the owner as browser hosts in config/egress-allowlist.yaml; the gateway refuses 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Optional
 
 from lc_core.fetch import FetchError
 from lc_ingest import nta
@@ -24,6 +24,19 @@ class Profile:
     expect_in_name: Callable  # key -> text the downloaded file's name must contain (the right publication)
     read: Callable
     record: Callable
+    daily: Optional["Daily"] = None  # the source's daily difference files, if it has them
+
+
+@dataclass(frozen=True)
+class Daily:
+    """A source's daily difference files, applied on top of its latest full file (pipeline.daily_diffs)."""
+    base: Callable         # manifest["processed"] -> the date of the full file they apply on, or None
+    listing: Callable      # (gateway, config) -> [{day, number, label}]: the files on offer, one plain request
+    key: Callable          # (day, base) -> publish key
+    flow: Callable         # (config, row) -> flow(page, step, timeout_ms) -> playwright Download
+    read: Callable
+    record: Callable
+    prepare: Callable      # the runner's prepare hook
 
 
 # ---- Japan: National Tax Agency corporate numbers ----
@@ -64,9 +77,52 @@ def nta_flow(page, step, timeout_ms):
     return info.value
 
 
+# The daily difference files: the row of the day's file under the configured section, found by its date
+# as the page writes it (lc_ingest.nta.daily_files read the same page with one plain request).
+FIND_DAILY_FILE = """({section, label}) => {
+  const squash = s => (s || '').replace(/\\s+/g, '');
+  const heads = [...document.querySelectorAll('h1, h2, h3, h4, h5, h6')];
+  const i = heads.findIndex(h => squash(h.textContent).includes(squash(section)));
+  if (i < 0) return null;
+  const head = heads[i], next = heads[i + 1];
+  const links = [...document.querySelectorAll('[onclick^="return doDownload("]')].filter(a =>
+    (head.compareDocumentPosition(a) & Node.DOCUMENT_POSITION_FOLLOWING) &&
+    (!next || (next.compareDocumentPosition(a) & Node.DOCUMENT_POSITION_PRECEDING)));
+  const hit = links.find(a => { const row = a.closest('tr'); return row && squash(row.textContent).includes(label); });
+  return hit ? hit.getAttribute('onclick').match(/doDownload\\((\\d+)\\)/)[1] : null;
+}"""
+
+
+def nta_daily_listing(gateway, config):
+    """The daily files on offer, read from the diff page with one plain GET (no browser)."""
+    conn, resp = gateway.open(config["page"])
+    try:
+        html = resp.read(2_000_000).decode("utf-8", "replace")
+    finally:
+        conn.close()
+    return nta.daily_files(html, config["section"])
+
+
+def nta_daily_flow(config, row):
+    """What a person does: open the diff page, find the day's file under the section, and save it."""
+    def flow(page, step, timeout_ms):
+        step(page, "open the NTA daily-diff download page")
+        page.goto(config["page"], wait_until="domcontentloaded")
+        step(page, f"choose the file of {row['day']}, {config['section']}")
+        number = page.evaluate(FIND_DAILY_FILE, {"section": config["section"], "label": row["label"]})
+        if not number:
+            raise FetchError(f"the daily file of {row['day']} isn't under {config['section']} on the NTA page")
+        with page.expect_download(timeout=timeout_ms) as info:
+            page.click(f'[onclick="return doDownload({number});"]')
+        return info.value
+    return flow
+
+
 JAPAN = Profile(
     source="jp-nta", job="ingest-jp", store="jp", hosts=(nta.HOST,), current=nta_current, flow=nta_flow,
     expect_in_name=lambda key: key[:10].replace("-", ""),  # 00_zenkoku_all_20261030.zip for 2026-10-30
-    read=nta.read_zip, record=nta.nta_record)
+    read=nta.read_zip, record=nta.nta_record,
+    daily=Daily(base=nta.latest_full, listing=nta_daily_listing, key=nta.diff_key, flow=nta_daily_flow,
+                read=nta.read_zip, record=nta.nta_diff_record, prepare=nta.keep_known_withdrawn))
 
 PROFILES = {p.source: p for p in (JAPAN,)}

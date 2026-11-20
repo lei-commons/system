@@ -4,7 +4,8 @@ data.ny.gov refreshes the dataset daily, but the list barely changes from one
 day to the next, and comparing 4.3 million records takes most of an hour. So
 a run processes the dataset once per ISO week ("2026-W46"). Only the columns
 in lc_ingest.registers.NY_COLUMNS are requested, so no agent, process or
-chairman name or address is ever downloaded.
+chairman name or address, and no mailing address, is ever downloaded. The
+company's own street address is (owner decision 2026-11-20).
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from lc_core.lease import Busy, lease
 from lc_ingest.registers import NY_COLUMNS, ny_record, read_csv
 from lc_ingest.runner import run_ingest
 from lc_ingest.store import GcsStore
+from lc_ingest import health
 
 COMPONENT = "job:ingest-ny"
 SOURCE_ID = "us-ny-dos"  # its entry in config/sources.yaml
@@ -69,14 +71,18 @@ def main() -> int:
     bucket = os.environ["LC_DATA_BUCKET"]
     client = storage.Client()
     record = Recorder(COMPONENT, log)
+    store = GcsStore(bucket, "us-ny")
     try:
         with lease(client.bucket(bucket), "ingest-ny"):
-            outcome = run(gateway, GcsStore(bucket, "us-ny"), allowlist=allowlist, log=record)
+            outcome = run(gateway, store, allowlist=allowlist, log=record)
+        health.note(store, outcome=outcome, log=record)
     except Busy as exc:
         record({"event": "busy", "reason": str(exc)})
         outcome = "busy"
     except Exception as exc:
-        record(failure(exc))
+        failed = failure(exc)
+        record(failed)
+        health.note(store, failure=failed, log=record)  # beside the store: a browser fallback reads it
         raise
     finally:
         record.write(client.bucket(log_bucket_name(bucket)))

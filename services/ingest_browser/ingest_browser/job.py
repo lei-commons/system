@@ -5,6 +5,9 @@ with one plain request; if it's already processed, it stops there and no browser
 headless browser follows the source's flow (lc_browser: every request through the conduct gateway, at a
 person's pace) and the downloaded file goes through the usual runner: file checks, retries, the volume
 guard, change files. Only while the system is running and the owner has approved the source.
+
+A source with daily difference files (pipeline.daily_diffs, on) then applies the days after its latest
+full file, oldest first, each once per full file (run_diffs).
 """
 
 from __future__ import annotations
@@ -15,7 +18,7 @@ import sys
 
 from lc_core.allowlist import AllowList
 from lc_core.approvals import require_approved
-from lc_core.control import require_running
+from lc_core.control import SystemHalted, require_running
 from lc_core.decisions import Recorder, failure, log_bucket_name
 from lc_core.fetch import FetchError, Gateway
 from lc_core.lease import Busy, lease
@@ -74,6 +77,65 @@ def run(profile: Profile, gateway, store, gate=None, allowlist=None, log=log, do
                       mapper=profile.record, source=profile.source, maker=f"ingestion@{profile.store}",
                       allowlist=allowlist or AllowList.load(), log=log, fetch=fetch,
                       **({"sleep": sleep} if sleep else {}))
+
+
+OK = ("done", "already-done")
+
+
+def run_diffs(profile: Profile, config: dict, gateway, store, gate=None, allowlist=None, log=log, download=None,
+              sleep=None) -> str:
+    """Apply the source's daily difference files on top of its latest full file. Returns the outcome:
+    halted, waiting (no full file yet), already-done, done, or the first diff's outcome that wasn't done.
+
+    The files dated from ``overlap_days`` before the full file's date onwards are applied, oldest first,
+    at most ``max_per_run`` in one run. Each one's publish key names the full file it applies on, so it is
+    applied once per full file: a new month's full file supersedes the diffs before it, and the days
+    around it are applied again on top (a diff applied twice changes nothing)."""
+    from datetime import date, timedelta
+
+    daily, gate = profile.daily, gate or gate_for(profile)
+    if config["page"].split("/")[2].lower() not in profile.hosts:
+        raise ValueError(f"{profile.source}: the daily-diff page must be on the source's own host {profile.hosts}")
+    try:
+        gate()
+    except SystemHalted as exc:
+        log({"event": "halted", "source": profile.source, "reason": str(exc)})
+        return "halted"
+    base = daily.base(store.read_manifest()["processed"])
+    if base is None:
+        log({"event": "diffs-waiting", "source": profile.source, "reason": "no full file processed yet"})
+        return "waiting"
+    since = (date.fromisoformat(base) - timedelta(days=config["overlap_days"])).isoformat()
+    done = set(store.read_manifest()["processed"])
+    pending = [r for r in daily.listing(gateway, config) if r["day"] >= since and daily.key(r["day"], base) not in done]
+    if not pending:
+        log({"event": "already-done", "source": profile.source, "publish": f"diffs on {base}"})
+        return "already-done"
+    outcome, applied = "already-done", 0
+    for row in pending[:config["max_per_run"]]:
+        key = daily.key(row["day"], base)
+        filename = f"{profile.source}-diff-{row['day']}-on-{base}.zip"
+        name = date.fromisoformat(row["day"]).strftime(config["file_date_format"])
+        browser = Profile(source=profile.source, job=profile.job, store=profile.store, hosts=profile.hosts,
+                          current=None, flow=daily.flow(config, row), expect_in_name=lambda _key, name=name: name,
+                          read=daily.read, record=daily.record)
+
+        def find(gw, manifest=None, key=key, filename=filename):
+            return key, config["page"], filename
+
+        def fetch(gw, url, out, browser=browser, key=key):
+            return fetch_for(browser, key, log=log, download=download)(gw, url, out)
+
+        outcome = run_ingest(gateway=gateway, store=store, gate=gate, find=find, read=daily.read, mapper=daily.record,
+                             prepare=daily.prepare, source=profile.source, maker=f"ingestion@{profile.store}",
+                             allowlist=allowlist or AllowList.load(), log=log, fetch=fetch,
+                             **({"sleep": sleep} if sleep else {}))
+        if outcome not in OK:
+            break
+        applied += outcome == "done"
+    log({"event": "diffs", "source": profile.source, "base": base, "applied": applied,
+         "pending": len(pending) - applied, "outcome": outcome})
+    return outcome
 
 
 def run_fallback(source: str, config: dict, gateway, store, after_failures: int, gate=None, allowlist=None, log=log,
@@ -151,6 +213,8 @@ def fallback_main(source: str) -> int:
 def main() -> int:
     from google.cloud import storage
 
+    from lc_core.sources import daily_diffs
+
     if os.environ.get("LC_MODE") == "fallback":
         return fallback_main(os.environ.get("LC_SOURCE", ""))
     profile = profile_for(os.environ.get("LC_SOURCE", ""))
@@ -160,8 +224,13 @@ def main() -> int:
     client = storage.Client()
     record = Recorder(f"job:{profile.job}", log)
     try:
+        diffs = daily_diffs(profile.source) if profile.daily else None
         with lease(client.bucket(bucket), profile.job):
-            outcome = run(profile, gateway, GcsStore(bucket, profile.store), allowlist=allowlist, log=record)
+            store = GcsStore(bucket, profile.store)
+            outcome = run(profile, gateway, store, allowlist=allowlist, log=record)
+            if diffs and diffs["enabled"] and outcome in OK:
+                daily = run_diffs(profile, diffs, gateway, store, allowlist=allowlist, log=record)
+                outcome = outcome if daily in OK + ("waiting",) else daily
     except Busy as exc:
         record({"event": "busy", "reason": str(exc)})
         outcome = "busy"

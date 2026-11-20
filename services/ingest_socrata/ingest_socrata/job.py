@@ -22,6 +22,7 @@ from lc_ingest.registers import read_csv
 from lc_ingest.runner import run_ingest
 from lc_ingest.socrata import PROFILES, Profile
 from lc_ingest.store import GcsStore
+from lc_ingest import health
 
 
 def log(record):
@@ -64,14 +65,18 @@ def main() -> int:
     bucket = os.environ["LC_DATA_BUCKET"]
     client = storage.Client()
     record = Recorder(f"job:{profile.job}", log)
+    store = GcsStore(bucket, profile.store)
     try:
         with lease(client.bucket(bucket), profile.job):
-            outcome = run(profile, gateway, GcsStore(bucket, profile.store), allowlist=allowlist, log=record)
+            outcome = run(profile, gateway, store, allowlist=allowlist, log=record)
+        health.note(store, outcome=outcome, log=record)
     except Busy as exc:
         record({"event": "busy", "reason": str(exc)})
         outcome = "busy"
     except Exception as exc:
-        record(failure(exc))
+        failed = failure(exc)
+        record(failed)
+        health.note(store, failure=failed, log=record)  # beside the store: a browser fallback reads it
         raise
     finally:
         record.write(client.bucket(log_bucket_name(bucket)))

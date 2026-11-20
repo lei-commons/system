@@ -50,6 +50,12 @@ def _event(actor: str, record: dict) -> Event | None:
     if kind == "held":
         return Event(actor, "ingested", subject, "held", record.get("reason") or "the volume guard held the update",
                      refs=_refs(record))
+    if kind == "mapping-upgrade":
+        why = " ".join(str(record.get("reason") or "").split())[:300]
+        reason = (f"{_n(record.get('changed', 0))} of {_n(record.get('total', 0))} records changed, past the volume guard's "
+                  f"{record.get('max_fraction', '?')}; a one-time mapping upgrade approved by the "
+                  f"{record.get('approved_by', '?')} on {record.get('approved_on', '?')}" + (f": {why}" if why else ""))
+        return Event(actor, "let a mapping upgrade through for", subject, "approved", reason, refs=_refs(record))
     if kind == "already-done":
         return Event(actor, "checked", subject, "skipped", "already ingested", refs=_refs(record))
     if kind == "built":

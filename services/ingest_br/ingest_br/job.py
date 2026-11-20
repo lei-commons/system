@@ -35,6 +35,7 @@ from lc_ingest import filecheck
 from lc_ingest.receita import Join, build_lookup, mapper, read_lookup, read_municipalities, rows
 from lc_ingest.runner import run_ingest
 from lc_ingest.store import SHARDS, GcsStore
+from lc_ingest import health
 
 COMPONENT = "job:ingest-br"
 SOURCE_ID = "br-rfb-cnpj"  # its entry in config/sources.yaml
@@ -195,15 +196,18 @@ def main() -> int:
     client = storage.Client()
     bucket = client.bucket(bucket_name)
     record = Recorder(COMPONENT, log)
+    store = GcsStore(bucket, "br")
     try:
         with lease(bucket, "ingest-br", ttl_seconds=4 * 3600):
-            outcome = run(gateway, GcsStore(bucket, "br"), lambda month: Lookup(bucket, month), allowlist=allowlist,
-                          log=record)
+            outcome = run(gateway, store, lambda month: Lookup(bucket, month), allowlist=allowlist, log=record)
+        health.note(store, outcome=outcome, log=record)
     except Busy as exc:
         record({"event": "busy", "reason": str(exc)})
         outcome = "busy"
     except Exception as exc:
-        record(failure(exc))
+        failed = failure(exc)
+        record(failed)
+        health.note(store, failure=failed, log=record)  # beside the store: a browser fallback reads it
         raise
     finally:
         record.write(client.bucket(log_bucket_name(bucket_name)))
