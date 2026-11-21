@@ -10,6 +10,8 @@ control repository and a GitHub variable until 2026-11-21; control parameters no
 
 from __future__ import annotations
 
+import re
+
 STATES = ("running", "paused", "stopped", "manual")
 AFTER_INGEST = ["build-snapshot", "load-db"]
 # The component name each job checks before working (lc_core.control.require_running).
@@ -21,7 +23,36 @@ SOURCE_ACTIONS = {"source-approve": "approved", "source-deny": "denied", "source
 SOURCE_LABELS = {"source-approve": "Approve", "source-deny": "Deny", "source-pending": "Keep pending"}
 # Changes to the registry itself (lc_core.source_edits): add, edit or remove a source, or leave Claude a suggestion.
 EDIT_ACTIONS = ("source-add", "source-edit", "source-remove", "source-hint")
+# Tools: one-off runs with their command overridden (they replaced the gateway-probe and load-test workflows when
+# GitHub lost its manual triggers, 2026-11-21). probe:<https URL> asks a source for its first kilobyte through the
+# gateway (allow-list, pacing, fixed address; ingest_gleif.probe); load-test:<records>:<seconds> builds a synthetic
+# copy of the database in its own schema, times the site's queries and drops it (load_db.loadtest).
+TOOLS = ("probe", "load-test")
+PROBE_URL = re.compile(r"^https://[A-Za-z0-9.-]+(/[A-Za-z0-9._~%/?=&+-]*)?$")
+PROBE_MAX = 2000
+LOAD_TEST_RECORDS = (1_000, 200_000_000)
+LOAD_TEST_SECONDS = (10, 3_600)
 MAX_BUDGET_USD = 1_000_000  # a typo guard, not a policy: the billing budget itself is set in Terraform
+
+
+def probe_url(text: str) -> str:
+    """The URL in ``probe:<url>``: a plain https address. Raises Refused. (The gateway still refuses any host
+    that isn't allow-listed.)"""
+    if not isinstance(text, str) or len(text) > PROBE_MAX or not PROBE_URL.match(text):
+        raise Refused("the probe needs a plain https URL")
+    return text
+
+
+def load_test_settings(text: str) -> tuple[int, int]:
+    """(records, seconds) in ``load-test:<records>:<seconds>``. Raises Refused."""
+    records, _, seconds = str(text).partition(":")
+    if not (records.isdigit() and seconds.isdigit()):
+        raise Refused("the load test needs whole numbers: records and seconds")
+    r, s = int(records), int(seconds)
+    if not LOAD_TEST_RECORDS[0] <= r <= LOAD_TEST_RECORDS[1] or not LOAD_TEST_SECONDS[0] <= s <= LOAD_TEST_SECONDS[1]:
+        raise Refused(f"records must be {LOAD_TEST_RECORDS[0]:,} to {LOAD_TEST_RECORDS[1]:,} and seconds "
+                      f"{LOAD_TEST_SECONDS[0]} to {LOAD_TEST_SECONDS[1]:,}")
+    return r, s
 
 
 def budget_amount(text: str) -> float:
@@ -108,9 +139,10 @@ def known(sources: list, action: str, registry: list = ()) -> bool:
         return name in jobs(sources)
     if kind in ("pause-component", "resume-component"):
         return name in {gate(j) for j in jobs(sources)}
-    if kind == "set-budget":
+    checks = {"set-budget": budget_amount, "probe": probe_url, "load-test": load_test_settings}
+    if kind in checks:
         try:
-            budget_amount(name)
+            checks[kind](name)
         except Refused:
             return False
         return True

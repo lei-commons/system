@@ -21,10 +21,14 @@ import secrets
 from dataclasses import dataclass, field
 
 from . import source_edits
-from .actions import EDIT_ACTIONS, SOURCE_ACTIONS, Refused, apply, catalogue, known, source_catalogue
+from .actions import (EDIT_ACTIONS, SOURCE_ACTIONS, Refused, apply, catalogue, known, load_test_settings, probe_url,
+                      source_catalogue)
 from .approvals import decide, effective
 
 MAX_REASON = 300
+PROBE_JOB = "ingest-gleif"  # the probe runs in this job's sealed network, identity and gateway
+LOAD_TEST_JOB = "load-db"  # the only job that can reach the serving database
+LOAD_TEST_TIMEOUT = "18000s"  # as the load-test workflow allowed: building tens of millions of rows takes hours
 
 
 class Conflict(Exception):
@@ -101,9 +105,21 @@ class GoogleBackend:
     def write_edits(self, edits, generation):
         self._write(source_edits.EDITS_NAME, edits, generation)
 
-    def run_job(self, job: str) -> str:
+    def run_job(self, job: str, args: list = None, env: dict = None, timeout: str = None) -> str:
+        """Start one execution of ``job``; with ``args``, ``env`` or ``timeout``, overridden for this run only
+        (the caller needs run.jobs.runWithOverrides on that job)."""
         url = f"https://run.googleapis.com/v2/projects/{self.project}/locations/{self.region}/jobs/{job}:run"
-        response = self._http.post(url, json={}, timeout=30)
+        body = {}
+        if args or env or timeout:
+            container = {}
+            if args:
+                container["args"] = list(args)
+            if env:
+                container["env"] = [{"name": k, "value": str(v)} for k, v in env.items()]
+            body = {"overrides": {"containerOverrides": [container] if container else [], "taskCount": 1}}
+            if timeout:
+                body["overrides"]["timeout"] = timeout
+        response = self._http.post(url, json=body, timeout=30)
         if response.status_code == 403:
             raise PermissionError(f"not allowed to start {job}")
         response.raise_for_status()
@@ -265,6 +281,20 @@ def perform(*, backend, verifier, secret: str, sources: list, registry: list, ac
             execution = backend.run_job(name)
             event.update(subject=name, run_id=execution)
             message = f"Started {name}" + (f" ({execution})" if execution else "") + "."
+        elif kind == "probe":
+            url = probe_url(name)
+            execution = backend.run_job(PROBE_JOB, args=["python", "-m", "ingest_gleif.probe", url])
+            event.update(subject=f"probe {url.split('/')[2]}", component=PROBE_JOB, run_id=execution)
+            message = (f"Probing {url.split('/')[2]} through the gateway ({execution or 'started'}). The answer "
+                       "appears in the job's log and the status report in a minute or two.")
+        elif kind == "load-test":
+            records, seconds = load_test_settings(name)
+            execution = backend.run_job(LOAD_TEST_JOB, args=["python", "-m", "load_db.loadtest"],
+                                        env={"LC_BENCH_RECORDS": records, "LC_BENCH_SECONDS": seconds},
+                                        timeout=LOAD_TEST_TIMEOUT)
+            event.update(subject="load test", component=LOAD_TEST_JOB, run_id=execution)
+            message = (f"Started the load test: {records:,} synthetic records, {seconds} s of mixed load "
+                       f"({execution or 'started'}). It takes the daily load's lock, so the two never overlap.")
         else:
             current, generation = backend.read_state()
             new = apply(action, current, actor, now)

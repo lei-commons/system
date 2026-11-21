@@ -19,7 +19,7 @@ class Backend:
     def __init__(self):
         self.state, self.state_gen = {"state": "running", "paused_components": []}, 1
         self.approvals, self.approvals_gen = {}, 0
-        self.runs, self.events, self.conflict = [], [], False
+        self.runs, self.events, self.conflict, self.overrides = [], [], False, []
 
     def read_state(self):
         return dict(self.state), self.state_gen
@@ -37,10 +37,11 @@ class Backend:
             raise Conflict("it changed meanwhile; try again")
         self.approvals, self.approvals_gen = decisions, generation + 1
 
-    def run_job(self, job):
+    def run_job(self, job, args=None, env=None, timeout=None):
         if job == "load-db" and self.conflict:
             raise PermissionError("not allowed to start load-db")
         self.runs.append(job)
+        self.overrides.append({"args": args, "env": env, "timeout": timeout})
         return f"{job}-x1"
 
     def record(self, event):
@@ -187,3 +188,59 @@ def test_the_monthly_budget_is_set_with_a_fresh_code(env):
     assert out.status == 200 and "2,000.00 USD" in out.message
     assert backend.state["monthly_budget_usd"] == 2000.0 and backend.state["state"] == "running"
     assert backend.events[-1]["subject"] == "monthly budget" and backend.events[-1]["decision"] == "done"
+
+
+def test_a_probe_runs_the_gleif_job_with_the_probe_command(env):
+    """The gateway-probe workflow's job, as an owner action (GitHub lost its manual triggers on 2026-11-21)."""
+    clock, backend, act = env
+    for bad in ("probe:http://x.test/", "probe:https://x.test/a b", "probe:ftp://x", "probe:https://x.test/;rm",
+                "probe:"):
+        assert act(bad).status == 404, bad
+    out = act("probe:https://data.brreg.no/enhetsregisteret/api/enheter/lastned")
+    assert out.status == 200 and "data.brreg.no" in out.message
+    assert backend.runs == ["ingest-gleif"]
+    assert backend.overrides[-1]["args"] == ["python", "-m", "ingest_gleif.probe",
+                                             "https://data.brreg.no/enhetsregisteret/api/enheter/lastned"]
+    assert backend.events[-1]["subject"] == "probe data.brreg.no" and backend.events[-1]["run_id"] == "ingest-gleif-x1"
+
+
+def test_a_load_test_runs_load_db_with_its_settings(env):
+    clock, backend, act = env
+    for bad in ("load-test:abc:10", "load-test:30000000", "load-test:999:120", "load-test:1000:5", "load-test:-1:10"):
+        assert act(bad).status == 404, bad
+    assert act("load-test:30000000:120", code="000000").status == 403 and backend.runs == []
+    out = act("load-test:30000000:120")
+    assert out.status == 200 and "30,000,000" in out.message
+    assert backend.runs == ["load-db"] and backend.overrides[-1] == {
+        "args": ["python", "-m", "load_db.loadtest"], "env": {"LC_BENCH_RECORDS": 30000000, "LC_BENCH_SECONDS": 120},
+        "timeout": "18000s"}
+    assert backend.events[-1]["subject"] == "load test"
+
+
+def test_run_with_overrides_sends_cloud_runs_override_body():
+    from lc_core.owner import GoogleBackend
+
+    class Http:
+        def post(self, url, json, timeout):
+            self.url, self.body = url, json
+
+            class R:
+                status_code = 200
+
+                def raise_for_status(self):
+                    pass
+
+                def json(self):
+                    return {"metadata": {"name": "projects/p/locations/r/jobs/load-db/executions/load-db-abc"}}
+            return R()
+
+    backend = GoogleBackend.__new__(GoogleBackend)
+    backend.project, backend.region, backend._http = "p", "r", Http()
+    assert backend.run_job("load-db", args=["python", "-m", "load_db.loadtest"], env={"LC_BENCH_RECORDS": 1000},
+                           timeout="18000s") == "load-db-abc"
+    assert backend._http.url.endswith("/jobs/load-db:run")
+    assert backend._http.body == {"overrides": {"containerOverrides": [{
+        "args": ["python", "-m", "load_db.loadtest"], "env": [{"name": "LC_BENCH_RECORDS", "value": "1000"}]}],
+        "taskCount": 1, "timeout": "18000s"}}
+    backend.run_job("ingest-gb")
+    assert backend._http.body == {}  # a plain run sends no overrides

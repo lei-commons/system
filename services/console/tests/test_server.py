@@ -217,7 +217,7 @@ class Backend:
         assert generation == self.generation
         self.state, self.generation = state, generation + 1
 
-    def run_job(self, job):
+    def run_job(self, job, args=None, env=None, timeout=None):
         self.runs.append(job)
         return f"{job}-abc12"
 
