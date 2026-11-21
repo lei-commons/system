@@ -229,3 +229,34 @@ def test_the_second_factor_page_through_the_server():
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_the_approvals_page_is_admin_only():
+    class Page:
+        def pending(self):
+            return {"pullRequests": []}
+
+        def handle(self, email, headers, body):
+            from lc_core.owner import Outcome
+
+            return Outcome(200, "approved")
+
+    srv = make_server(Snap(), [OWNER], "site-aud", ("127.0.0.1", 0), iap=fake_iap, admin_audience="admin-aud",
+                      approvals=Page())
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        def call(token, method="GET", body=None):
+            c = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=5)
+            c.request(method, "/api/v1/admin/approvals", body=json.dumps(body) if body else None,
+                      headers={"X-Goog-IAP-JWT-Assertion": token, **(SAME_ORIGIN if body else {})})
+            r = c.getresponse()
+            out = r.status, r.read()
+            c.close()
+            return out
+
+        assert call("site")[0] == 403 and call("admin")[0] == 200
+        assert call("site", "POST", {"repo": "x"})[0] == 403
+        assert json.loads(call("admin", "POST", {"repo": "x"})[1])["ok"] is True
+    finally:
+        srv.shutdown()
+        srv.server_close()

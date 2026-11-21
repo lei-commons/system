@@ -15,6 +15,9 @@ The agents act on GitHub only through these Apps (constitution Article 5). Maker
 | `lei-commons-guardian` | checks, statuses: write; contents, pull requests: read | every repository except `control` |
 | `lei-commons-release` | contents: write | `releases` only |
 
+The site's admin area uses `lei-commons-guardian` to set a pull request's `owner-approval` status after the owner
+approves it (`config/approvals.yaml`, `lc_site.approvals`); the site may read that App's key and no other.
+
 Never install any of them on `control`. Its private keys are in Secret Manager as `github-app-lei-commons-<name>`, created by `bootstrap/github-apps.sh`; nothing else holds them.
 
 The fifth App in the design, `lei-commons-control`, is no longer needed: since 2026-11-21 the control state lives only in the cloud control bucket and changes only on the admin page, so the `control` repository has no workflows and no token.

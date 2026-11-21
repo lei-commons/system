@@ -1,0 +1,45 @@
+# The owner's approval for sensitive changes (config/approvals.yaml; owner decision 2026-11-21). Sets the
+# pull request's owner-approval status: success at once when no sensitive path changes; otherwise pending,
+# assigned to the owner, with a comment linking to the admin page, where the owner approves the exact head
+# commit with a fresh authenticator code (the site then sets success as the guardian App).
+#
+# pull_request_target runs main's copy of this workflow and of the rules, never the pull request's code, so a
+# pull request can't change its own gate. Nothing from the pull request is checked out or run.
+name: owner-approval
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  statuses: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: owner-approval-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  owner-approval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}  # main's rules, never the pull request's
+          persist-credentials: false
+          sparse-checkout: |
+            config/approvals.yaml
+            config/site.yaml
+            packages/lc_core/lc_core
+            scripts/owner_approval_status.py
+          sparse-checkout-cone-mode: false
+      - run: pip install -q pyyaml
+      - name: Set the owner-approval status
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 scripts/owner_approval_status.py
