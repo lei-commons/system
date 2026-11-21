@@ -256,6 +256,39 @@ function budgetButton(d, reload) {
   };
 }
 
+// One-off runs with their command overridden (they replaced the probe and load-test workflows).
+function toolButtons(reload) {
+  const input = (attrs) => h("input", { required: true, ...attrs });
+  const probe = {
+    label: "Probe a URL", tone: "",
+    help: "Ask a source for its first kilobyte through the gateway, to see how it answers us. Allow-listed hosts only.",
+    open: (panel) => {
+      const url = input({ type: "url", placeholder: "https://…", "aria-label": "URL to probe", class: "url-input" });
+      codeForm(panel, {
+        title: "Probe a URL through the gateway", help: probe.help, fields: [h("div", { class: "action-fields" }, url)],
+        collect: () => (/^https:\/\/[A-Za-z0-9.-]+(\/[A-Za-z0-9._~%/?=&+-]*)?$/.test(url.value) ? {} : "Enter a plain https URL."),
+        action: () => `probe:${url.value}`, confirmLabel: "Confirm: probe", onDone: reload,
+      });
+    },
+  };
+  const loadTest = {
+    label: "Load test", tone: "",
+    help: "Build a synthetic copy of the database in its own schema, time the site's queries, and drop it. Takes the daily load's lock.",
+    open: (panel) => {
+      const records = input({ type: "number", min: "1000", step: "1000", value: "30000000", "aria-label": "Synthetic records", class: "budget-input" });
+      const seconds = input({ type: "number", min: "10", max: "3600", value: "120", "aria-label": "Seconds of mixed load", class: "budget-input" });
+      codeForm(panel, {
+        title: "Run the load test", help: loadTest.help,
+        fields: [h("div", { class: "action-fields" }, records, h("span", { class: "muted" }, "records"), seconds, h("span", { class: "muted" }, "seconds"))],
+        collect: () => (Number(records.value) >= 1000 && Number(seconds.value) >= 10 ? {} : "At least 1,000 records and 10 seconds."),
+        action: () => `load-test:${Math.round(Number(records.value))}:${Math.round(Number(seconds.value))}`,
+        confirmLabel: "Confirm: start the load test", onDone: reload,
+      });
+    },
+  };
+  return [probe, loadTest];
+}
+
 function actions(d, reload) {
   if (!d.actions || !d.actions.length) return null;
   const groups = {};
@@ -265,7 +298,8 @@ function actions(d, reload) {
     h("p", { class: "muted", style: { marginTop: 0 } }, "Each asks, right here, for a reason and a fresh code from your authenticator before it acts, and is recorded in the decision log."),
     ...entries.map(([group, items], i) => h("div", { class: "action-group" },
       h("div", { class: "action-label" }, group),
-      actionBar(items, reload, undefined, group === "System" || (i === 0 && !groups.System) ? [budgetButton(d, reload)] : []))));
+      actionBar(items, reload, undefined, group === "System" || (i === 0 && !groups.System) ? [budgetButton(d, reload)] : []))),
+    h("div", { class: "action-group" }, h("div", { class: "action-label" }, "Tools"), actionBar([], reload, undefined, toolButtons(reload))));
 }
 
 function page(d, meta, updated, reload) {

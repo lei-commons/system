@@ -342,3 +342,4 @@ dl.mini.wide { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
   dl.mini, dl.mini.wide { grid-template-columns: 1fr; }
   .source-row .toolbar { flex-wrap: wrap; }
 }
+.url-input { flex: 1 1 260px; min-width: 0; }

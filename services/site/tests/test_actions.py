@@ -45,7 +45,7 @@ class Backend:
     def write_approvals(self, decisions, generation):
         self.approvals = decisions
 
-    def run_job(self, job):
+    def run_job(self, job, args=None, env=None, timeout=None):
         self.runs.append(job)
         return "x"
 

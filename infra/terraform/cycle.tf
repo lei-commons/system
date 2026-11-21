@@ -208,3 +208,14 @@ resource "google_cloud_run_v2_job_iam_member" "site_runs" {
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.sa["site"].email}"
 }
+
+# The admin page's tools run two jobs with their command overridden for one run (lc_core.owner, owner decision
+# 2026-11-21): a probe through ingest-gleif and the load test through load-db. Only on those two jobs.
+resource "google_cloud_run_v2_job_iam_member" "site_runs_with_overrides" {
+  for_each = var.cycle_enabled && var.site_enabled ? toset(["ingest-gleif", "load-db"]) : toset([])
+
+  location = var.region
+  name     = each.value
+  role     = "roles/run.jobsExecutorWithOverrides"
+  member   = "serviceAccount:${google_service_account.sa["site"].email}"
+}

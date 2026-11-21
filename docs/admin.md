@@ -8,7 +8,10 @@ authentication before the directory opens to the public.
 `https://<domain>/admin/` (config/site.yaml `domain` and `admin`). It holds:
 
 - **System**: the cycle, jobs, control state, and every owner action (pause, stop, resume, manual mode,
-  run a job, pause or resume one job, the monthly budget);
+  run a job, pause or resume one job, the monthly budget), plus two tools: **probe a URL** (the source's first
+  kilobyte through the gateway, as the ingest-gleif job; allow-listed hosts only) and the **load test** (a
+  synthetic copy of the database, timed and dropped, as the load-db job). They replaced the gateway-probe and
+  load-test workflows; their results show in the status report (`status.yml`);
 - **Data sources**: approve, deny or keep pending; add, edit or remove a source; leave Claude a suggestion;
 - **Second factor**: set up the authenticator, or rotate its key.
 
