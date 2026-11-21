@@ -173,5 +173,7 @@ def test_registry_changes_are_checked_like_every_action(site):
     assert post({"action": "source-hint:us-co-sos", "code": code(), "hint": "x"}, fetch_site="cross-site")[0] == 403
     assert post({"action": "source-hint:us-co-sos", "code": code(), "hint": "x"}, token="other")[0] == 403
     assert post({"action": "source-hint:us-co-sos", "code": code(), "hint": "x" * 40000})[0] == 400  # too big
-    assert backend.edits == {} and backend.events == []
+    assert backend.edits == {}
+    assert [(e["subject"], e["decision"]) for e in backend.events] == [("second factor", "rejected")]  # the 000000
+    backend.events.clear()
     assert post({"action": "source-hint:us-co-sos", "code": code(), "hint": "x"})[0] == 200  # ...so it still works

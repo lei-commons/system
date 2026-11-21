@@ -176,7 +176,9 @@ def test_codes_and_failures_change_nothing(env):
     assert act("source-remove:gleif").status == 400
     assert act("source-hint:us-co-sos", {"hint": "x" * 1001}).status == 400
     assert act("source-edit:us-co-sos", {"fields": "name"}).status == 400
-    assert backend.edits == {} and backend.events == []
+    assert backend.edits == {}
+    assert [(e["subject"], e["decision"]) for e in backend.events] == [("second factor", "rejected")]
+    backend.events.clear()
     backend.conflict = True
     out = act("source-edit:us-co-sos", {"fields": {"name": "Colorado SOS"}})
     assert out.status == 409 and backend.events[-1]["decision"] == "failed"

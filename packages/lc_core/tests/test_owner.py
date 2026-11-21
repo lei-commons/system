@@ -90,7 +90,10 @@ def test_refusals_change_nothing(env):
     assert act("source-approve:us-co-sos", reason="  ").status == 400
     assert act("source-approve:us-co-sos", code="123456").status == 403
     assert act("source-approve:us-co-sos", code="abc").status == 403
-    assert backend.approvals == {} and backend.events == []
+    assert backend.approvals == {}
+    # each refused code is kept in the decision log as a rejected attempt (never the code itself)
+    assert [(e["subject"], e["decision"]) for e in backend.events] == [("second factor", "rejected")] * 2
+    assert all("123456" not in str(e) for e in backend.events)
 
 
 def test_lockout_after_repeated_wrong_codes(env):
