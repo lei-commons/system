@@ -655,3 +655,882 @@ sources:
     url: https://commoncrawl.org
     terms_url: https://commoncrawl.org/terms-of-use
     assessment: {risk: high, commercial: varies by page, attribution: varies by page, summary: "Not built yet. Each page has its own terms; Common Crawl's terms of use apply to its archive. Needs a careful review before any use.", verified: false}
+
+  # ---- Candidates from the 2026-11-21 scan (owner's goal: 100M+ records), for the owner to approve, deny or keep
+  # pending on the Data sources page. Read from publishers' documentation and licence pages only; no data was
+  # downloaded. Figures are estimates unless a count is cited. Approving permits building; each still needs its
+  # host added to the egress allow-list (owner approval) and its job built. Blocked sources (accounts, keys, paid,
+  # no redistribution) are in context/source-scan-2026-11-21.md, not here. ----
+
+  - id: us-fl-dos
+    name: "Florida Department of State, Division of Corporations (Sunbiz corporate data file)"
+    country: "US"
+    access: open
+    method: bulk
+    licence: "none stated (Florida public records)"
+    cadence: daily
+    status: active
+    url: https://dos.sunbiz.org/data-definitions/cor.html
+    terms_url: https://dos.fl.gov/sunbiz/other-services/data-downloads/
+    assessment:
+      risk: medium
+      commercial: "unclear"
+      attribution: "none stated"
+      summary: >-
+        Free daily and quarterly fixed-width files of every corporation, LLC, LP, non-profit and trust: about 3.95M
+        active and more than 8M records with inactive ones (Division statistics). Served over SFTP with a shared
+        public username and password published on the download page. No licence is stated, only 'for informational
+        purposes, as is'. Officer and registered-agent names and addresses would be dropped (officer names and
+        titles kept at most). A separate event file gives mergers and conversions. New egress host.
+      verified: false
+
+  - id: au-abr-abn
+    name: "Australian Business Register ABN Bulk Extract"
+    country: "AU"
+    access: open
+    method: bulk
+    licence: "CC-BY-3.0-AU"
+    cadence: weekly
+    status: active
+    url: https://abr.business.gov.au/Tools/BulkExtract
+    terms_url: https://data.gov.au/data/dataset/abn-bulk-extract
+    assessment:
+      risk: low
+      commercial: "allowed"
+      attribution: "required (credit the Australian Business Register)"
+      summary: >-
+        Weekly XML extract of every ABN, with no registration needed for the bulk files. Beyond the ASIC companies
+        we already hold (joined by ACN), it adds about 2-2.5M trusts, super funds, partnerships, government bodies,
+        associations and co-operatives (estimate). Sole traders (entity type IND) are people and would be dropped.
+        Licence read from a search snippet of data.gov.au; to confirm.
+      verified: false
+
+  - id: in-ogd-company-master
+    name: "India RoC-wise company master data (MCA, via data.gov.in and AIKosh)"
+    country: "IN"
+    access: open
+    method: bulk
+    licence: "Government Open Data License - India"
+    cadence: monthly
+    status: active
+    url: https://www.data.gov.in/resource/registrars-companies-roc-wise-company-master-data
+    terms_url: https://data.gov.in/government-open-data-license-india
+    assessment:
+      risk: medium
+      commercial: "allowed"
+      attribution: "required ('Published under Open Government Data License - India', with a link)"
+      summary: >-
+        Monthly CSV per Registrar of Companies: CIN, name, status, class, category, capital, registration date and
+        state, no person data. About 2.7-2.8M companies of any status (estimate). Another route to the MCA data
+        marked blocked (in-mca); whether the download needs a sign-in is still to be checked (it must not, for us to
+        use it).
+      verified: false
+
+  - id: us-irs-eo-bmf
+    name: "IRS Exempt Organizations Business Master File Extract"
+    country: "US"
+    access: open
+    method: bulk
+    licence: "public domain (US government work)"
+    cadence: monthly
+    status: active
+    url: https://www.irs.gov/charities-non-profits/exempt-organizations-business-master-file-extract-eo-bmf
+    terms_url: https://www.irs.gov/charities-non-profits/exempt-organizations-business-master-file-extract-eo-bmf
+    assessment:
+      risk: low
+      commercial: "allowed"
+      attribution: "none required (credit 'IRS EO BMF')"
+      summary: >-
+        1,984,891 exempt organisations (count on the IRS page, 2026-11-21), keyed by EIN, with address, ruling date,
+        subsection and NTEE codes. Most are in no state register we read (about 1.6-1.8M new). The 'in care of' name
+        is often a person and would be dropped.
+      verified: false
+
+  - id: us-cms-nppes-org
+    name: "CMS NPPES NPI file, type 2 (organisation) providers"
+    country: "US"
+    access: open
+    method: bulk
+    licence: "public domain (US government work)"
+    cadence: monthly
+    status: active
+    url: https://download.cms.gov/nppes/NPI_Files.html
+    terms_url: https://download.cms.gov/nppes/NPI_Files.html
+    assessment:
+      risk: medium
+      commercial: "allowed"
+      attribution: "none required"
+      summary: >-
+        About 1.9M organisation health-care providers (third-party counts), monthly full file plus weekly updates.
+        Type 1 rows are individual practitioners and would be dropped entirely; the authorised official's phone is
+        dropped. Provider records rather than a register: hospitals have many sub-part NPIs and no EIN is published,
+        so merging is harder.
+      verified: false
+
+  - id: fr-rna
+    name: "France Répertoire National des Associations (Ministère de l'Intérieur)"
+    country: "FR"
+    access: open
+    method: bulk
+    licence: "Licence Ouverte 2.0 (Etalab)"
+    cadence: monthly
+    status: active
+    url: https://www.data.gouv.fr/fr/datasets/repertoire-national-des-associations/
+    terms_url: https://www.etalab.gouv.fr/licence-ouverte-open-licence
+    assessment:
+      risk: low
+      commercial: "allowed"
+      attribution: "required (source and date of last update)"
+      summary: >-
+        Every declared association since 1901 (RNA_waldec and RNA_import): about 2.5M, of which 1.5-2M have no SIREN
+        and would be new even with SIRENE. Name, purpose, seat, dates. The management address can be a volunteer's
+        home and would be dropped. Excludes Alsace-Moselle. Same host as SIRENE (data.gouv.fr).
+      verified: false
+
+  - id: pe-sunat-ruc
+    name: "Peru SUNAT padrón reducido del RUC"
+    country: "PE"
+    access: open
+    method: bulk
+    licence: "none stated"
+    cadence: daily
+    status: active
+    url: https://www.sunat.gob.pe/descargaPRR/mrc137_padron_reducido.html
+    terms_url: https://orientacion.sunat.gob.pe/padron-reducido-del-ruc-para-descarga
+    assessment:
+      risk: medium
+      commercial: "unclear"
+      attribution: "none stated"
+      summary: >-
+        Daily download of every taxpayer: RUC, name, status, domicile condition, ubigeo and fiscal address. Only
+        RUCs starting 20 (legal persons) would be kept; RUC-10 rows are natural persons and dropped entirely. About
+        1.5-2.5M legal persons including inactive (estimate). No licence text found.
+      verified: false
+
+  - id: hk-cr
+    name: "Hong Kong Companies Registry open data (live companies, registered non-Hong Kong companies)"
+    country: "HK"
+    access: open
+    method: api
+    licence: "DATA.GOV.HK terms and conditions"
+    cadence: daily
+    status: active
+    url: https://data.gov.hk/en-data/dataset/hk-cr-crdata-list-addr
+    terms_url: https://data.gov.hk/en/terms-and-conditions
+    assessment:
+      risk: medium
+      commercial: "allowed"
+      attribution: "required (the Government, the Companies Registry and DATA.GOV.HK)"
+      summary: >-
+        1,609,720 live local companies and 16,014 registered non-Hong Kong companies (CR, June 2026): BRN, English
+        and Chinese names, registered office. The terms allow commercial use and redistribution. Served as a search
+        API, so listing everything needs checking against its limits; weekly lists of new companies are bulk.
+      verified: false
+
+  - id: es-borme
+    name: "Spain BORME (Boletín Oficial del Registro Mercantil, BOE open data)"
+    country: "ES"
+    access: open
+    method: api
+    licence: "BOE reuse conditions (aviso legal)"
+    cadence: daily
+    status: active
+    url: https://www.boe.es/datosabiertos/faq/borme.php
+    terms_url: https://www.boe.es/informacion/aviso_legal/index.php
+    assessment:
+      risk: medium
+      commercial: "allowed"
+      attribution: "required ('Fuente de los datos: Agencia Estatal Boletín Oficial del Estado', with a link)"
+      summary: >-
+        The commercial register's gazette since 2009: incorporations, changes and dissolutions, from which the
+        register is rebuilt (about 1.5M companies, estimate). Heavy parsing, no tax ID. Appointed administrators'
+        names would be kept with roles only. Must not suggest official status.
+      verified: false
+
+  - id: ua-edr
+    name: "Ukraine Unified State Register of Legal Entities (Ministry of Justice)"
+    country: "UA"
+    access: open
+    method: bulk
+    licence: "unverified (data.gov.ua datasets are usually CC-BY-4.0)"
+    cadence: weekly
+    status: active
+    url: https://data.gov.ua
+    terms_url: https://data.gov.ua
+    assessment:
+      risk: medium
+      commercial: "unclear"
+      attribution: "unverified"
+      summary: >-
+        Open data publication restored in January 2026 (Ministry order 3168/5). About 1.3-1.5M legal entities and
+        public formations (estimate); sole proprietors (FOP) dropped, founders and heads kept as names and roles
+        only. Licence and dataset page not readable by the scan; wartime rules could suspend it again.
+      verified: false
+
+  - id: ro-onrc
+    name: "Romania Trade Register (ONRC) open data"
+    country: "RO"
+    access: open
+    method: bulk
+    licence: "unverified (CC-BY-4.0 per a third party; data.gov.ro default OGL-ROU-1.0)"
+    cadence: quarterly
+    status: active
+    url: https://data.gov.ro
+    terms_url: https://data.gov.ro
+    assessment:
+      risk: medium
+      commercial: "unclear"
+      attribution: "unverified"
+      summary: >-
+        Companies, status, CAEN codes and EU branches: about 1.0-1.5M legal persons (estimate). Natural-person
+        traders (PFA, II, IF) dropped; the legal-representatives file kept as names and roles only. Publisher pages
+        were not readable by the scan; the licence must be confirmed.
+      verified: false
+
+  - id: se-bolagsverket
+    name: "Sweden Bolagsverket high-value dataset bulk file"
+    country: "SE"
+    access: open
+    method: bulk
+    licence: "unverified (CC-BY-4.0 expected under EU high-value datasets)"
+    cadence: weekly
+    status: active
+    url: https://bolagsverket.se
+    terms_url: https://bolagsverket.se
+    assessment:
+      risk: medium
+      commercial: "unclear"
+      attribution: "unverified"
+      summary: >-
+        Sweden's free company bulk file under the EU high-value datasets rules (the API needs a registered client
+        and is not used): about 1.2M companies and associations (estimate), without board members. Bolagsverket's
+        page was behind a captcha; the licence should be confirmed in writing.
+      verified: false
+
+  - id: th-dbd
+    name: "Thailand Department of Business Development juristic person open data"
+    country: "TH"
+    access: open
+    method: bulk
+    licence: "Open Data Common (unverified)"
+    cadence: monthly
+    status: active
+    url: https://opendata.dbd.go.th/en/dataset/dataset_11_01
+    terms_url: https://data.go.th
+    assessment:
+      risk: medium
+      commercial: "unclear"
+      attribution: "unverified"
+      summary: >-
+        About 1.0M operating juristic persons (2.09M ever registered; DBD figures via the press). The open files may
+        be monthly new and dissolved lists rather than the full register; pages blocked automated reading, so
+        licence and coverage are unverified.
+      verified: false
+
+  - id: ar-rns
+    name: "Argentina Registro Nacional de Sociedades"
+    country: "AR"
+    access: open
+    method: bulk
+    licence: "CC-BY-4.0"
+    cadence: monthly
+    status: active
+    url: https://datos.jus.gob.ar/dataset/registro-nacional-de-sociedades
+    terms_url: https://datos.jus.gob.ar/dataset/registro-nacional-de-sociedades
+    assessment:
+      risk: low
+      commercial: "allowed"
+      attribution: "required ('Fuente: Ministerio de Justicia, Registro Nacional de Sociedades')"
+      summary: >-
+        National register of companies from all provinces (CUIT, name, type, dates, address), monthly, CC BY 4.0
+        read on the publisher's page. About 1M legal persons (estimate). The cleanest licence in Latin America.
+      verified: false
+
+  - id: cl-sii-pj
+    name: "Chile SII nómina de personas jurídicas"
+    country: "CL"
+    access: open
+    method: bulk
+    licence: "none stated"
+    cadence: yearly
+    status: active
+    url: https://www.sii.cl/sobre_el_sii/nominapersonasjuridicas.html
+    terms_url: https://www.sii.cl/sobre_el_sii/nominapersonasjuridicas.html
+    assessment:
+      risk: medium
+      commercial: "unclear"
+      attribution: "none stated"
+      summary: >-
+        Legal-person taxpayers: name, start and end of activity, addresses and activity codes; about 1M+ (estimate).
+        No licence stated, and an SII resolution mentions use for commercial risk assessment, which needs checking.
+      verified: false
+
+  - id: il-ica
+    name: "Israel Corporations Authority companies database (data.gov.il)"
+    country: "IL"
+    access: open
+    method: bulk
+    licence: "unverified (data.gov.il open licence)"
+    cadence: daily
+    status: active
+    url: https://www.justice.gov.il/En/Units/IsraeliCorporations/CompaniesRegistrar/OnlineServices/Pages/DataBaseRegisteredCompaniesVoluntarilyLiquidatedCompanies.aspx
+    terms_url: https://www.justice.gov.il/En/Units/IsraeliCorporations/CompaniesRegistrar/OnlineServices/Pages/DataBaseRegisteredCompaniesVoluntarilyLiquidatedCompanies.aspx
+    assessment:
+      risk: medium
+      commercial: "unclear"
+      attribution: "unverified"
+      summary: >-
+        Daily file of registered companies: number, Hebrew and English names, status, dates, address, type. About
+        0.7-1.07M (estimate). Pages were not readable by the scan; the licence must be confirmed. Non-profits
+        (amutot) are a separate dataset.
+      verified: false
+
+  - id: pl-krs
+    name: "Poland National Court Register (KRS) open API"
+    country: "PL"
+    access: open
+    method: api
+    licence: "unverified"
+    cadence: daily
+    status: active
+    url: https://prs.ms.gov.pl/krs/openApi
+    terms_url: https://prs.ms.gov.pl/krs/openApi
+    assessment:
+      risk: medium
+      commercial: "unclear"
+      attribution: "unverified"
+      summary: >-
+        Keyless API with rich extracts (name, KRS, NIP, REGON, legal form, address, PKD, status) and a daily change
+        bulletin; about 970k companies, foundations and associations. No bulk file, so building it means fetching
+        each number, politely; no licence stated. Board members kept as names and roles only.
+      verified: false
+
+  - id: us-tx-franchise
+    name: "Texas Comptroller active franchise tax permit holders (data.texas.gov)"
+    country: "US"
+    access: open
+    method: bulk
+    licence: "unverified"
+    cadence: irregular
+    status: active
+    url: https://data.texas.gov/dataset/Active-Franchise-Tax-Permit-Holders/9cir-efmm
+    terms_url: https://data.texas.gov/dataset/Active-Franchise-Tax-Permit-Holders/9cir-efmm
+    assessment:
+      risk: medium
+      commercial: "unclear"
+      attribution: "unverified"
+      summary: >-
+        The only free route to Texas-registered entities (the Secretary of State's bulk data is paid, and the
+        Comptroller's own files now need an account): taxpayer number, legal name, address, organisation type, SOS
+        file number, charter date. Size unverified (likely over 1M); the dataset may be stale.
+      verified: false
+
+  - id: co-rues
+    name: "Colombia RUES: personas jurídicas y entidades sin ánimo de lucro (datos.gov.co)"
+    country: "CO"
+    access: open
+    method: bulk
+    licence: "unverified"
+    cadence: irregular
+    status: active
+    url: https://www.datos.gov.co/d/c82u-588k
+    terms_url: https://www.datos.gov.co/d/c82u-588k
+    assessment:
+      risk: high
+      commercial: "unclear"
+      attribution: "unverified"
+      summary: >-
+        Chambers of commerce registry data on the national open-data portal; publisher and licence not confirmed.
+        Mixed with natural-person merchants, who would be dropped; perhaps 0.8-1.5M legal persons and non-profits
+        (estimate).
+      verified: false
+
+  - id: ca-bc-orgbook
+    name: "British Columbia OrgBook BC (BC Registries)"
+    country: "CA"
+    access: open
+    method: api
+    licence: "Open Government Licence - British Columbia"
+    cadence: daily
+    status: active
+    url: https://orgbook.gov.bc.ca/
+    terms_url: https://www2.gov.bc.ca/gov/content/data/policy-standards/data-policies/open-data/api-terms-of-use-for-ogl-information
+    assessment:
+      risk: medium
+      commercial: "allowed"
+      attribution: "required ('Contains information licensed under the Open Government Licence - British Columbia')"
+      summary: >-
+        Keyless API of BC entities (registry number, CRA business number, type, status, names); about 1M including
+        sole proprietorships, which are dropped. API only, so it needs a polite crawl within the API terms.
+      verified: false
+
+  - id: cy-drcor
+    name: "Cyprus register of companies, foreign companies and co-operatives (DRCOR)"
+    country: "CY"
+    access: open
+    method: bulk
+    licence: "CC-BY-4.0"
+    cadence: monthly
+    status: active
+    url: https://data.gov.cy/el/dataset/mitroo-eggegrammenon-etaireion-emporikon-eponymion-kai-synetairismon-stin-kypro
+    terms_url: https://data.gov.cy/el/dataset/mitroo-eggegrammenon-etaireion-emporikon-eponymion-kai-synetairismon-stin-kypro
+    assessment:
+      risk: low
+      commercial: "allowed"
+      attribution: "required (credit the Department of Registrar of Companies, data.gov.cy)"
+      summary: >-
+        Monthly CSVs of organisations, registered offices and officials, CC BY 4.0 read on the publisher's page.
+        About 576k companies including struck-off ones; trade names (may be sole traders) excluded; officials kept
+        as names and roles only. Many SPVs, useful for LEI coverage.
+      verified: false
+
+  - id: ch-zefix
+    name: "Switzerland Zefix central business name index (LINDAS linked data)"
+    country: "CH"
+    access: open
+    method: api
+    licence: "opendata.swiss terms_by (open use, source required)"
+    cadence: daily
+    status: active
+    url: https://register.ld.admin.ch/.well-known/dataset/foj-zefix
+    terms_url: https://opendata.swiss/en/dataset/zefix-zentraler-firmenindex
+    assessment:
+      risk: medium
+      commercial: "allowed"
+      attribution: "required ('Source: Federal Commercial Registry Office / Zefix')"
+      summary: >-
+        Daily core data of active entities in the commercial register (UID, name, seat, address, legal form) through
+        a keyless SPARQL endpoint; about 550k excluding sole proprietorships (estimate). Active entities only; no
+        bulk dump, so it is paged.
+      verified: false
+
+  - id: ec-sri-ruc
+    name: "Ecuador SRI catastro RUC (open data)"
+    country: "EC"
+    access: open
+    method: bulk
+    licence: "unverified"
+    cadence: monthly
+    status: active
+    url: https://www.sri.gob.ec/datasets
+    terms_url: https://www.sri.gob.ec/datasets
+    assessment:
+      risk: medium
+      commercial: "unclear"
+      attribution: "unverified"
+      summary: >-
+        Per-province taxpayer files; companies (sociedades) about 0.4-0.6M (estimate), natural persons dropped.
+        Pages were not readable by the scan; licence and terms to confirm.
+      verified: false
+
+  - id: sk-rpo
+    name: "Slovakia Register of Legal Entities, Entrepreneurs and Public Authorities (RPO)"
+    country: "SK"
+    access: open
+    method: bulk
+    licence: "CC-BY-4.0"
+    cadence: daily
+    status: active
+    url: https://slovak.statistics.sk
+    terms_url: https://slovak.statistics.sk
+    assessment:
+      risk: low
+      commercial: "allowed"
+      attribution: "required (Statistical Office of the Slovak Republic)"
+      summary: >-
+        Consolidated register (commercial register, trade licensing and others), CC BY 4.0 per the Statistical
+        Office. About 462k legal entities and organisations; about 1M person records (sole traders) dropped. The
+        dump host is a cloud bucket whose provenance should be confirmed.
+      verified: false
+
+  - id: us-sec-edgar
+    name: "SEC EDGAR company list and submissions"
+    country: "US"
+    access: open
+    method: bulk
+    licence: "public domain (US government work)"
+    cadence: daily
+    status: active
+    url: https://www.sec.gov/search-filings/edgar-search-assistance/accessing-edgar-data
+    terms_url: https://www.sec.gov/search-filings/edgar-search-assistance/accessing-edgar-data
+    assessment:
+      risk: low
+      commercial: "allowed"
+      attribution: "none required"
+      summary: >-
+        Every EDGAR filer with SIC, state of incorporation, address and former names; several hundred thousand
+        entities (funds, trusts, issuers), a good LEI cross-match. The CIK list includes individual insiders, who
+        would be dropped using the submissions' entity type. Fair-access rules: declared User-Agent, at most 10
+        requests a second.
+      verified: false
+
+  - id: gb-ccew
+    name: "Register of Charities, England and Wales (Charity Commission)"
+    country: "GB"
+    access: open
+    method: bulk
+    licence: "OGL-UK-3.0"
+    cadence: daily
+    status: active
+    url: https://register-of-charities.charitycommission.gov.uk/en/register/full-register-download
+    terms_url: https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/
+    assessment:
+      risk: low
+      commercial: "allowed"
+      attribution: "required ('Contains public sector information licensed under the Open Government Licence v3.0')"
+      summary: >-
+        Daily extract of about 172k registered charities plus removed ones; about 120k are not companies
+        (unincorporated charities, trusts, CIOs). Charitable companies join Companies House by company number.
+        Trustees kept as names only or dropped; no contact details.
+      verified: false
+
+  - id: lt-jar
+    name: "Lithuania Register of Legal Entities (Registrų centras) open data"
+    country: "LT"
+    access: open
+    method: bulk
+    licence: "unverified (CC-BY-4.0 per a third party)"
+    cadence: daily
+    status: active
+    url: https://www.registrucentras.lt/atviri-duomenys-ir-statistika
+    terms_url: https://www.registrucentras.lt/atviri-duomenys-ir-statistika
+    assessment:
+      risk: medium
+      commercial: "allowed"
+      attribution: "required (cite Registrų centras)"
+      summary: >-
+        Code, name, legal form, status, address and dates for about 250k legal persons including deregistered ones
+        (estimate). Publisher pages were not readable by the scan; licence to confirm.
+      verified: false
+
+  - id: eu-ted
+    name: "EU Tenders Electronic Daily (Publications Office of the EU)"
+    country: "*"
+    access: open
+    method: bulk
+    licence: "free reuse (TED legal notice; editorial content CC-BY-4.0)"
+    cadence: daily
+    status: active
+    url: https://ted.europa.eu/en/help/data-reuse
+    terms_url: https://ted.europa.eu/en/legal-notice
+    assessment:
+      risk: medium
+      commercial: "allowed"
+      attribution: "required (credit TED / Publications Office; mark changes)"
+      summary: >-
+        Daily notices naming contracting authorities (municipalities, hospitals, schools, public bodies) and winning
+        suppliers across the EU; likely hundreds of thousands of organisations after matching, many from countries
+        with no open register. Contact persons and natural-person suppliers dropped. Identifiers are inconsistent.
+      verified: false
+
+  - id: md-asp
+    name: "Moldova State Register of Legal Units (Agenția Servicii Publice)"
+    country: "MD"
+    access: open
+    method: bulk
+    licence: "not specified"
+    cadence: irregular
+    status: active
+    url: https://dataset.gov.md/en/dataset/11736-date-din-registrul-de-stat-al-unitatilor-de-drept-privind-intreprinderile-inregistrate-in-repu
+    terms_url: https://dataset.gov.md/en/dataset/11736-date-din-registrul-de-stat-al-unitatilor-de-drept-privind-intreprinderile-inregistrate-in-repu
+    assessment:
+      risk: high
+      commercial: "unclear"
+      attribution: "unclear"
+      summary: >-
+        XLSX snapshots of registered enterprises, about 200k (estimate); individual entrepreneurs dropped. The
+        portal says 'License Not Specified', so the agency would have to be asked for a licence first.
+      verified: false
+
+  - id: si-ajpes-prs
+    name: "Slovenian Business Register (AJPES)"
+    country: "SI"
+    access: open
+    method: bulk
+    licence: "CC-BY-4.0"
+    cadence: irregular
+    status: active
+    url: https://podatki.gov.si/dataset/poslovni-register-slovenije
+    terms_url: https://podatki.gov.si/dataset/poslovni-register-slovenije
+    assessment:
+      risk: low
+      commercial: "allowed"
+      attribution: "required (cite AJPES)"
+      summary: >-
+        Twice-monthly CSV, CC BY 4.0 read on the publisher's page: registration number, name, address, legal form.
+        About 120-150k entities after dropping sole traders (s.p.) and room renters (about 42% of units).
+      verified: false
+
+  - id: cz-csu-res
+    name: "Czech Register of Economic Subjects (RES, Czech Statistical Office)"
+    country: "CZ"
+    access: open
+    method: bulk
+    licence: "unverified"
+    cadence: irregular
+    status: active
+    url: https://csu.gov.cz/registr-ekonomickych-subjektu-otevrena-data-dokumentace
+    terms_url: https://csu.gov.cz/registr-ekonomickych-subjektu-otevrena-data-dokumentace
+    assessment:
+      risk: low
+      commercial: "unclear"
+      attribution: "unverified"
+      summary: >-
+        Twice-monthly CSV of every economic subject by IČO. Fills gaps the court register (cz-justice) lacks: public
+        bodies, churches, associations (100-300k, estimate). Natural-person entrepreneurs dropped. Terms of use to
+        read.
+      verified: false
+
+  - id: tw-mof-tax
+    name: "Taiwan national business tax registration (Ministry of Finance)"
+    country: "TW"
+    access: open
+    method: bulk
+    licence: "Open Government Data License, version 1.0"
+    cadence: daily
+    status: active
+    url: https://data.gov.tw/dataset/9400
+    terms_url: https://data.gov.tw/license
+    assessment:
+      risk: low
+      commercial: "allowed"
+      attribution: "required (as the Open Government Data License asks)"
+      summary: >-
+        Daily CSV of operating businesses by unified business number. Beyond the GCIS companies it adds
+        partnerships, associations, schools, foundations and foreign branches (about 0.1-0.2M, estimate); sole
+        proprietorships dropped.
+      verified: false
+
+  - id: ca-cra-charities
+    name: "Canada Revenue Agency list of charities (T3010 open data)"
+    country: "CA"
+    access: open
+    method: bulk
+    licence: "Open Government Licence - Canada"
+    cadence: yearly
+    status: active
+    url: https://open.canada.ca/data/dataset/21118663-1847-48ce-81ce-1ac7cff674c0
+    terms_url: https://open.canada.ca/en/open-government-licence-canada
+    assessment:
+      risk: low
+      commercial: "allowed"
+      attribution: "required ('Contains information licensed under the Open Government Licence - Canada')"
+      summary: >-
+        About 86k registered charities keyed by business number; perhaps half are provincial corporations or trusts
+        not in the federal register. Directors kept as names and roles only, or dropped. Yearly.
+      verified: false
+
+  - id: nl-anbi
+    name: "Netherlands ANBI public-benefit institutions (Belastingdienst)"
+    country: "NL"
+    access: open
+    method: bulk
+    licence: "CC0-1.0"
+    cadence: weekly
+    status: active
+    url: https://belastingdienst.nl/wps/wcm/connect/bldcontentnl/themaoverstijgend/brochures_en_publicaties/open_data_anbi
+    terms_url: https://belastingdienst.nl/wps/wcm/connect/bldcontentnl/themaoverstijgend/brochures_en_publicaties/open_data_anbi
+    assessment:
+      risk: low
+      commercial: "allowed"
+      attribution: "none required (CC0)"
+      summary: >-
+        Weekly file of about 44k public-benefit institutions with RSIN, KVK number, name and town; all new (the
+        Dutch company register is paid, and its free dataset has no names or numbers).
+      verified: false
+
+  - id: au-acnc
+    name: "Australian Charities and Not-for-profits Commission register"
+    country: "AU"
+    access: open
+    method: bulk
+    licence: "CC-BY-3.0-AU"
+    cadence: weekly
+    status: active
+    url: https://data.gov.au/data/dataset/acnc-register
+    terms_url: https://data.gov.au/data/dataset/acnc-register
+    assessment:
+      risk: low
+      commercial: "allowed"
+      attribution: "required (credit the ACNC)"
+      summary: >-
+        About 65k registered charities, each with an ABN, so nearly all already come with au-abr-abn; its value is
+        the charity status, size and purposes. Responsible persons are not in the file.
+      verified: false
+
+  - id: nz-charities
+    name: "New Zealand Charities Register (Department of Internal Affairs)"
+    country: "NZ"
+    access: open
+    method: api
+    licence: "CC-BY-3.0-NZ"
+    cadence: daily
+    status: active
+    url: https://charities.govt.nz/charities-in-new-zealand/the-charities-register/open-data
+    terms_url: https://charities.govt.nz/charities-in-new-zealand/the-charities-register/open-data
+    assessment:
+      risk: low
+      commercial: "allowed"
+      attribution: "required (credit Charities Services, Department of Internal Affairs)"
+      summary: >-
+        Keyless OData service of about 28k charities; New Zealand's company register is not open (its bulk agreement
+        forbids sharing), so these are mostly new. Officers kept as names and roles only.
+      verified: false
+
+  - id: gb-oscr
+    name: "Scottish Charity Register (OSCR)"
+    country: "GB"
+    access: open
+    method: bulk
+    licence: "OGL-UK-3.0"
+    cadence: daily
+    status: active
+    url: https://www.oscr.org.uk/about-charities/search-the-register/download-the-scottish-charity-register/
+    terms_url: https://www.oscr.org.uk/crown-copyright
+    assessment:
+      risk: low
+      commercial: "allowed"
+      attribution: "required (credit OSCR, Crown copyright and database right)"
+      summary: >-
+        Daily CSV of about 25k charities plus former charities with removal dates; most (SCIOs, trusts) are not at
+        Companies House. Personal data is outside the OGL and dropped. OSCR bars direct marketing and presenting a
+        copy as the official register.
+      verified: false
+
+  - id: gb-ccni
+    name: "Register of Charities, Northern Ireland (Charity Commission for Northern Ireland)"
+    country: "GB"
+    access: open
+    method: bulk
+    licence: "OGL-UK-3.0"
+    cadence: irregular
+    status: active
+    url: https://www.data.gov.uk/dataset/4e5deb54-0485-4cc5-84a3-a72f0d8d3ef3/register-of-charities
+    terms_url: https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/
+    assessment:
+      risk: medium
+      commercial: "allowed"
+      attribution: "required (OGL statement)"
+      summary: >-
+        About 7-8k charities; the OpenDataNI resource currently shows no data, so the source is the commission's CSV
+        export. Trustees dropped or kept as names and roles.
+      verified: false
+
+  - id: gb-find-a-tender
+    name: "UK Find a Tender Service and Contracts Finder (OCDS)"
+    country: "GB"
+    access: open
+    method: both
+    licence: "OGL-UK-3.0"
+    cadence: daily
+    status: active
+    url: https://www.find-tender.service.gov.uk/Developer/Documentation
+    terms_url: https://www.find-tender.service.gov.uk/Developer/Documentation
+    assessment:
+      risk: medium
+      commercial: "allowed"
+      attribution: "required (OGL statement)"
+      summary: >-
+        Public procurement notices naming contracting authorities (councils, schools, academies, NHS bodies) and
+        suppliers, often with Companies House numbers; mainly adds public bodies (estimate tens of thousands).
+        Contacts and sole-trader suppliers dropped.
+      verified: false
+
+  - id: gb-govuk-orgs
+    name: "GOV.UK organisations (Government Digital Service)"
+    country: "GB"
+    access: open
+    method: api
+    licence: "OGL-UK-3.0"
+    cadence: daily
+    status: active
+    url: https://docs.publishing.service.gov.uk/manual/organisations-api.html
+    terms_url: https://www.gov.uk/api
+    assessment:
+      risk: low
+      commercial: "allowed"
+      attribution: "required (OGL statement)"
+      summary: >-
+        About 1,200 UK government departments, agencies and public bodies, with parent and child links
+        (relationships). Small but clean, and not in any company register.
+      verified: false
+
+  - id: us-ffiec-nic
+    name: "FFIEC National Information Center bank structure data (Federal Reserve)"
+    country: "US"
+    access: open
+    method: bulk
+    licence: "public domain (US government work)"
+    cadence: daily
+    status: active
+    url: https://www.ffiec.gov/npw/FinancialReport/DataDownload
+    terms_url: https://www.ffiec.gov/npw/FinancialReport/DataDownload
+    assessment:
+      risk: low
+      commercial: "allowed"
+      attribution: "none required"
+      summary: >-
+        Attributes, relationships and transformations of banks, holding companies and other institutions (likely
+        over 100k rows with closed ones). Most have LEIs or RSSD IDs; the value is the ownership relationships. Page
+        not readable by the scan.
+      verified: false
+
+  - id: wikidata-orgs
+    name: "Wikidata organisations with register identifiers (Wikimedia)"
+    country: "*"
+    access: open
+    method: bulk
+    licence: "CC0-1.0"
+    cadence: weekly
+    status: active
+    url: https://www.wikidata.org/wiki/Wikidata:Database_download
+    terms_url: https://www.wikidata.org/wiki/Wikidata:Licensing
+    assessment:
+      risk: medium
+      commercial: "allowed"
+      attribution: "none required (CC0)"
+      summary: >-
+        An identifier crosswalk (LEI, national register IDs, Wikipedia) and a source of public bodies, universities,
+        NGOs and international organisations no register lists (likely hundreds of thousands new). Crowd-sourced, so
+        enrichment rather than an authority; the weekly dump is over 100 GB and is filtered while streaming.
+      verified: false
+
+  - id: de-offeneregister
+    name: "OffeneRegister.de (Open Knowledge Foundation Germany snapshot of the Handelsregister)"
+    country: "DE"
+    access: open
+    method: bulk
+    licence: "CC-BY-4.0"
+    cadence: irregular
+    status: active
+    url: https://offeneregister.de/
+    terms_url: https://offeneregister.de/
+    assessment:
+      risk: high
+      commercial: "allowed"
+      attribution: "required (OpenCorporates / OffeneRegister)"
+      summary: >-
+        About 5M German companies including deleted ones, but a one-off snapshot from about 2019 that is no longer
+        updated, taken from a register whose terms limit mass retrieval. The only bulk route to Germany; it would be
+        a frozen layer, clearly dated. Officers kept as names and roles only.
+      verified: false
+
+  - id: ru-fns-rsmp
+    name: "Russia Federal Tax Service unified register of small and medium enterprises"
+    country: "RU"
+    access: open
+    method: bulk
+    licence: "FNS standard terms for public information"
+    cadence: monthly
+    status: active
+    url: https://www.nalog.gov.ru/opendata/7707329152-rsmp/
+    terms_url: https://www.nalog.gov.ru
+    assessment:
+      risk: high
+      commercial: "unclear"
+      attribution: "unverified"
+      summary: >-
+        About 2M+ small and medium legal entities (individual entrepreneurs dropped); not the full register (EGRUL
+        is paid). High legal and sanctions risk, and the host often blocks foreign addresses. Listed for
+        completeness; not recommended without a legal and sanctions review.
+      verified: false
