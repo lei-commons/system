@@ -12,7 +12,9 @@ It takes the daily load's lock, so the two never overlap. It stops at once
 unless the system is running. It reports only timings, counts and sizes, never
 names or IDs, because the system repo's workflow logs are public.
 
-Run it as an override of the load-db job: see .github/workflows/load-test.yml.
+Run it as an override of the load-db job (args python -m load_db.loadtest; LC_BENCH_RECORDS and
+LC_BENCH_SECONDS), an owner action on the admin page: GitHub has no manual triggers that change the system
+(owner decision 2026-11-21).
 """
 
 from __future__ import annotations

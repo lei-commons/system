@@ -62,11 +62,11 @@ def test_no_constitution_no_session(tmp_path):
         build_system(tmp_path, "x")
 
 
-@pytest.mark.parametrize("env", [{"SYSTEM_STATE": "paused"}, {}])
-def test_paused_or_unknown_state_never_builds_a_client(tmp_path, monkeypatch, env):
-    monkeypatch.delenv("SYSTEM_STATE", raising=False)
+@pytest.mark.parametrize("word", ["paused", None])
+def test_paused_or_unknown_state_never_builds_a_client(tmp_path, monkeypatch, word):
     monkeypatch.delenv("LC_CONTROL_STATE_URI", raising=False)
-    for k, v in env.items():
-        monkeypatch.setenv(k, v)
+    if word:
+        (tmp_path / "state.json").write_text('{"state": "%s"}' % word)
+        monkeypatch.setenv("LC_CONTROL_STATE_URI", str(tmp_path / "state.json"))
     monkeypatch.setattr("lc_harness.__main__.ClaudeVertex", lambda *a: pytest.fail("client built"))
     assert main(["--role", "x", "--task-file", "t", "--trace", str(tmp_path / "t.jsonl")]) == 3

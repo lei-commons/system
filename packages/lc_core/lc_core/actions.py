@@ -3,7 +3,7 @@
 One catalogue, so the pages, the site and the console can't disagree (lc_core.owner carries them out). Jobs come from the
 sources registry, so a new source gets its actions with no other change.
 
-The state rules match the `control` repository's ``apply_command.py``: pause
+The state rules (the retired `control` repository's workflow used the same): pause
 and stop always work, even on a missing or corrupt state; everything else
 refuses to guess.
 """
