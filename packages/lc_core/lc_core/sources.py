@@ -2,8 +2,8 @@
 
 Everything that lists sources reads it: the site's pages and its source names, the
 snapshot (which sources, in what merge order, with what licence and attribution),
-the daily cycle's steps (Terraform), and the status and run-job workflows. So a new
-source needs only its entry here.
+the daily cycle's steps (Terraform), the status workflow and the owner's run-a-job actions. So a
+new source needs only its entry here.
 """
 
 from __future__ import annotations

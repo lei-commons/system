@@ -13,7 +13,6 @@ on:
     branches: [main]
     paths: ["config/sources.yaml", "config/cycle.yaml", "config/egress-allowlist.yaml", "config/dedi.yaml", "infra/workflows/**", "scripts/render_cycle.py",
             "packages/lc_core/lc_core/cycle.py", "packages/lc_core/lc_core/sources.py", ".github/workflows/deploy-cycle.yml"]
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -43,6 +42,11 @@ jobs:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@v2
+      - name: Deploy only while the system is running (the owner's control state)
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          STATE_CHECK_ENFORCED: ${{ vars.STATE_CHECK_ENFORCED }}
+        run: python3 scripts/check_system_state.py deploy:cycle
 
       - name: Self-test the cycle's logic in Workflows
         run: |

@@ -9,11 +9,11 @@ The system starts **paused**. Nothing runs and nothing is spent on models until 
 1. Turn on two-factor authentication for your account, and in the org settings require it for all members.
 2. Create these empty repositories (public, no README):
    `system`, `ledger-gleif`, `ledger-us`, `ledger-gb`, `ledger-in`, `ledger-br`, `ledger-sg`, `releases`, `intake`, `status`.
-   Create `control` as **private**; only you have access to it.
+   Create `control` as **private**; only you have access to it. (Since 2026-11-21 it holds only notes: the control state lives in the cloud.)
 3. Push this repository's contents to `lei-commons/system`.
 4. Org settings → Actions → General: allow only actions from GitHub and verified creators, and set workflow permissions to read-only.
 
-The four GitHub Apps (`lei-commons-maker`, `-checker`, `-guardian`, `-release`) and the owner-only `lei-commons-control` are registered in milestone M2 from manifests in this repo. Each is created by you clicking one confirmation link; agents never create Apps themselves.
+The four GitHub Apps (`lei-commons-maker`, `-checker`, `-guardian`, `-release`) are registered in milestone M2 from manifests in this repo. Each is created by you clicking one confirmation link; agents never create Apps themselves.
 
 ## 2. Google Cloud
 
@@ -78,7 +78,6 @@ Pass the same `--currency`, `--budget` and `--no-budget-pubsub` options as on th
 
 When milestone M1 checks are green:
 
-1. Set org variable `SYSTEM_STATE` to `running`.
-2. Edit `gs://<project>-control/state.json` and set `"state": "running"` (the console does both in one click from M2 on).
+Set the state to `running` on the admin page (2-step login and a fresh code). It writes `gs://<project>-control/state.json`, the only copy of the control state (owner decision 2026-11-21: no GitHub variables). If the admin page is down, edit that file in the Cloud Console with your own Google account.
 
-To stop everything at any time, set either back to `paused` or `stopped`. Agents check before every step and fail closed if they cannot read the state.
+To stop everything at any time, set it back to `paused` or `stopped`. Agents and jobs check before every step, and every deploy workflow checks before deploying (`scripts/check_system_state.py`); all fail closed if they cannot read the state (deploys once `STATE_CHECK_ENFORCED` is `true`, which the bootstrap sets after granting the deployer read access to `state.json`).

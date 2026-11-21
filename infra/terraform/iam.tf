@@ -16,14 +16,12 @@ locals {
     gateway      = "Runs the conduct gateway, the only route to the internet for jobs"
     site         = "Serves the private site and API from the latest snapshot; reads snapshots only"
     loader       = "Loads each snapshot into the serving database"
-    # Used only by the owner's workflows in the control repo. Never an agent identity.
-    control-operator = "Writes the control state on the owner's command, from control@main only"
     # Lets Claude read the owner's suggestions and source edits, privately, from intake@main. Read-only.
     reader = "Reads the owner's source edits and approvals (control bucket, two objects), from intake@main only"
   }
 
   # Runtime identities read the control state before every step.
-  runtime_sas = [for k in keys(local.service_accounts) : k if !contains(["deployer", "control-operator", "reader"], k)]
+  runtime_sas = [for k in keys(local.service_accounts) : k if !contains(["deployer", "reader"], k)]
 
   common_roles = ["roles/logging.logWriter", "roles/monitoring.metricWriter"]
 
@@ -45,8 +43,6 @@ locals {
     site = ["roles/run.viewer", "roles/cloudscheduler.viewer", "roles/workflows.viewer", "roles/cloudsql.client", "roles/cloudsql.instanceUser"]
     # Connects to the serving database; the admin password comes from Secret Manager.
     loader = ["roles/cloudsql.client"]
-    # No project roles: it only touches the two buckets below.
-    control-operator = []
     # No project roles: it reads two objects in the control bucket (below).
     reader = []
   }
@@ -63,7 +59,7 @@ locals {
       "roles/storage.objectViewer" = ["console", "site", "loader"]
     }
     decision_log = {
-      "roles/storage.objectCreator" = ["ingest", "crawler", "resolver", "maker", "checker", "publisher", "workflow", "console", "budget-guard", "control-operator", "loader", "site"]
+      "roles/storage.objectCreator" = ["ingest", "crawler", "resolver", "maker", "checker", "publisher", "workflow", "console", "budget-guard", "loader", "site"]
       "roles/storage.objectViewer"  = ["publisher", "console", "site"]
     }
     ledger_baselines = {
@@ -77,7 +73,7 @@ locals {
     control = {
       "roles/storage.objectViewer" = local.runtime_sas
       # The site takes the owner's actions inline (IAP plus a fresh code each time), as the console does.
-      "roles/storage.objectUser" = ["console", "budget-guard", "control-operator", "site"]
+      "roles/storage.objectUser" = ["console", "budget-guard", "site"]
     }
   }
 
@@ -141,6 +137,20 @@ resource "google_storage_bucket_iam_member" "reader_source_files" {
     title       = "source-files-only"
     description = "source-edits.json and source-approvals.json"
     expression  = "resource.name == \"projects/_/buckets/${google_storage_bucket.control.name}/objects/source-edits.json\" || resource.name == \"projects/_/buckets/${google_storage_bucket.control.name}/objects/source-approvals.json\""
+  }
+}
+
+# The deployer reads the owner's control state, and nothing else in the control bucket, so that every
+# deploy stops unless the system is running (scripts/check_system_state.py; owner decision 2026-11-21).
+resource "google_storage_bucket_iam_member" "deployer_control_state" {
+  bucket = google_storage_bucket.control.name
+  role   = "roles/storage.objectViewer"
+  member = google_service_account.sa["deployer"].member
+
+  condition {
+    title       = "control-state-only"
+    description = "state.json"
+    expression  = "resource.name == \"projects/_/buckets/${google_storage_bucket.control.name}/objects/state.json\""
   }
 }
 

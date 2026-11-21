@@ -1,13 +1,13 @@
 """Owner control gate (constitution Article 1).
 
 Every job and agent calls ``require_running(component)`` before each step. The
-state is set only by the owner, through the owner console, which writes:
-
-  * the GitHub org variable ``SYSTEM_STATE`` (read by Actions workflows), and
-  * ``state.json`` in the control bucket (read by Cloud Run jobs and services).
-
-Agents have read-only access to both. If the state cannot be read, the gate
-fails closed: the step does not run.
+state lives only in the cloud: ``state.json`` in the control bucket, named by
+``LC_CONTROL_STATE_URI`` (owner decision 2026-11-21; the GitHub copies, the org
+variables and the control repo's workflows, are retired). Only the owner changes
+it, on the 2FA-protected admin page; the budget guard may also pause. Deploy
+workflows read the same file before deploying (scripts/check_system_state.py).
+Agents have read-only access. If the state cannot be read, the gate fails
+closed: the step does not run.
 
 state.json shape::
 
@@ -62,22 +62,14 @@ def _read_gcs(uri: str) -> dict:
 
 
 def load_state(env: dict | None = None) -> ControlState:
-    """Load the control state. Order: LC_CONTROL_STATE_URI (gs:// or file path), then SYSTEM_STATE."""
+    """Load the control state from LC_CONTROL_STATE_URI (gs:// or a file path), its only source."""
     env = os.environ if env is None else env
     uri = env.get("LC_CONTROL_STATE_URI", "")
-    if uri:
-        if uri.startswith("gs://"):
-            return ControlState.from_dict(_read_gcs(uri))
-        return ControlState.from_dict(json.loads(Path(uri).read_text(encoding="utf-8")))
-    if "SYSTEM_STATE" in env:
-        paused = [c for c in env.get("PAUSED_COMPONENTS", "").split(",") if c]
-        budget = env.get("MONTHLY_BUDGET_USD")
-        return ControlState.from_dict({
-            "state": env["SYSTEM_STATE"],
-            "paused_components": paused,
-            "monthly_budget_usd": budget,
-        })
-    raise SystemHalted("control state not available; failing closed")
+    if not uri:
+        raise SystemHalted("control state not available (LC_CONTROL_STATE_URI unset); failing closed")
+    if uri.startswith("gs://"):
+        return ControlState.from_dict(_read_gcs(uri))
+    return ControlState.from_dict(json.loads(Path(uri).read_text(encoding="utf-8")))
 
 
 def require_running(component: str, env: dict | None = None, allow_manual: bool = False) -> ControlState:
