@@ -8,7 +8,7 @@
 // built, and leave Claude a suggestion (hints, URLs; up to 1,000 characters). Those
 // edits are laid over the registry in git; a source's id, its approval and its
 // pipeline (job, store, record id) are shown but can't be changed here.
-import { actionBar, api, codeForm, errorBox, flag, fmt, h } from "../lib.js";
+import { ADMIN_API, actionBar, api, codeForm, errorBox, flag, fmt, h } from "../lib.js";
 
 const STATUS = { approved: ["good", "✓", "Approved"], denied: ["bad", "✕", "Denied"], pending: ["warn", "◷", "Pending"],
   unknown: ["idle", "?", "Unknown"] };
@@ -224,7 +224,7 @@ const CHANGE = { add: "added", edit: "edited", remove: "removed", hint: "suggest
 export async function render(root, arg, params) {
   let d;
   try {
-    d = await api("/api/v1/sources");
+    d = await api(`${ADMIN_API}/sources`);
   } catch (error) {
     root.replaceChildren(h("div", { class: "wrap" }, errorBox(error)));
     return;

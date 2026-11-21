@@ -175,3 +175,15 @@ def test_a_code_record_that_cant_be_written_fails_closed_with_a_clear_message():
                   email="o@x.test", now="t", trigger="site")
     assert out.status == 503 and "PermissionError" in out.message and "nothing was done" in out.message
     assert backend.approvals == {} and backend.events == []
+
+
+def test_the_monthly_budget_is_set_with_a_fresh_code(env):
+    """Control parameters live only in the cloud (owner decision 2026-11-21): the budget moved here from GitHub."""
+    clock, backend, act = env
+    assert act("set-budget:abc").status == 404 and act("set-budget:0").status == 404
+    assert act("set-budget:-5").status == 404 and act("set-budget:nan").status == 404
+    assert act("set-budget:2000", code="000000").status == 403
+    out = act("set-budget:2000")
+    assert out.status == 200 and "2,000.00 USD" in out.message
+    assert backend.state["monthly_budget_usd"] == 2000.0 and backend.state["state"] == "running"
+    assert backend.events[-1]["subject"] == "monthly budget" and backend.events[-1]["decision"] == "done"

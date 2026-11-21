@@ -1,3 +1,7 @@
+// The admin area: the same app served at /admin/, whose API is under /api/v1/admin/ (lc_site.server).
+export const ADMIN = location.pathname === "/admin" || location.pathname.startsWith("/admin/");
+export const ADMIN_API = "/api/v1/admin";
+
 // Small helpers shared by every view. Pages are built with h(), which sets text
 // through textContent, so data from the API is never parsed as HTML.
 
@@ -148,7 +152,7 @@ export function errorBox(error) {
 // site (same origin, JSON), which checks the owner's login and the code before
 // acting. `onDone` runs after a success, to refresh the page's data.
 export async function postAction(action, reason, code, extra = {}) {
-  const response = await fetch("/api/v1/act", {
+  const response = await fetch(`${ADMIN_API}/act`, {
     method: "POST", credentials: "same-origin",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ ...extra, action, reason, code }),

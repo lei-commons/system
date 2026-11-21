@@ -3,6 +3,14 @@
 Every request needs the owner's IAP-verified Google account. Nothing here is
 public, and it stays that way until the owner approves going public.
 
+The admin area (owner decision 2026-11-21) is separate: the pages under /admin/ and the API under
+/api/v1/admin/ (the System and Data sources pages, the second factor, every owner action). The load
+balancer sends those paths to a backend of their own, where IAP asks for a recent sign-in with 2-step
+verification (config/site.yaml admin). Admin requests are accepted only with that backend's IAP token
+(LC_IAP_ADMIN_AUDIENCE), so the admin paths can't be reached through the ordinary backend. Until the
+admin backend exists (the owner's bootstrap rerun), that variable is unset and admin requests are checked
+like the rest, which the site logs at startup.
+
 The app is plain JavaScript modules served from this service. The content
 policy lets the page run only this service's own scripts and styles and talk
 only to this service, so nothing loads from anywhere else.
@@ -20,6 +28,8 @@ from urllib.parse import parse_qs, urlsplit
 
 from lc_core.iap import HEADER, verify_iap
 
+ADMIN_PAGES = ("/admin", "/admin/")
+ADMIN_API = "/api/v1/admin/"
 STATIC = Path(__file__).resolve().parent / "static"
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; "
        "font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
@@ -47,6 +57,8 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     owners: set = set()
     audience: str = ""
+    admin_audience: str = ""
+    second_factor = None
     snapshot = None
     system = None
     decisions = None
@@ -81,14 +93,18 @@ class Handler(BaseHTTPRequestHandler):
         path = url.path
         if path == "/health":
             return self._send(200, b"ok\n", "text/plain")
-        email = self.iap(self.headers.get(HEADER), self.audience)
-        if email is None or email not in self.owners:
+        admin = is_admin(path)
+        if self._owner(admin) is None:
             if path.startswith("/api/"):
                 return self._json(403, {"error": "not allowed"})
             return self._plain(403, "This private instance is for the owner.")
 
-        if path in ("/", "/index.html"):
+        if path in ("/", "/index.html") or path in ADMIN_PAGES:
             return self._send(200, (STATIC / "index.html").read_bytes())
+        if path.startswith(ADMIN_API):
+            return self._admin_api(path)
+        if admin:
+            return self._plain(404, "Not found.")
         if path.startswith("/download/"):
             return self._download(path[len("/download/"):])
         if path == "/.well-known/dedi.index.json" or path.startswith(("/dedi/", "/data/")):
@@ -101,6 +117,32 @@ class Handler(BaseHTTPRequestHandler):
         if not path.startswith("/api/"):
             return self._plain(404, "Not found.")
         return self._api(path, url.query)
+
+    def _owner(self, admin: bool):
+        """The owner's email if the IAP token is good for this path, else None. Admin paths take only the admin
+        backend's token once it exists."""
+        audience = self.admin_audience if admin and self.admin_audience else self.audience
+        email = self.iap(self.headers.get(HEADER), audience)
+        return email if email is not None and email in self.owners else None
+
+    def _admin_api(self, path):
+        if path == "/api/v1/admin/sources":
+            if self.system is None:
+                return self._json(503, {"error": "the sources view isn't configured"})
+            return self._json(200, self.system.sources_page())
+        if path == "/api/v1/admin/system":
+            if self.system is None:
+                return self._json(503, {"error": "the system view isn't configured"})
+            meta = self.snapshot.meta if self.snapshot is not None else {}
+            return self._json(200, self.system.collect({k: meta.get(k) for k in ("date", "snapshotRoot")}))
+        if path == "/api/v1/admin/second-factor":
+            if self.second_factor is None:
+                return self._json(503, {"error": "the second factor isn't configured"})
+            try:
+                return self._json(200, self.second_factor.view(self._owner(True)))
+            except Exception as exc:
+                return self._json(503, {"error": f"the key can't be read right now ({type(exc).__name__})"})
+        return self._json(404, {"error": "not found"})
 
     def _download(self, rest):
         from .downloads import CHUNK, content_type
@@ -200,25 +242,20 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, record) if record else self._json(404, {"error": "not found"})
         if path == "/api/v1/stats":
             return self._json(200, snap.stats())
-        if path == "/api/v1/sources":
-            if self.system is None:
-                return self._json(503, {"error": "the sources view isn't configured"})
-            return self._json(200, self.system.sources_page())
-        if path == "/api/v1/system":
-            if self.system is None:
-                return self._json(503, {"error": "the system view isn't configured"})
-            return self._json(200, self.system.collect({k: snap.meta.get(k) for k in ("date", "snapshotRoot")}))
         return self._json(404, {"error": "not found"})
 
     def do_POST(self):
-        """Only owner actions (lc_site.actions): IAP first, then same-origin JSON, a reason and a fresh code."""
-        if urlsplit(self.path).path != "/api/v1/act":
+        """Only the admin area's changes: owner actions (lc_site.actions) and second-factor steps
+        (lc_site.second_factor). IAP first (the admin backend's token), then same-origin JSON and a fresh code."""
+        path = urlsplit(self.path).path
+        if path not in ("/api/v1/admin/act", "/api/v1/admin/second-factor"):
             return self._send(405, b"")
-        email = self.iap(self.headers.get(HEADER), self.audience)
-        if email is None or email not in self.owners:
+        email = self._owner(True)
+        if email is None:
             return self._json(403, {"ok": False, "message": "not allowed"})
-        if self.actions is None:
-            return self._json(503, {"ok": False, "message": "Owner actions aren't configured on this site."})
+        handler = self.actions if path == "/api/v1/admin/act" else self.second_factor
+        if handler is None:
+            return self._json(503, {"ok": False, "message": "This isn't configured on this site."})
         try:
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
@@ -226,8 +263,11 @@ class Handler(BaseHTTPRequestHandler):
         from .actions import MAX_BODY
 
         body = self.rfile.read(length) if 0 < length <= MAX_BODY else b""
-        outcome = self.actions.handle(email, self.headers, body)
-        return self._json(outcome.status, {"ok": outcome.ok, "message": outcome.message})
+        if handler is self.actions:
+            outcome, extra = self.actions.handle(email, self.headers, body), {}
+        else:
+            outcome, extra = self.second_factor.handle(email, self.headers, body)
+        return self._json(outcome.status, {"ok": outcome.ok, "message": outcome.message, **extra})
 
     def do_HEAD(self):
         return self._send(405, b"")
@@ -301,9 +341,15 @@ def load_from(bucket, latest: dict):
                 os.remove(local)
 
 
+def is_admin(path: str) -> bool:
+    """Whether a path belongs to the admin area (config/site.yaml admin.paths)."""
+    return path in ADMIN_PAGES or path.startswith("/admin/") or path.startswith(ADMIN_API)
+
+
 def make_server(snapshot, owners, audience, address, iap=verify_iap, system=None, decisions=None, downloads=None,
-                actions=None, dedi=None):
+                actions=None, dedi=None, admin_audience="", second_factor=None):
     attrs = {"snapshot": snapshot, "owners": {o.strip().lower() for o in owners if o.strip()}, "audience": audience,
+             "admin_audience": admin_audience, "second_factor": second_factor,
              "iap": staticmethod(iap), "system": system, "decisions": decisions, "downloads": downloads,
              "actions": actions, "dedi": dedi, "files": static_files()}
     return ThreadingHTTPServer(address, type("Bound", (Handler,), attrs))
@@ -337,13 +383,18 @@ def main() -> int:
         system = SystemView(GoogleReader(project, os.environ.get("GCP_REGION", "us-central1"), buckets))
     except Exception as exc:  # the rest of the site works without it
         print(json.dumps({"event": "system-view-unavailable", "error": type(exc).__name__}), flush=True)
-    actions = None
+    actions = second = None
     try:
         actions = _owner_actions(system)
+        second = _second_factor(actions)
     except Exception as exc:  # the rest of the site works without it; actions answer 503
         print(json.dumps({"event": "owner-actions-unavailable", "error": type(exc).__name__}), flush=True)
+    admin_audience = os.environ.get("LC_IAP_ADMIN_AUDIENCE", "")
+    if not admin_audience:  # before the admin backend exists: admin paths are checked like the rest
+        print(json.dumps({"event": "admin-without-reauth", "why": "LC_IAP_ADMIN_AUDIENCE is not set"}), flush=True)
     make_server(choose_directory(bucket), owners, audience, ("0.0.0.0", int(os.environ.get("PORT", "8080"))),
-                system=system, decisions=decisions, downloads=downloads, actions=actions, dedi=dedi).serve_forever()
+                system=system, decisions=decisions, downloads=downloads, actions=actions, dedi=dedi,
+                admin_audience=admin_audience, second_factor=second).serve_forever()
     return 0
 
 
@@ -368,6 +419,35 @@ def _owner_actions(system):
                         verifier=Verifier(GcsSteps(storage.Client().bucket(f"{project}-control"))),
                         read_secret=read_secret, sources=pipelines(path) if path else pipelines(),
                         registry=registry(path), on_change=(system.invalidate if system else None))
+
+
+class SecretStore:
+    """The second-factor key in Secret Manager (secret console-totp): read the latest version, add a new one."""
+
+    def __init__(self, project: str, secret_id: str = "console-totp"):
+        from google.cloud import secretmanager
+
+        self._client = secretmanager.SecretManagerServiceClient()
+        self._parent = f"projects/{project}/secrets/{secret_id}"
+
+    def get(self):
+        from google.api_core.exceptions import FailedPrecondition, NotFound
+
+        try:
+            response = self._client.access_secret_version(name=f"{self._parent}/versions/latest")
+        except (NotFound, FailedPrecondition):
+            return None
+        return response.payload.data.decode("ascii")
+
+    def put(self, value: str) -> None:
+        self._client.add_secret_version(parent=self._parent, payload={"data": value.encode("ascii")})
+
+
+def _second_factor(actions):
+    from .second_factor import SecondFactor
+
+    return SecondFactor(store=SecretStore(os.environ["GCP_PROJECT_ID"]), verifier=actions.verifier,
+                        record=actions.backend.record)
 
 
 def choose_directory(bucket, open_database=None, load_snapshot=None):

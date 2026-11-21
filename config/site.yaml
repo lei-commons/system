@@ -20,3 +20,17 @@
 domain: lei-commons.nfh.global
 load_balancer: true
 only_through_load_balancer: true
+
+# The admin area (owner decision 2026-11-21: every administrative action behind two-factor authentication before
+# the directory opens to the public). The System and Data sources pages, the second factor (setup and rotation)
+# and every owner action live under these paths only. The load balancer sends them to a backend service of their
+# own, where IAP asks the owner to sign in again with Google's 2-step verification (reauth_method) whenever the
+# last sign-in is older than reauth_max_age_minutes, and each action still needs a fresh authenticator code. The
+# site accepts admin requests only with that backend's IAP token (LC_IAP_ADMIN_AUDIENCE), so the admin paths can't
+# be reached through the ordinary backend, which will lose IAP when the site goes public.
+#   reauth_method: ENROLLED_SECOND_FACTORS (the account's 2-step verification), SECURE_KEY (a security key only)
+#   or LOGIN (password only). reauth_max_age_minutes: 5 to 1440.
+admin:
+  paths: ["/admin", "/admin/*", "/api/v1/admin/*"]
+  reauth_method: ENROLLED_SECOND_FACTORS
+  reauth_max_age_minutes: 30

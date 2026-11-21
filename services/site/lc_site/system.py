@@ -231,7 +231,7 @@ class SystemView:
             "collectedAt": self._clock(),
             "control": {"state": (control or {}).get("state"), "pausedComponents": (control or {}).get("paused_components", []),
                         "updatedBy": (control or {}).get("updated_by"), "updatedAt": (control or {}).get("updated_at"),
-                        "error": control_error},
+                        "monthlyBudgetUsd": (control or {}).get("monthly_budget_usd"), "error": control_error},
             "jobs": [{"name": j["name"].rsplit("/", 1)[1], "status": _execution_status(j),
                       "lastRun": (j.get("latestCreatedExecution") or {}).get("createTime"),
                       "finished": (j.get("latestCreatedExecution") or {}).get("completionTime")} for j in jobs],

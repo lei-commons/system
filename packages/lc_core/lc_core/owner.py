@@ -271,6 +271,9 @@ def perform(*, backend, verifier, secret: str, sources: list, registry: list, ac
             backend.write_state(new, generation)
             paused = ", ".join(new.get("paused_components") or []) or "none"
             message = f"The system is {new['state']}; paused jobs: {paused}."
+            if kind == "set-budget":
+                event.update(subject="monthly budget", component="budget")
+                message = f"The monthly budget is now {new['monthly_budget_usd']:,.2f} USD."
     except Refused as exc:
         event.update(decision="rejected", reason=f"{reason} (refused: {exc})")
         _record(backend, event, log)
