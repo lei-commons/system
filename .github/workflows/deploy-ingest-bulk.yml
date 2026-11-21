@@ -8,7 +8,6 @@ on:
   push:
     branches: [main]
     paths: ["services/ingest_bulk/**", "packages/lc_ingest/**", "packages/lc_core/**", "config/fields.yaml", ".github/workflows/deploy-ingest-bulk.yml", "config/sources.yaml"]
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -45,6 +44,11 @@ jobs:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@v2
+      - name: Deploy only while the system is running (the owner's control state)
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          STATE_CHECK_ENFORCED: ${{ vars.STATE_CHECK_ENFORCED }}
+        run: python3 scripts/check_system_state.py deploy:ingest-bulk
       - name: Build and push
         run: |
           gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet

@@ -16,30 +16,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  control-gate:
-    # Fails fast when the owner has paused or stopped the system.
-    # Owner pushes are never blocked, so the owner can always fix things in manual mode.
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check SYSTEM_STATE
-        env:
-          SYSTEM_STATE: ${{ vars.SYSTEM_STATE }}
-          ACTOR_TYPE: ${{ github.event.sender.type }}
-          ACTOR: ${{ github.actor }}
-          OWNER: ${{ vars.OWNER_LOGIN }}
-        run: |
-          if [ -z "${SYSTEM_STATE:-}" ] && [ -z "${OWNER:-}" ]; then
-            # Before bootstrap no agent identities exist, so only the owner can be pushing.
-            echo "::warning::org variables not set yet (pre-bootstrap); gate skipped"; exit 0
-          fi
-          if [ "$ACTOR" = "$OWNER" ]; then echo "owner change; gate skipped"; exit 0; fi
-          case "${SYSTEM_STATE:-}" in
-            running) echo "system running" ;;
-            *) echo "::error::system is '${SYSTEM_STATE:-unset}'; agent changes are blocked"; exit 1 ;;
-          esac
-
   tests:
-    needs: control-gate
     runs-on: ubuntu-latest
     services:
       # A real Postgres for the serving-database tests.
@@ -149,13 +126,12 @@ jobs:
       - name: Gateway image builds and starts
         run: |
           docker build -f services/conduct_proxy/Dockerfile -t conduct-gateway .
-          docker run -d --name gw -p 8080:8080 -e SYSTEM_STATE=paused conduct-gateway
+          docker run -d --name gw -p 8080:8080 conduct-gateway  # no control state: it fails closed
           for i in 1 2 3 4 5 6 7 8 9 10; do curl -fsS localhost:8080/health && break; sleep 1; done
           curl -fsS localhost:8080/health
           test "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-LC-Target: https://api.gleif.org/x' localhost:8080/fetch)" = 503
 
   conduct-policy:
-    needs: control-gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -181,7 +157,6 @@ jobs:
           EOF
 
   lint:
-    needs: control-gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

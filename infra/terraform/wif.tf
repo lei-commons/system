@@ -9,7 +9,6 @@ locals {
   wif_bindings = {
     "system@refs/heads/main"       = "deployer"
     "releases@refs/heads/main"     = "publisher"
-    "control@refs/heads/main"      = "control-operator"
     "ledger-gleif@refs/heads/main" = "maker"
     "ledger-gb@refs/heads/main"    = "maker"
     "ledger-br@refs/heads/main"    = "maker"

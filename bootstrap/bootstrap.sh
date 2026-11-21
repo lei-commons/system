@@ -177,6 +177,7 @@ PUBLISHER="$(terraform output -json service_accounts | python3 -c 'import json,s
 CONTROL_URI="$(terraform output -raw control_state_uri)"
 GH_LOGIN="$(gh api user --jq .login 2>/dev/null || echo '<your-github-login>')"
 
+# STATE_CHECK_ENFORCED: deploys stop unless they can read state.json (Terraform above has just let the deployer read it).
 declare -A VARS=(
   [GCP_PROJECT_ID]="$PROJECT"
   [GCP_REGION]="$REGION"
@@ -184,14 +185,11 @@ declare -A VARS=(
   [GCP_DEPLOYER_SA]="$DEPLOYER"
   [GCP_PUBLISHER_SA]="$PUBLISHER"
   [LC_CONTROL_STATE_URI]="$CONTROL_URI"
-  [SYSTEM_STATE]="paused"
-  [MONTHLY_BUDGET_USD]="$BUDGET"
   [OWNER_LOGIN]="$GH_LOGIN"
+  [STATE_CHECK_ENFORCED]="true"
 )
-
-if [[ "$CURRENCY" != "USD" ]]; then
-  unset 'VARS[MONTHLY_BUDGET_USD]'  # the budget given here isn't in USD
-fi
+# The control state (running or paused, paused components, the budget) is not a GitHub variable: it lives
+# only in state.json above, and the owner changes it on the admin page (owner decision 2026-11-21).
 
 echo
 echo "GitHub organisation variables for ${ORG}:"
@@ -201,7 +199,7 @@ if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
   read -r -p "Set these on github.com/${ORG} now with gh? [y/N] " ok
   if [[ "$ok" == "y" || "$ok" == "Y" ]]; then
     for k in "${!VARS[@]}"; do
-      # A rerun never overwrites: SYSTEM_STATE in particular stays as the owner set it.
+      # A rerun never overwrites a variable the owner has set.
       if gh variable get "$k" --org "$ORG" >/dev/null 2>&1; then
         echo "  kept $k (already set)"
       else
@@ -216,4 +214,4 @@ fi
 
 echo
 echo "Bootstrap complete. A first run leaves the system PAUSED; a rerun keeps the control state and variables as they were."
-echo "After a first run: follow docs/day-zero.md, then set SYSTEM_STATE=running when ready."
+echo "After a first run: follow docs/day-zero.md, then set the state to running on the admin page when ready."

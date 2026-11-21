@@ -17,4 +17,4 @@ The agents act on GitHub only through these Apps (constitution Article 5). Maker
 
 Never install any of them on `control`. Its private keys are in Secret Manager as `github-app-lei-commons-<name>`, created by `bootstrap/github-apps.sh`; nothing else holds them.
 
-The fifth App in the design, `lei-commons-control`, waits until GitHub's permission for organisation variables can be confirmed. Until then the `control` repository uses its own token.
+The fifth App in the design, `lei-commons-control`, is no longer needed: since 2026-11-21 the control state lives only in the cloud control bucket and changes only on the admin page, so the `control` repository has no workflows and no token.

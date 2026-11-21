@@ -10,8 +10,8 @@ login and a fresh code from the authenticator, entered on the confirmation
 page. A code works once, so a form posted from anywhere else can't act; the
 Origin header is checked too. Every attempt, allowed or refused, is audited,
 and every applied action is recorded in the decision log. The control state is
-written only if it hasn't changed since it was read. Budget changes stay in the
-`control` repository.
+written only if it hasn't changed since it was read. It is the only copy: the
+GitHub copies were retired on 2026-11-21, and budget changes move to the admin page.
 """
 
 from __future__ import annotations
@@ -310,8 +310,7 @@ class Handler(BaseHTTPRequestHandler):
         table = "".join(f"<tr><th align=left>{html.escape(k)}<td>{html.escape(v)}" for k, v in rows)
         site = f'<a href="{html.escape(self.app.site_url)}/#/system">System page</a>' if self.app.site_url else "System page"
         return page("System status", f"<table>{table}</table><p>Actions start from the {site}: each asks here for a fresh "
-                                     "code. Budget changes run from the "
-                                     "<a href=https://github.com/lei-commons/control/actions>control repository</a>.</p>")
+                                     "code. Budget changes are made on the admin page.</p>")
 
 
 def _site(url: str, hosts=None):

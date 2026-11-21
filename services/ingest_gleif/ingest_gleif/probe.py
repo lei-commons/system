@@ -2,8 +2,9 @@
 
     python -m ingest_gleif.probe <https URL on an allow-listed registry host>
 
-Run as the ingest-gleif job with its arguments overridden (gateway-probe.yml). It asks for the first
-kilobyte only (Range: bytes=0-1023), goes through the gateway like every fetch (allow-list, pacing, the
+Run as the ingest-gleif job with its arguments overridden, an owner action on the admin page (the
+gateway-probe workflow was retired 2026-11-21: GitHub has no manual triggers that change the system).
+It asks for the first kilobyte only (Range: bytes=0-1023), goes through the gateway like every fetch (allow-list, pacing, the
 fixed address), and prints the status, the response headers the gateway passes back, and, for an error,
 the first 600 characters of the body: a site's own explanation (a firewall's block page, a rate-limit
 note). It changes nothing and stores nothing. (2026-11-18: GLEIF's file storage answered 403 only to us.)

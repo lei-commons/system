@@ -6,7 +6,6 @@ on:
   push:
     branches: [main]
     paths: ["services/load_db/**", "packages/lc_core/**", "packages/lc_directory/**", "services/load_db/Dockerfile", ".github/workflows/deploy-load-db.yml", "config/cycle.yaml", "config/publishing.yaml"]
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -29,6 +28,11 @@ jobs:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@v2
+      - name: Deploy only while the system is running (the owner's control state)
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          STATE_CHECK_ENFORCED: ${{ vars.STATE_CHECK_ENFORCED }}
+        run: python3 scripts/check_system_state.py deploy:load-db
       - name: Build and push
         run: |
           gcloud auth configure-docker "${{ vars.GCP_REGION }}-docker.pkg.dev" --quiet
