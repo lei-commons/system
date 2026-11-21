@@ -180,7 +180,7 @@ def _perform_edit(*, backend, verifier, secret, registry, action, kind, name, re
     if not secret:
         return Outcome(403, "The second factor isn't set up yet: enrol in the owner console first.")
     if not verifier.verify(secret, (code or "").strip()):
-        log({"event": "action-code-refused", "action": action})
+        _refused(backend, action, name, email, now, trigger, log)
         if verifier.locked():
             return Outcome(403, "Too many wrong codes. Wait five minutes, then try again.")
         return Outcome(403, "That code didn't work, or it was already used. Enter the code your app shows now.")
@@ -245,7 +245,7 @@ def perform(*, backend, verifier, secret: str, sources: list, registry: list, ac
         return Outcome(503, f"The code couldn't be checked ({type(exc).__name__}: {str(exc).splitlines()[0][:120]}), "
                             "so nothing was done.")
     if not verified:
-        log({"event": "action-code-refused", "action": action})
+        _refused(backend, action, name, email, now, trigger, log)
         if verifier.locked():
             return Outcome(403, "Too many wrong codes. Wait five minutes, then try again.")
         return Outcome(403, "That code didn't work, or it was already used. Enter the code your app shows now.")
@@ -286,6 +286,14 @@ def perform(*, backend, verifier, secret: str, sources: list, registry: list, ac
         return Outcome(502, f"It didn't work: {type(exc).__name__}: {str(exc)[:200]}", event)
     _record(backend, event, log)
     return Outcome(200, message, event)
+
+
+def _refused(backend, action, name, email, now, trigger, log):
+    """A wrong or reused code: logged, and kept in the decision log as a rejected attempt (never the code)."""
+    log({"event": "action-code-refused", "action": action})
+    _record(backend, {"ts": now, "actor": f"owner:{email}", "action": action, "subject": "second factor",
+                      "trigger": trigger, "reason": "the code was wrong or already used", "decision": "rejected",
+                      "component": name}, log)
 
 
 def _record(backend, event, log):

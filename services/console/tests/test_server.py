@@ -61,6 +61,7 @@ def call(e, path="/", method="GET", token="owner", cookie=None, body=None):
         h["Cookie"] = f"{COOKIE}={cookie}"
     if body is not None:
         h["Content-Type"] = "application/x-www-form-urlencoded"
+        h["Sec-Fetch-Site"] = "same-origin"  # as a browser posting this page's own form says
     c.request(method, path, body=body, headers=h)
     r = c.getresponse()
     data = r.read().decode()
@@ -328,7 +329,8 @@ def test_the_confirmation_page_needs_iap_but_no_session(act):
 def test_an_action_needs_a_fresh_code_and_a_reason(act):
     assert call(act, "/act", "POST", body=f"do=pause&reason=&code={code(act)}").status == 400
     assert call(act, "/act", "POST", body="do=pause&reason=test&code=000000").status == 403
-    assert act.app.backend.state["state"] == "running" and act.app.backend.events == []
+    assert act.app.backend.state["state"] == "running"
+    assert [(e["subject"], e["decision"]) for e in act.app.backend.events] == [("second factor", "rejected")]
     r = call(act, "/act", "POST", body=f"do=pause&reason=checking+the+cycle&code={code(act)}")
     assert r.status == 200 and "The system is paused" in r.body
     assert act.app.backend.state["state"] == "paused" and act.app.backend.state["updated_by"] == f"owner:{OWNER}"

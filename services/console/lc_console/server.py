@@ -150,8 +150,8 @@ class Handler(BaseHTTPRequestHandler):
         site = self.headers.get("Sec-Fetch-Site")
         if site is not None:
             return site == "same-origin"
-        origin = self.headers.get("Origin")
-        return origin is None or origin == f"https://{self.headers.get('Host', '')}"
+        origin = self.headers.get("Origin")  # a request that says neither is refused
+        return origin is not None and origin == f"https://{self.headers.get('Host', '')}"
 
     def do_GET(self):
         if self.path == "/health":
