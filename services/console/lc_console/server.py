@@ -34,12 +34,11 @@ from lc_core.control import load_state
 
 from .auth import SESSION_SECONDS, Sessions, verify_iap
 from .store import SecretManagerStore
-from .totp import Verifier, new_secret, otpauth_uri
+from lc_core import second_factor as sf
+
+from .totp import Verifier
 
 COOKIE = "__Host-lc-console"
-# A key waiting for its first good code. It is stored, not held in memory, so a
-# restart can't swap the key after the owner has added it to their app.
-PENDING = "pending:"
 MAX_FORM = 4096
 MAX_REASON = 300
 HEADERS = {
@@ -56,16 +55,8 @@ def page(title, body):
             f"<style>{STYLE}</style><h1>{html.escape(title)}</h1>{body}</html>").encode()
 
 
-def qr_image(uri):
-    """An inline QR code. Setup still works from the typed key if this fails."""
-    try:
-        import segno
-
-        return f'<p><img alt="QR code" width=240 height=240 src="{segno.make(uri, error="m").svg_data_uri(scale=6, border=2)}"></p>'
-    except Exception:
-        return ""
-
-
+SET_UP_ON_SITE = ("<p>No authenticator is set up. Set it up in the site's admin area (Second factor), "
+                  "where IAP asks you to sign in again with 2-step verification first.</p>")
 CODE_FORM = ("<form method=post action={action}><label>Code from your authenticator app "
              "<input name=code inputmode=numeric autocomplete=one-time-code required autofocus></label> "
              "<button>Continue</button></form>")
@@ -162,9 +153,9 @@ class Handler(BaseHTTPRequestHandler):
         loaded = self._load()
         if loaded is None:
             return None
-        secret, pending = loaded
-        if secret is None:
-            return self._enrol_page(email, pending)
+        secret = loaded
+        if not secret:
+            return self._send(200, page("Second factor", SET_UP_ON_SITE))
         path, _, query = self.path.partition("?")
         if path == "/act":  # the confirmation asks for a fresh code itself, so no session is needed to see it
             params = parse_qs(query)
@@ -184,7 +175,7 @@ class Handler(BaseHTTPRequestHandler):
         loaded = self._load()
         if loaded is None:
             return None
-        secret, pending = loaded
+        secret = loaded
         if self.path == "/verify" and secret:
             ok = self.app.verifier.verify(secret, code)
             self._audit(email, "second-factor", ok)
@@ -193,16 +184,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, page("Second factor", f"<p>{self._failure()}</p>" + CODE_FORM.format(action="/verify")))
         if self.path == "/act" and secret:
             return self._act(email, secret, form)
-        if self.path == "/enrol" and secret is None:
-            ok = bool(pending) and self.app.verifier.verify(pending, code)
-            self._audit(email, "enrolled", ok)
-            if ok:
-                try:
-                    self.app.store.put(pending)
-                except Exception as exc:
-                    return self._unavailable(exc)
-                return self._send(303, b"", cookie=self.app.sessions.issue(email), location="/")
-            return self._enrol_page(email, pending, status=403, note=self._failure())
         return self._send(404, page("Not found", ""))
 
     def do_HEAD(self):
@@ -220,28 +201,14 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(503, page("Unavailable", "<p>The console can't reach its second-factor secret.</p>"))
 
     def _load(self):
-        """Return (secret, pending key), or None after answering 503. Creates a key if there is none."""
+        """Return the active key (None if none is set up), or None after answering 503. The key is set up and
+        rotated only in the site's admin area (lc_core.second_factor); this console never creates or shows one."""
         try:
-            with self.app.lock:
-                value = self.app.store.get()
-                if value is None:
-                    value = PENDING + new_secret()
-                    self.app.store.put(value)
+            value = self.app.store.get()
         except Exception as exc:
             self._unavailable(exc)
             return None
-        if value.startswith(PENDING):
-            return None, value[len(PENDING):]
-        return value, None
-
-    def _enrol_page(self, email, pending, status=200, note=""):
-        uri = otpauth_uri(pending, email)
-        message = f"<p><strong>{html.escape(note)}</strong></p>" if note else ""
-        body = (f"{message}<p>Scan this with your authenticator app, then enter the code it shows. "
-                f"This key stays the same if you reload.</p>{qr_image(uri)}"
-                f"<p>Or enter this key by hand, as a time-based key:</p><p><code>{pending}</code></p>"
-                + CODE_FORM.format(action="/enrol"))
-        return self._send(status, page("Set up your authenticator", body))
+        return sf.active(value) or ""
 
     def _describe(self, action: str):
         if self.app.backend is None:

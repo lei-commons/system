@@ -3,9 +3,9 @@
 One catalogue, so the pages, the site and the console can't disagree (lc_core.owner carries them out). Jobs come from the
 sources registry, so a new source gets its actions with no other change.
 
-The state rules match the `control` repository's ``apply_command.py``: pause
-and stop always work, even on a missing or corrupt state; everything else
-refuses to guess.
+The state rules: pause and stop always work, even on a missing or corrupt state; everything else refuses to
+guess. ``set-budget:<amount>`` records the owner's monthly cap in USD in the control state (it lived in the
+control repository and a GitHub variable until 2026-11-21; control parameters now live only in the cloud).
 """
 
 from __future__ import annotations
@@ -21,6 +21,18 @@ SOURCE_ACTIONS = {"source-approve": "approved", "source-deny": "denied", "source
 SOURCE_LABELS = {"source-approve": "Approve", "source-deny": "Deny", "source-pending": "Keep pending"}
 # Changes to the registry itself (lc_core.source_edits): add, edit or remove a source, or leave Claude a suggestion.
 EDIT_ACTIONS = ("source-add", "source-edit", "source-remove", "source-hint")
+MAX_BUDGET_USD = 1_000_000  # a typo guard, not a policy: the billing budget itself is set in Terraform
+
+
+def budget_amount(text: str) -> float:
+    """The amount in ``set-budget:<amount>``. Raises Refused unless it is a number above zero."""
+    try:
+        value = float(text)
+    except (TypeError, ValueError):
+        raise Refused(f"the budget must be a number, not {text!r}") from None
+    if not (value == value) or value <= 0 or value > MAX_BUDGET_USD:  # value == value is False for NaN
+        raise Refused(f"the budget must be above zero and at most {MAX_BUDGET_USD:,}")
+    return value
 
 
 class Refused(Exception):
@@ -96,6 +108,12 @@ def known(sources: list, action: str, registry: list = ()) -> bool:
         return name in jobs(sources)
     if kind in ("pause-component", "resume-component"):
         return name in {gate(j) for j in jobs(sources)}
+    if kind == "set-budget":
+        try:
+            budget_amount(name)
+        except Refused:
+            return False
+        return True
     return False
 
 
@@ -128,6 +146,8 @@ def apply(action: str, current: dict | None, actor: str, now: str) -> dict:
         if kind == "pause-component":
             paused.append(component)
         new["paused_components"] = paused
+    elif kind == "set-budget":
+        new["monthly_budget_usd"] = budget_amount(component)
     else:
         raise Refused(f"{action} doesn't change the control state")
     new["updated_by"] = actor

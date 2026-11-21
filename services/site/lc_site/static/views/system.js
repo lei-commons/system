@@ -3,7 +3,7 @@
 // Status always comes with an icon and a word, never colour alone; motion stops for
 // people who ask for reduced motion. Owner actions ask, inline, for a reason and a
 // fresh authenticator code before the site acts (lc_site.actions).
-import { actionBar, api, errorBox, flag, fmt, h, svg } from "../lib.js";
+import { ADMIN_API, actionBar, api, codeForm, errorBox, flag, fmt, h, svg } from "../lib.js";
 
 const KIND = { ok: "good", failed: "bad", running: "busy", idle: "idle", unknown: "idle" };
 const ICON = { good: "✓", bad: "✕", busy: "●", idle: "○" };
@@ -236,15 +236,36 @@ function dediCard(dd) {
     ...notes.map((n) => h("p", { class: "muted", style: { marginBottom: 0 } }, n)));
 }
 
-// ---- owner actions: open the console, which asks for a fresh code ----
+// ---- owner actions: each asks, inline, for a reason and a fresh code ----
+// The monthly budget is a control parameter kept in the cloud's control state (owner decision 2026-11-21).
+function budgetButton(d, reload) {
+  const current = d.control.monthlyBudgetUsd;
+  return {
+    label: current == null ? "Set monthly budget" : `Budget: ${fmt(current)} USD`, tone: "",
+    help: "The monthly spending cap in USD, kept in the control state.",
+    open: (panel) => {
+      const amount = h("input", { type: "number", min: "1", step: "1", required: true, "aria-label": "Monthly budget in USD",
+        placeholder: "USD per month", value: current == null ? "" : String(current), class: "budget-input" });
+      codeForm(panel, {
+        title: "Set the monthly budget", help: "The cap the budget guard and the System page show, in USD a month.",
+        fields: [h("div", { class: "action-fields" }, amount, h("span", { class: "muted" }, "USD a month"))],
+        collect: () => (Number(amount.value) > 0 ? {} : "Enter an amount above zero."),
+        action: () => `set-budget:${Number(amount.value)}`, confirmLabel: "Confirm: set the budget", onDone: reload,
+      });
+    },
+  };
+}
+
 function actions(d, reload) {
   if (!d.actions || !d.actions.length) return null;
   const groups = {};
   for (const a of d.actions) (groups[a.group] = groups[a.group] || []).push(a);
+  const entries = Object.entries(groups);
   return h("section", { class: "card card-pad actions" }, h("h3", {}, "Owner actions"),
     h("p", { class: "muted", style: { marginTop: 0 } }, "Each asks, right here, for a reason and a fresh code from your authenticator before it acts, and is recorded in the decision log."),
-    ...Object.entries(groups).map(([group, items]) => h("div", { class: "action-group" },
-      h("div", { class: "action-label" }, group), actionBar(items, reload))));
+    ...entries.map(([group, items], i) => h("div", { class: "action-group" },
+      h("div", { class: "action-label" }, group),
+      actionBar(items, reload, undefined, group === "System" || (i === 0 && !groups.System) ? [budgetButton(d, reload)] : []))));
 }
 
 function page(d, meta, updated, reload) {
@@ -270,7 +291,7 @@ function page(d, meta, updated, reload) {
     h("div", { class: "grid cols-2", style: { marginTop: "18px" } },
       h("section", { class: "card card-pad" }, h("h3", {}, "Last daily cycle"), timeline(d), unavailable(d.cyclesError)),
       h("section", { class: "card card-pad" }, h("h3", {}, "Latest decisions"), feed(d),
-        h("p", { style: { marginBottom: 0 } }, h("a", { href: "#/log" }, "The full decision log →")), unavailable(d.feedError))),
+        h("p", { style: { marginBottom: 0 } }, h("a", { href: "/#/log" }, "The full decision log →")), unavailable(d.feedError))),
     h("div", { class: "grid cols-3", style: { marginTop: "18px" } },
       h("section", { class: "card card-pad" }, h("h3", {}, "Recent cycles"),
         table(["Started", "Took", "Status"], d.cycles.map((x) => h("tr", {}, h("td", {}, when(x.started)),
@@ -298,7 +319,7 @@ export async function render(root) {
     if (!force && root.querySelector(".action-panel:not([hidden])")) return;
     try {
       // The DeDi card is extra: if its status can't be read, the rest of the page still shows.
-      const [d, meta, dedi] = await Promise.all([api("/api/v1/system"), api("/api/v1/meta"),
+      const [d, meta, dedi] = await Promise.all([api(`${ADMIN_API}/system`), api("/api/v1/meta"),
         api("/api/v1/dedi").catch(() => null)]);
       root.replaceChildren(page({ ...d, dedi }, meta, new Date(), () => load(true)));
     } catch (error) {

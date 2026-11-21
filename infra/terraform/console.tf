@@ -102,9 +102,12 @@ resource "google_iap_web_cloud_run_service_iam_member" "owner" {
   member                 = "user:${var.owner_email}"
 }
 
-# The site checks the same second factor for owner actions taken inline on its pages.
+# The site checks the same second factor for owner actions taken inline on its pages, and its admin area sets
+# the key up and rotates it (lc_core.second_factor), so it adds versions too.
 resource "google_secret_manager_secret_iam_member" "site_totp" {
+  for_each = toset(["roles/secretmanager.secretAccessor", "roles/secretmanager.secretVersionAdder"])
+
   secret_id = google_secret_manager_secret.console_totp.id
-  role      = "roles/secretmanager.secretAccessor"
+  role      = each.value
   member    = google_service_account.sa["site"].member
 }

@@ -10,16 +10,19 @@
 <body>
 <header class="topbar">
   <a class="brand" href="#/"><span class="brand-mark"></span>lei-commons</a>
+  <!-- data-area="admin": pages of the admin area (/admin/), which asks for a recent 2-step sign-in first. -->
   <nav class="nav" id="nav">
     <a href="#/" data-route="search">Search</a>
     <a href="#/graph" data-route="graph">Graph explorer</a>
     <a href="#/dashboards" data-route="dashboards">Dashboards</a>
     <a href="#/data" data-route="data">Data</a>
-    <a href="#/sources" data-route="sources">Data sources</a>
-    <a href="#/system" data-route="system">System</a>
     <a href="#/log" data-route="log">Log</a>
+    <a href="#/sources" data-route="sources" data-area="admin">Data sources</a>
+    <a href="#/system" data-route="system" data-area="admin">System</a>
+    <a href="#/security" data-route="security" data-area="admin">Second factor</a>
   </nav>
   <span class="spacer"></span>
+  <span class="private admin-badge" id="admin-badge" hidden title="The admin area: every change needs a fresh code from your authenticator">Admin</span>
   <span class="private" title="Visible only to the owner until the owner approves going public">Private</span>
   <button class="icon-btn" id="theme" type="button" aria-label="Switch light or dark theme">◐</button>
 </header>

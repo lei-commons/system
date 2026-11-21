@@ -106,9 +106,9 @@ def test_system_page_through_the_server(tmp_path):
             r = c.getresponse()
             return r.status, r.read().decode()
 
-        data = json.loads(get("/api/v1/system")[1])
+        data = json.loads(get("/api/v1/admin/system")[1])
         assert data["control"]["state"] == "running" and data["decisions"][0]["reason"] == "<b>test</b>"
-        assert get("/api/v1/system", token="bad")[0] == 403
+        assert get("/api/v1/admin/system", token="bad")[0] == 403
     finally:
         srv.shutdown()
         srv.server_close()

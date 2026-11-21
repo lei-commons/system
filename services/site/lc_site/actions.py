@@ -1,6 +1,6 @@
 """Owner actions taken inline on the site's pages (Data sources, System).
 
-POST /api/v1/act with a JSON body {action, reason, code}, plus ``fields`` (a source's
+POST /api/v1/admin/act with a JSON body {action, reason, code}, plus ``fields`` (a source's
 attributes) or ``hint`` (a suggestion for Claude) for changes to the registry. Accepted only when:
 - the request carries the owner's IAP login (checked by the server first);
 - the browser marks it same-origin (Sec-Fetch-Site), with a JSON body, so no
@@ -16,9 +16,9 @@ import json
 from datetime import datetime, timezone
 
 from lc_core.owner import Outcome, perform
+from lc_core.second_factor import active
 
 MAX_BODY = 32768  # a 1,000-character suggestion or summary, even all escaped, fits
-PENDING = "pending:"  # the console's marker for a key that hasn't been confirmed yet
 
 
 class OwnerActions:
@@ -30,8 +30,8 @@ class OwnerActions:
         self.on_change = on_change or (lambda: None)
 
     def secret(self):
-        value = self._read_secret()
-        return None if not value or value.startswith(PENDING) else value
+        """The active key (lc_core.second_factor): none while it's being set up; the current one during a rotation."""
+        return active(self._read_secret())
 
     def handle(self, email: str, headers, body: bytes) -> Outcome:
         if headers.get("Sec-Fetch-Site") != "same-origin":

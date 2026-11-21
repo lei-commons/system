@@ -12,6 +12,12 @@ locals {
   site_lb_audience     = local.site_lb ? "/projects/${data.google_project.this.number}/global/backendServices/${google_compute_backend_service.site[0].generated_id}" : ""
   # The IAP audiences the site accepts: during step 1 either, after step 2 only the load balancer's.
   site_audiences = local.site_lb_only ? [local.site_lb_audience] : compact([local.site_direct_audience, local.site_lb_audience])
+
+  # The admin area (config/site.yaml admin; owner decision 2026-11-21): its paths go to a backend of their own,
+  # where IAP asks for a recent sign-in with 2-step verification. The site accepts admin requests only with
+  # this backend's token.
+  site_admin          = local.site_config.admin
+  site_admin_audience = local.site_lb ? "/projects/${data.google_project.this.number}/global/backendServices/${google_compute_backend_service.site_admin[0].generated_id}" : ""
 }
 
 resource "google_compute_global_address" "site" {
@@ -70,6 +76,64 @@ resource "google_compute_backend_service" "site" {
   }
 }
 
+# The admin area's backend: the same Cloud Run service through the same NEG, with its own IAP settings.
+resource "google_compute_backend_service" "site_admin" {
+  count = local.site_lb ? 1 : 0
+
+  name                  = "lc-site-admin"
+  protocol              = "HTTPS"
+  load_balancing_scheme = "EXTERNAL_MANAGED"
+  description           = "The admin area (${join(", ", local.site_admin.paths)}): IAP with re-authentication"
+
+  backend {
+    group = google_compute_region_network_endpoint_group.site[0].id
+  }
+
+  iap {
+    enabled = true
+  }
+
+  log_config {
+    enable      = true
+    sample_rate = 1.0
+  }
+}
+
+resource "google_iap_web_backend_service_iam_member" "site_admin_owner" {
+  count = local.site_lb ? 1 : 0
+
+  web_backend_service = google_compute_backend_service.site_admin[0].name
+  role                = "roles/iap.httpsResourceAccessor"
+  member              = "user:${var.owner_email}"
+}
+
+# Re-authentication on the admin backend: IAP asks the owner to sign in again (with the method below) whenever
+# the last sign-in is older than the maximum age, before any admin page or action answers.
+resource "google_iap_settings" "site_admin" {
+  count = local.site_lb ? 1 : 0
+
+  name = "projects/${data.google_project.this.number}/iap_web/compute/services/${google_compute_backend_service.site_admin[0].name}"
+
+  access_settings {
+    reauth_settings {
+      method      = local.site_admin.reauth_method
+      max_age     = "${local.site_admin.reauth_max_age_minutes * 60}s"
+      policy_type = "MINIMUM"
+    }
+  }
+
+  lifecycle {
+    precondition {
+      condition     = contains(["ENROLLED_SECOND_FACTORS", "SECURE_KEY", "LOGIN"], local.site_admin.reauth_method)
+      error_message = "config/site.yaml admin.reauth_method must be ENROLLED_SECOND_FACTORS, SECURE_KEY or LOGIN."
+    }
+    precondition {
+      condition     = local.site_admin.reauth_max_age_minutes >= 5 && local.site_admin.reauth_max_age_minutes <= 1440
+      error_message = "config/site.yaml admin.reauth_max_age_minutes must be 5 to 1440."
+    }
+  }
+}
+
 resource "google_iap_web_backend_service_iam_member" "site_owner" {
   count = local.site_lb ? 1 : 0
 
@@ -83,6 +147,22 @@ resource "google_compute_url_map" "site" {
 
   name            = "lc-site"
   default_service = google_compute_backend_service.site[0].id
+
+  host_rule {
+    hosts        = [local.site_domain]
+    path_matcher = "site"
+  }
+
+  # The admin paths go to the admin backend; everything else to the ordinary one.
+  path_matcher {
+    name            = "site"
+    default_service = google_compute_backend_service.site[0].id
+
+    path_rule {
+      paths   = local.site_admin.paths
+      service = google_compute_backend_service.site_admin[0].id
+    }
+  }
 }
 
 resource "google_compute_target_https_proxy" "site" {

@@ -319,3 +319,26 @@ dl.mini.wide { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
 .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .table-scroll > table.data { min-width: 640px; }
 .dedi td.mono { white-space: nowrap; }
+
+/* The admin area (/admin/): its badge, and the second-factor page's key. */
+.admin-badge { background: color-mix(in srgb, var(--warning) 22%, transparent); color: var(--ink); }
+.key-block .qr { display: block; background: #fff; padding: 8px; border-radius: 8px; margin: 8px 0; }
+.key-block .key { word-break: break-all; font-size: 15px; }
+.budget-input { width: 10em; }
+
+/* Phones and narrow windows: the header wraps, and the page links get a row of their own that scrolls sideways
+   inside itself, so the page never does. */
+@media (max-width: 900px) {
+  .topbar { flex-wrap: wrap; gap: 8px 12px; padding: 10px 16px; }
+  .nav { order: 3; width: 100%; overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
+  .nav::-webkit-scrollbar { display: none; }
+  .nav a { white-space: nowrap; }
+}
+.source-row { min-width: 0; overflow-wrap: anywhere; }
+.source-row .chip { white-space: normal; max-width: 100%; height: auto; }
+@media (max-width: 700px) {
+  .source-row-head { flex-wrap: wrap; }
+  .source-row-head > div { min-width: 0; flex: 1 1 200px; }
+  dl.mini, dl.mini.wide { grid-template-columns: 1fr; }
+  .source-row .toolbar { flex-wrap: wrap; }
+}

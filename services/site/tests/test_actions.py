@@ -1,4 +1,4 @@
-"""Owner actions on the site: POST /api/v1/act, through a real socket."""
+"""Owner actions on the site: POST /api/v1/admin/act, through a real socket."""
 
 import http.client
 import json
@@ -69,7 +69,7 @@ def site():
                       actions=actions)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
 
-    def post(body, token="ok", fetch_site="same-origin", content_type="application/json", path="/api/v1/act"):
+    def post(body, token="ok", fetch_site="same-origin", content_type="application/json", path="/api/v1/admin/act"):
         c = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=5)
         headers = {"Content-Type": content_type, "Origin": "null"}
         if token:
