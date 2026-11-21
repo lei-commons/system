@@ -13,6 +13,14 @@ authentication before the directory opens to the public.
   synthetic copy of the database, timed and dropped, as the load-db job). They replaced the gateway-probe and
   load-test workflows; their results show in the status report (`status.yml`);
 - **Data sources**: approve, deny or keep pending; add, edit or remove a source; leave Claude a suggestion;
+- **Approvals**: pull requests that change sensitive paths (`config/approvals.yaml`: how the system is built,
+  deployed and given access, and how the owner signs in) wait here. The owner approves a pull request's exact
+  head commit with a reason and a fresh code; the site then sets its `owner-approval` status to success as the
+  `lei-commons-guardian` GitHub App. The owner-approval workflow (`pull_request_target`, so always main's own
+  copy and rules) sets the status for every pull request: success at once when nothing sensitive changes,
+  otherwise pending, assigned to the owner, with a comment linking here. Branch protection on `system` requires
+  it; the private repositories can't be protected on GitHub's free plan, so there the session never merges a
+  sensitive change without it;
 - **Second factor**: set up the authenticator, or rotate its key.
 
 The rest of the site (Search, Graph explorer, Dashboards, Data, Log) stays at `/`. It is still private behind

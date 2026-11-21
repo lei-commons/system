@@ -6,7 +6,7 @@ name: deploy-site
 on:
   push:
     branches: [main]
-    paths: ["services/site/**", "packages/lc_core/**", "packages/lc_directory/**", "config/sources.yaml", "config/cycle.yaml", ".github/workflows/deploy-site.yml"]
+    paths: ["services/site/**", "packages/lc_core/**", "packages/lc_directory/**", "config/sources.yaml", "config/cycle.yaml", "config/approvals.yaml", ".github/workflows/deploy-site.yml"]
 
 permissions:
   contents: read

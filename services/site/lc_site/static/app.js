@@ -15,6 +15,7 @@ const ADMIN_VIEWS = {
   system: () => import("./views/system.js"),
   sources: () => import("./views/sources.js"),
   security: () => import("./views/security.js"),
+  approvals: () => import("./views/approvals.js"),
 };
 const views = ADMIN ? ADMIN_VIEWS : PUBLIC_VIEWS;
 const HOME = ADMIN ? "system" : "search";

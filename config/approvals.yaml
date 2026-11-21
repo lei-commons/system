@@ -1,0 +1,47 @@
+# Sensitive changes need the owner's approval (owner decision 2026-11-21: every administrative action and system
+# change behind two-factor authentication). A pull request that changes any path below gets the commit status
+# `context` set to pending, is assigned to the owner, and can be merged only once the owner approves it on the
+# admin page (https://<domain>/admin/#/approvals) with a fresh authenticator code. The approval is tied to the
+# pull request's head commit: a new push needs a new approval. Other pull requests get the status at once.
+#
+# The status is set by .github/workflows/owner-approval.yml (pending or not needed; it always runs main's own copy,
+# so a pull request can't change its own gate) and, after the owner approves, by the site as the GitHub App
+# below (lc_site.approvals). Branch protection on main requires the status (system; the private repositories
+# can't be protected on GitHub's free plan, so there the session never merges without it).
+#
+# Patterns: paths from the repository root; * matches within a directory, ** across directories.
+
+context: owner-approval
+owner_login: pramodkvarma
+github_app:
+  name: lei-commons-guardian      # statuses: write; pull requests and contents: read (docs/github-apps.md)
+  app_id: 5655569
+  installation_id: 179552998
+  key_secret: github-app-lei-commons-guardian
+sensitive_paths:
+  # How the system is built, deployed and given access.
+  - ".github/**"
+  - "infra/**"
+  - "bootstrap/**"
+  - "config/**"
+  - "constitution.md"
+  - "scripts/check_system_state.py"
+  - "agents/**"
+  # The egress gateway (what the system may reach) and the owner console.
+  - "services/conduct_proxy/**"
+  - "services/console/**"
+  # Authentication, the second factor, owner actions and control state.
+  - "packages/lc_core/lc_core/iap.py"
+  - "packages/lc_core/lc_core/totp.py"
+  - "packages/lc_core/lc_core/second_factor.py"
+  - "packages/lc_core/lc_core/owner.py"
+  - "packages/lc_core/lc_core/actions.py"
+  - "packages/lc_core/lc_core/control.py"
+  - "packages/lc_core/lc_core/approvals.py"
+  - "packages/lc_core/lc_core/approval_rules.py"
+  - "packages/lc_core/lc_core/source_edits.py"
+  - "services/site/lc_site/server.py"
+  - "services/site/lc_site/actions.py"
+  - "services/site/lc_site/second_factor.py"
+  - "services/site/lc_site/approvals.py"
+  - "services/site/Dockerfile"

@@ -59,6 +59,7 @@ class Handler(BaseHTTPRequestHandler):
     audience: str = ""
     admin_audience: str = ""
     second_factor = None
+    approvals = None
     snapshot = None
     system = None
     decisions = None
@@ -135,6 +136,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(503, {"error": "the system view isn't configured"})
             meta = self.snapshot.meta if self.snapshot is not None else {}
             return self._json(200, self.system.collect({k: meta.get(k) for k in ("date", "snapshotRoot")}))
+        if path == "/api/v1/admin/approvals":
+            if self.approvals is None:
+                return self._json(503, {"error": "approvals aren't configured"})
+            try:
+                return self._json(200, self.approvals.pending())
+            except Exception as exc:
+                return self._json(502, {"error": f"GitHub couldn't be read right now ({type(exc).__name__})"})
         if path == "/api/v1/admin/second-factor":
             if self.second_factor is None:
                 return self._json(503, {"error": "the second factor isn't configured"})
@@ -248,12 +256,14 @@ class Handler(BaseHTTPRequestHandler):
         """Only the admin area's changes: owner actions (lc_site.actions) and second-factor steps
         (lc_site.second_factor). IAP first (the admin backend's token), then same-origin JSON and a fresh code."""
         path = urlsplit(self.path).path
-        if path not in ("/api/v1/admin/act", "/api/v1/admin/second-factor"):
+        handlers = {"/api/v1/admin/act": self.actions, "/api/v1/admin/second-factor": self.second_factor,
+                    "/api/v1/admin/approvals": self.approvals}
+        if path not in handlers:
             return self._send(405, b"")
         email = self._owner(True)
         if email is None:
             return self._json(403, {"ok": False, "message": "not allowed"})
-        handler = self.actions if path == "/api/v1/admin/act" else self.second_factor
+        handler = handlers[path]
         if handler is None:
             return self._json(503, {"ok": False, "message": "This isn't configured on this site."})
         try:
@@ -263,10 +273,10 @@ class Handler(BaseHTTPRequestHandler):
         from .actions import MAX_BODY
 
         body = self.rfile.read(length) if 0 < length <= MAX_BODY else b""
-        if handler is self.actions:
-            outcome, extra = self.actions.handle(email, self.headers, body), {}
-        else:
+        if handler is self.second_factor:
             outcome, extra = self.second_factor.handle(email, self.headers, body)
+        else:
+            outcome, extra = handler.handle(email, self.headers, body), {}
         return self._json(outcome.status, {"ok": outcome.ok, "message": outcome.message, **extra})
 
     def do_HEAD(self):
@@ -347,9 +357,9 @@ def is_admin(path: str) -> bool:
 
 
 def make_server(snapshot, owners, audience, address, iap=verify_iap, system=None, decisions=None, downloads=None,
-                actions=None, dedi=None, admin_audience="", second_factor=None):
+                actions=None, dedi=None, admin_audience="", second_factor=None, approvals=None):
     attrs = {"snapshot": snapshot, "owners": {o.strip().lower() for o in owners if o.strip()}, "audience": audience,
-             "admin_audience": admin_audience, "second_factor": second_factor,
+             "admin_audience": admin_audience, "second_factor": second_factor, "approvals": approvals,
              "iap": staticmethod(iap), "system": system, "decisions": decisions, "downloads": downloads,
              "actions": actions, "dedi": dedi, "files": static_files()}
     return ThreadingHTTPServer(address, type("Bound", (Handler,), attrs))
@@ -383,18 +393,22 @@ def main() -> int:
         system = SystemView(GoogleReader(project, os.environ.get("GCP_REGION", "us-central1"), buckets))
     except Exception as exc:  # the rest of the site works without it
         print(json.dumps({"event": "system-view-unavailable", "error": type(exc).__name__}), flush=True)
-    actions = second = None
+    actions = second = approvals = None
     try:
         actions = _owner_actions(system)
         second = _second_factor(actions)
     except Exception as exc:  # the rest of the site works without it; actions answer 503
         print(json.dumps({"event": "owner-actions-unavailable", "error": type(exc).__name__}), flush=True)
+    try:
+        approvals = _approvals(actions) if actions else None
+    except Exception as exc:  # the Approvals page answers 503; everything else works
+        print(json.dumps({"event": "approvals-unavailable", "error": type(exc).__name__}), flush=True)
     admin_audience = os.environ.get("LC_IAP_ADMIN_AUDIENCE", "")
     if not admin_audience:  # before the admin backend exists: admin paths are checked like the rest
         print(json.dumps({"event": "admin-without-reauth", "why": "LC_IAP_ADMIN_AUDIENCE is not set"}), flush=True)
     make_server(choose_directory(bucket), owners, audience, ("0.0.0.0", int(os.environ.get("PORT", "8080"))),
                 system=system, decisions=decisions, downloads=downloads, actions=actions, dedi=dedi,
-                admin_audience=admin_audience, second_factor=second).serve_forever()
+                admin_audience=admin_audience, second_factor=second, approvals=approvals).serve_forever()
     return 0
 
 
@@ -448,6 +462,20 @@ def _second_factor(actions):
 
     return SecondFactor(store=SecretStore(os.environ["GCP_PROJECT_ID"]), verifier=actions.verifier,
                         record=actions.backend.record)
+
+
+def _approvals(actions):
+    """The Approvals page: GitHub as the guardian App (config/approvals.yaml), the same code check as actions."""
+    from lc_core.approval_rules import load
+
+    from .approvals import Approvals, GitHubApp
+
+    rules = load()
+    key = SecretStore(os.environ["GCP_PROJECT_ID"], rules.key_secret)
+    domain = os.environ.get("LC_SITE_DOMAIN", "")
+    return Approvals(github=GitHubApp(rules.app_id, rules.installation_id, key.get), rules=rules,
+                     verifier=actions.verifier, read_secret=actions.secret, record=actions.backend.record,
+                     admin_url=f"https://{domain}/admin/#/approvals" if domain else "")
 
 
 def choose_directory(bucket, open_database=None, load_snapshot=None):

@@ -111,3 +111,13 @@ resource "google_secret_manager_secret_iam_member" "site_totp" {
   role      = each.value
   member    = google_service_account.sa["site"].member
 }
+
+# The admin page's Approvals (lc_site.approvals) talk to GitHub as the guardian App (statuses: write; pull
+# requests and contents: read): the site may read that App's key, and no other App's.
+resource "google_secret_manager_secret_iam_member" "site_guardian_key" {
+  count = length(var.app_key_readers) > 0 ? 1 : 0
+
+  secret_id = "projects/${var.project_id}/secrets/${yamldecode(file("${path.module}/../../config/approvals.yaml")).github_app.key_secret}"
+  role      = "roles/secretmanager.secretAccessor"
+  member    = google_service_account.sa["site"].member
+}

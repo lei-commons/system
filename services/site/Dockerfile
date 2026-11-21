@@ -6,6 +6,7 @@ RUN useradd --create-home --uid 10001 site
 WORKDIR /app
 COPY config/sources.yaml config/sources.yaml
 COPY config/cycle.yaml config/cycle.yaml
+COPY config/approvals.yaml config/approvals.yaml
 COPY packages/lc_core packages/lc_core
 COPY packages/lc_directory packages/lc_directory
 COPY services/site services/site
@@ -17,5 +18,5 @@ RUN python -c "import duckdb; c = duckdb.connect(); c.execute(\"SET extension_di
  && chmod -R a+rX /opt/duckdb-extensions
 
 USER site
-ENV PYTHONUNBUFFERED=1 LC_SOURCES_CONFIG=/app/config/sources.yaml LC_CYCLE_CONFIG=/app/config/cycle.yaml
+ENV PYTHONUNBUFFERED=1 LC_SOURCES_CONFIG=/app/config/sources.yaml LC_CYCLE_CONFIG=/app/config/cycle.yaml LC_APPROVALS_CONFIG=/app/config/approvals.yaml
 CMD ["python", "-m", "lc_site.server"]

@@ -55,6 +55,10 @@ resource "google_cloud_run_v2_service" "site" {
         value = join(",", local.site_audiences)
       }
       env {
+        name  = "LC_SITE_DOMAIN" # the admin page's address in approval links (config/site.yaml)
+        value = local.site_domain
+      }
+      env {
         name  = "LC_IAP_ADMIN_AUDIENCE" # the admin backend's audience: admin paths accept only its token (site_lb.tf)
         value = local.site_admin_audience
       }
