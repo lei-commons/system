@@ -65,9 +65,20 @@ Owner decisions 2026-11-22:
 
 ## Promotion: once
 
-A source moves to production through one pull request that changes its `stage` to `production`. That is a
-sensitive path (`config/**`), so the owner approves it on the admin page. The pull request quotes the trial's
-numbers against this checklist:
+A source moves to production through one pull request that changes its `stage` to `production`. Owner decision
+2026-11-22: "Once a new data source has gone through trial and tested for data access and data structure etc., no
+need to ask for approval to promote it to production for each data source. Sensitive code/system changes should
+be explicitly approved through admin console." So a promotion needs no approval: the owner-approval workflow
+passes it on its own (`lc_core.approval_rules.promotion_only`) when it does nothing else, that is:
+
+- it changes only `config/sources.yaml`, the rendered `infra/workflows/daily-cycle.yaml`, and tests or docs;
+- the registry is unchanged except for pipelines whose `stage` goes from `trial` to `production`;
+- the cycle is unchanged except for the promoted jobs leaving the trials step (and joining the ingest list,
+  which `deploy-cycle` checks against `render_cycle.py` before deploying).
+
+Anything more in the same pull request (a profile fix, a new host, another registry field) needs the owner's
+approval as before, so fixes go in their own pull request first. The session merges a promotion once CI is green,
+and only when the trial's numbers pass this checklist, which the pull request quotes:
 
 1. at least one complete run has finished (a `quality` event), and the files' columns matched;
 2. the record count is plausible for the register, and skips are explained (people dropped, linked records);

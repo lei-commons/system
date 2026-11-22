@@ -4,6 +4,12 @@ A pull request that changes a sensitive path gets the commit status ``context`` 
 approves it, with a fresh authenticator code, for its exact head commit (owner decision 2026-11-21). The
 owner-approval workflow and the site's Approvals page both decide with this module, from main's copy of the
 config, so a pull request can't change the rules it is judged by.
+
+One exception (owner decision 2026-11-22): promoting sources that passed their trial needs no approval each
+time. ``promotion_only`` recognises such a pull request strictly: it changes only the sources registry, the
+rendered cycle and tests or docs; the registry is unchanged except for pipelines whose stage goes from trial to
+production; and the cycle is unchanged except for the promoted jobs moving out of the trials step. Anything
+else in the same pull request, or any other change to those files, needs the owner's approval as before.
 """
 
 from __future__ import annotations
@@ -15,6 +21,10 @@ from pathlib import Path
 
 import yaml
 
+REGISTRY = "config/sources.yaml"
+CYCLE = "infra/workflows/daily-cycle.yaml"
+PROMOTION_FILES = (REGISTRY, CYCLE)
+PROMOTION_EXTRAS = (re.compile(r"^(?:.+/)?tests/[^/].*$"), re.compile(r"^docs/[^/].*\.md$"))
 DEFAULT_PATH = Path(__file__).resolve().parents[3] / "config" / "approvals.yaml"
 
 
@@ -83,3 +93,67 @@ def load(path=None) -> Rules:
         raise ValueError("approvals.yaml: github_app.name must be the App's name")
     return Rules(data["context"], data["owner_login"], app["name"], app["app_id"], app["installation_id"],
                  app["key_secret"], tuple(patterns))
+
+
+def _pipelines(registry) -> dict:
+    """{source id: its pipeline} for every built source of a parsed registry."""
+    sources = (registry or {}).get("sources") if isinstance(registry, dict) else None
+    if not isinstance(sources, list):
+        raise ValueError("the registry has no sources list")
+    return {s["id"]: s["pipeline"] for s in sources if isinstance(s, dict) and isinstance(s.get("pipeline"), dict)}
+
+
+def _without(value, jobs: set):
+    """The cycle with the given job names taken out of every list, and a trials step left empty dropped."""
+    if isinstance(value, dict):
+        return {k: _without(v, jobs) for k, v in value.items()}
+    if isinstance(value, list):
+        out = [_without(v, jobs) for v in value if not (isinstance(v, str) and v in jobs)]
+        return [v for v in out if not (isinstance(v, dict) and list(v) == ["trials"]
+                                       and not ((v["trials"] or {}).get("for") or {}).get("in"))]
+    return value
+
+
+def promotion_only(changed, base: dict, head: dict) -> list | None:
+    """The sources a pull request promotes from trial to production, if that's all it does; otherwise None.
+
+    ``changed`` is the pull request's changed paths; ``base`` and ``head`` map REGISTRY and CYCLE to their text at
+    the merge base and at the head (None for a missing file)."""
+    changed = set(changed)
+    if REGISTRY not in changed:
+        return None
+    if any(p not in PROMOTION_FILES and not any(r.match(p) for r in PROMOTION_EXTRAS) for p in changed):
+        return None
+    try:
+        before, after = (_pipelines(yaml.safe_load(t[REGISTRY] or "")) for t in (base, head))
+        old_registry, new_registry = yaml.safe_load(base[REGISTRY]), yaml.safe_load(head[REGISTRY])
+    except (ValueError, KeyError, TypeError, yaml.YAMLError):
+        return None
+    promoted = sorted(i for i in after if i in before and before[i].get("stage") == "trial"
+                      and after[i].get("stage") == "production")
+    if not promoted:
+        return None
+    for source in new_registry["sources"]:  # put the stages back: the rest must be exactly as before
+        if isinstance(source, dict) and source.get("id") in promoted:
+            source["pipeline"] = dict(source["pipeline"], stage="trial")
+    if new_registry != old_registry:
+        return None
+    if CYCLE in changed:
+        jobs = {after[i].get("job") for i in promoted}
+        try:
+            old_cycle, new_cycle = yaml.safe_load(base[CYCLE] or ""), yaml.safe_load(head[CYCLE] or "")
+        except (KeyError, yaml.YAMLError):
+            return None
+        trials = [v for v in _steps(new_cycle) if isinstance(v, dict) and "trials" in v]
+        if any(job in (((t["trials"] or {}).get("for") or {}).get("in") or []) for t in trials for job in jobs):
+            return None  # a promoted job still on trial in the new cycle
+        if not new_cycle or _without(old_cycle, jobs) != _without(new_cycle, jobs):
+            return None
+    return promoted
+
+
+def _steps(cycle) -> list:
+    try:
+        return cycle["main"]["steps"]
+    except (KeyError, TypeError):
+        return []

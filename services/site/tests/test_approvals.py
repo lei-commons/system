@@ -83,6 +83,16 @@ def test_only_sensitive_pull_requests_are_listed(page):
         ("lei-commons/system", 5, ["infra/terraform/site_lb.tf"], False)]
 
 
+def test_a_promotion_the_workflow_passed_is_not_listed(page):
+    approvals, gh, events, post, code = page
+    gh.files[5] = ["config/sources.yaml", "infra/workflows/daily-cycle.yaml"]
+    gh.statuses["aaa1111"] = [{"context": "owner-approval", "state": "success", "creator": {"login": "github-actions[bot]"},
+                               "description": "Promotes trial sources only (tw-mof-tax): no approval needed"}]
+    assert approvals.pending(fresh=True)["pullRequests"] == []
+    gh.statuses["aaa1111"][0]["description"] = "No sensitive paths: no approval needed"  # not a promotion: listed
+    assert [p["number"] for p in approvals.pending(fresh=True)["pullRequests"]] == [5]
+
+
 def test_approving_sets_the_apps_status_on_that_commit(page):
     approvals, gh, events, post, code = page
     out = post({"repo": "lei-commons/system", "number": 5, "sha": "aaa1111", "reason": "reviewed the LB change",
