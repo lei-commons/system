@@ -35,7 +35,7 @@ jobs:
           for s in yaml.safe_load(open("config/sources.yaml"))["sources"]:
               p = s.get("pipeline") or {}
               if p.get("image") == "ingest-bulk":
-                  print(p["job"], s["id"])
+                  print(p["job"], s["id"], p["stage"])
           PY
           cat jobs.txt
           [ -s jobs.txt ] || { echo "::error::no source uses ingest-bulk"; exit 1; }
@@ -57,14 +57,31 @@ jobs:
       - name: Deploy the jobs
         run: |
           GATEWAY="$(gcloud run services describe conduct-gateway --region "$REGION" --format='value(status.url)')"
-          while read -r job source; do
+          while read -r job source stage; do
             gcloud run jobs describe "$job" --region "$REGION" >/dev/null 2>&1 || echo "$job" >> new_jobs.txt
             gcloud run jobs deploy "$job" --region "$REGION" --image "$IMAGE:$GITHUB_SHA" \
               --service-account "lc-ingest@$PROJECT.iam.gserviceaccount.com" \
               --network lc-jobs --subnet "lc-jobs-$REGION" --vpc-egress all-traffic \
               --set-env-vars "LC_SOURCE=$source,LC_GATEWAY_URL=$GATEWAY,LC_DATA_BUCKET=$PROJECT-data,LC_CONTROL_STATE_URI=gs://$PROJECT-control/state.json,LC_CODE_VERSION=$GITHUB_SHA" \
-              --max-retries 0 --task-timeout 10800 --memory 8Gi --cpu 2
+              --max-retries 0 --task-timeout 10800 --memory 8Gi --cpu 2 \
+              --labels "lc-image=ingest-bulk,lc-stage=$stage"
           done < jobs.txt
+      - name: Remove trials that left the registry (their reports, then their jobs)
+        # A trial dropped from config/sources.yaml (docs/source-trials.md): its job runs once with LC_CLEANUP=1,
+        # which deletes trials/<source>/ in every version, and is then deleted. Only jobs whose last deploy
+        # labelled them a trial; a production job is never removed here.
+        run: |
+          gcloud run jobs list --region "$REGION" \
+            --filter='metadata.labels.lc-image=ingest-bulk AND metadata.labels.lc-stage=trial' \
+            --format='value(metadata.name)' > trial_jobs.txt
+          while read -r job; do
+            [ -n "$job" ] || continue
+            grep -q "^$job " jobs.txt && continue
+            echo "removing the trial $job"
+            gcloud run jobs execute "$job" --region "$REGION" --update-env-vars LC_CLEANUP=1 --wait \
+              || echo "::warning::$job: the cleanup run failed; the bucket's lifecycle deletes its reports within about 3 days"
+            gcloud run jobs delete "$job" --region "$REGION" --quiet
+          done < trial_jobs.txt
       # Only a job this deploy created runs now (its first run); the daily cycle runs the others, one at a time.
       - name: Run each new job once now
         run: |

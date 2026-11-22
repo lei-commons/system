@@ -206,9 +206,79 @@ def test_trials_are_deployed_by_production_s_own_workflow_with_its_commit():
     wf = (Path(__file__).resolve().parents[3] / ".github" / "workflows" / "deploy-ingest-bulk.yml").read_text()
     assert "LC_CODE_VERSION=$GITHUB_SHA" in wf and '"$IMAGE:$GITHUB_SHA"' in wf
     jobs_script = wf.split("python3 - <<'PY'", 1)[1].split("PY", 1)[0]
-    assert "stage" not in jobs_script  # every ingest-bulk pipeline, trial or production, gets the same image
+    # Every ingest-bulk pipeline, trial or production, gets the same image: the stage is only printed, for the label.
+    assert '"trial"' not in jobs_script and '"production"' not in jobs_script and 'print(p["job"], s["id"], p["stage"])' in jobs_script
+    # A trial dropped from the registry: its job runs once in cleanup mode, then goes. Production jobs never.
+    removal = wf.split("Remove trials that left the registry", 1)[1]
+    assert "metadata.labels.lc-stage=trial" in removal and "LC_CLEANUP=1 --wait" in removal
+    assert removal.index("LC_CLEANUP=1") < removal.index("gcloud run jobs delete")
+    assert '--labels "lc-image=ingest-bulk,lc-stage=$stage"' in wf and "read -r job source stage" in wf
     tf = (Path(__file__).resolve().parents[3] / "infra" / "terraform" / "storage.tf").read_text()
-    assert 'matches_prefix = ["trials/"]' in tf and "age            = 60" in tf
+    net = tf.split("Source trials keep only small quality reports", 1)[1].split("matches_prefix = [\"tmp/\"]", 1)[0]
+    assert "age            = 2" in net and "days_since_noncurrent_time = 1" in net and net.count('["trials/"]') == 2
+
+
+class Blob:
+    def __init__(self, bucket, name, generation, data=b"{}"):
+        self.bucket, self.name, self.generation, self.data, self.content_type = bucket, name, generation, data, "application/json"
+
+    def download_as_bytes(self):
+        return self.data
+
+    def upload_from_string(self, data, content_type=None):
+        self.bucket.add(self.name, data)
+
+
+class Bucket:
+    """A versioned bucket: every write is a new generation; the newest is live."""
+
+    def __init__(self):
+        self.objects, self.client, self.generation = [], self, 0
+
+    def add(self, name, data=b"{}"):
+        self.generation += 1
+        self.objects.append(Blob(self, name, self.generation, data))
+
+    def blob(self, name):
+        return Blob(self, name, None)
+
+    def list_blobs(self, bucket, prefix, versions=False):
+        found = [b for b in self.objects if b.name.startswith(prefix)]
+        if versions:
+            return list(found)
+        live = {}
+        for b in found:
+            live[b.name] = b
+        return list(live.values())
+
+    def delete_blob(self, name, generation=None):
+        self.objects = [b for b in self.objects if not (b.name == name and b.generation == generation)]
+
+
+def test_a_trial_leaves_nothing_once_removed_and_stays_fresh_while_live():
+    from lc_ingest import trials
+
+    bucket = Bucket()
+    for name in ("trials/gb-ccew/trial-report.json", "trials/gb-ccew/manifest.json", "trials/gb-ccew/trial-report.json",
+                 "trials/gb-ccew-other/trial-report.json", "gb-ccew/manifest.json", "us-irs/manifest.json"):
+        bucket.add(name)
+    assert trials.refresh(bucket, "gb-ccew") == 2  # the live objects only, each rewritten (a new generation)
+    assert len([b for b in bucket.objects if b.name.startswith("trials/gb-ccew/")]) == 5
+    assert trials.remove(bucket, "gb-ccew") == 5  # every version
+    assert sorted(b.name for b in bucket.objects) == ["gb-ccew/manifest.json", "trials/gb-ccew-other/trial-report.json",
+                                                      "us-irs/manifest.json"]  # nothing else touched
+    for bad in ("", "../gb", "gb-ccew/", "GB", "a"):
+        with pytest.raises(ValueError):
+            trials.prefix(bad)
+
+
+def test_the_cleanup_mode_deletes_the_trial_and_says_so():
+    from ingest_bulk.job import cleanup
+
+    bucket, events = Bucket(), []
+    bucket.add("trials/gb-ccew/trial-report.json")
+    assert cleanup("gb-ccew", bucket, log=events.append) == 0 and bucket.objects == []
+    assert events == [{"event": "trial-cleaned", "source": "gb-ccew", "objects": 1, "why": "the trial left the registry"}]
 
 
 def test_quality_flags_implausible_data():

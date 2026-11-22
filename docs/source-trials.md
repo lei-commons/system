@@ -7,6 +7,7 @@ Owner decisions 2026-11-22:
   trial mode. Trial mode should be used only when introducing new data sources or an existing data source has
   completely changed." Trial mode must run the latest code, as production does, and must not use any ongoing
   cloud resources when unused.
+- "Once the trial is done, left over data/resources should be cleaned up within 24 hrs … maximum 48 hrs."
 
 ## When a trial is used
 
@@ -32,11 +33,18 @@ Owner decisions 2026-11-22:
   publication only if it hasn't measured that publication with this commit yet. An unchanged day is a
   seconds-long check. A failing trial is logged as `trial-failed` and never fails the cycle or touches the
   clean-run count.
-- **It uses nothing when unused.**
-  - With no source on trial, the cycle has no `trials` step.
-  - A Cloud Run job that isn't running costs nothing.
-  - Trial reports are a few kilobytes, and the data bucket's lifecycle deletes everything under `trials/` 60
-    days after it was written. A finished or abandoned trial leaves nothing behind.
+- **It uses nothing when unused, and leaves nothing once done** (`lc_ingest.trials`).
+  - With no source on trial, the cycle has no `trials` step, and a Cloud Run job that isn't running costs
+    nothing.
+  - **Promoted:** the job's first production run deletes everything under `trials/<source>/`, every version,
+    before it does anything else. The daily cycle runs it within 24 hours of the promotion.
+  - **Dropped from the registry:** when the pull request merges, `deploy-ingest-bulk.yml` runs the job once
+    with `LC_CLEANUP=1`, which deletes `trials/<source>/` in every version, and then deletes the job. This
+    takes minutes. Only jobs whose last deploy labelled them a trial are removed this way.
+  - **Safety net:** the data bucket's lifecycle deletes `trials/` objects older than 2 days, and replaced
+    versions after 1 day. A live trial rewrites its reports on every daily run (`trial-refreshed`), so the net
+    never takes a live trial's report. It only catches leftovers the two paths above missed, for example when
+    the system was paused and deploys didn't run.
 - **It reports.** The `quality` event in `status.yml` carries counts and register vocabulary only, never
   names, because the logs are public:
   - records, and why rows were skipped;
@@ -67,5 +75,5 @@ numbers against this checklist:
 5. the anomalies are zero or explained, and there are no contact-like values;
 6. the registration numbers have one main shape.
 
-After promotion, the job's next run processes the publication into the source's store, and the next snapshot
-adds those records as a normal changes day. The trial's report expires with the lifecycle.
+After promotion, the job's next run first deletes the trial's reports, then processes the publication into the
+source's store. The next snapshot adds those records as a normal changes day.
