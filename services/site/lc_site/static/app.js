@@ -14,6 +14,7 @@ const PUBLIC_VIEWS = {
 const ADMIN_VIEWS = {
   system: () => import("./views/system.js"),
   sources: () => import("./views/sources.js"),
+  trials: () => import("./views/trials.js"),
   log: () => import("./views/log.js"),
   security: () => import("./views/security.js"),
   approvals: () => import("./views/approvals.js"),

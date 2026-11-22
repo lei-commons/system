@@ -121,7 +121,9 @@ function sourceCards(d, meta) {
   return h("div", { class: "source-grid" }, ...d.sources.map((s) => h("section", { class: "card card-pad source-card" },
     h("div", { class: "source-head" },
       h("span", { class: "flag big" }, s.country && s.country !== "*" ? flag(s.country) : "🌐"),
-      h("div", {}, h("div", { class: "source-name" }, s.label), h("div", { class: "muted" }, s.name))),
+      h("div", {}, h("div", { class: "source-name" }, s.label, s.stage === "trial"
+        ? h("span", { class: "pill busy", style: { marginLeft: "8px" }, title: "Runs into its own store and reports its data's quality; kept out of the database until the owner promotes it" }, "trial")
+        : null), h("div", { class: "muted" }, s.name))),
     h("div", { class: "source-records num" }, s.records ? fmt(s.records) : "–"),
     h("div", { class: "muted" }, s.relationships ? `records · ${fmt(s.relationships)} relationships` : "records"),
     // The source's share of every source's records added up: its size next to the others, not how much of

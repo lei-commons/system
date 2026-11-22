@@ -65,7 +65,8 @@ class _Partitions:
 
 def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: str, allowlist: AllowList, log,
                kind: str = "entity", seen: bool = False, prepare=None, fetch=None, attempts: int = DOWNLOAD_ATTEMPTS,
-               check_as: str = None, sleep=time.sleep, backoff: float = 30.0, guard_settings=None) -> str:
+               check_as: str = None, sleep=time.sleep, backoff: float = 30.0, guard_settings=None,
+               quality=None) -> str:
     """Return the outcome: halted, denied, already-done, held or done.
 
     ``find(gateway, manifest)`` returns (key, url, filename). ``key`` identifies
@@ -85,6 +86,12 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
 
     ``guard_settings`` (lc_core.guard.GuardSettings) defaults to config/sources.yaml's
     ``volume_guard``. It is read before anything is fetched, so a bad setting stops the run.
+
+    ``quality``, for a source on trial (docs/source-trials.md): a function returning a fresh
+    lc_ingest.quality.Quality. The run then only measures: every mapped record of the attempt that succeeds is
+    measured, the ``quality`` event is logged (counts only) and ``trial-report.json`` (with a sample) written to
+    ``store``; nothing else is kept (no records, no changes, no copy of the file), and ``store``'s manifest
+    notes the key as measured. The caller gives a trial its own small store and a key that names the code.
     """
     try:
         gate()
@@ -113,6 +120,7 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
             # Download, check and read are one step: a file cut short, an error page or a corrupt archive
             # is fetched again, every time logged, and nothing from it is kept (lc_ingest.filecheck).
             counts.clear()
+            measure = quality() if quality else None
             partitions = _Partitions(os.path.join(work, f"in-{attempt}"))
             os.makedirs(os.path.join(work, f"in-{attempt}"), exist_ok=True)
             try:
@@ -121,7 +129,10 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
                 filecheck.check(download, check_as or filecheck.kind_for(filename))
                 with open(download, "rb") as f:
                     for record in map_records(read(f), counts, allowlist, mapper=mapper, kind=kind):
-                        partitions.add(record)
+                        if measure is not None:
+                            measure.add(record)  # a trial measures and keeps nothing
+                        else:
+                            partitions.add(record)
                 shards = partitions.close()
                 break
             except Denied as exc:
@@ -138,6 +149,9 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
                 sleep(backoff * attempt)
         if attempt > 1:
             log({"event": "download-recovered", "source": source, "publish": key, "attempt": attempt})
+        if measure is not None:  # a trial: the report is all it keeps
+            os.remove(download)
+            return _measured(store, manifest, key, source, measure, counts, size, log)
         store.keep_source(filename, download)  # only a file that checked and read cleanly is kept
         os.remove(download)  # the disk is memory on Cloud Run
 
@@ -221,4 +235,17 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
     log({"event": "done", "source": source, "publish": key, "bytes": size, "changes": changes_written,
          "records_changed": changed_existing + new_records, "existing_changed": changed_existing,
          "new_records": new_records, "total": manifest["records"], **dict(counts)})
+    return "done"
+
+
+def _measured(store, manifest, key, source, measure, counts, size, log) -> str:
+    """A trial's end: the quality event (counts only), the report with its sample, and the key noted as measured."""
+    log({"event": "quality", "source": source, "publish": key, "bytes": size, "quality": measure.summary(counts)})
+    report = measure.report(counts, publish=key)
+    store.write_json(f"trial-reports/{key.replace(' ', '_').replace('/', '-').replace('@', '')}.json", report)  # one per file
+    store.write_json("trial-report.json", report)  # the latest
+    manifest["processed"] = (manifest["processed"] + [key])[-KEEP_PROCESSED:]
+    manifest["lastKey"] = key
+    store.write_manifest(manifest)
+    log({"event": "measured", "source": source, "publish": key, "records": measure.records})
     return "done"

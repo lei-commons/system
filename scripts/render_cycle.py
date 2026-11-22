@@ -9,6 +9,11 @@ the registry's order; a failure is logged and the cycle carries on; the sources 
 again after ``retry_wait_minutes``, up to ``retries`` rounds; then the snapshot and the database load
 run (these two still stop the cycle if they fail); finally, if any source never succeeded, the cycle
 ends as failed, naming them, so the owner is alerted and the day isn't counted as clean.
+
+Sources on trial (config/sources.yaml pipeline stage, owner 2026-11-22; docs/source-trials.md) run last,
+after the snapshot, the load and the DeDi check, once each, and only measure (a publication already measured
+with the deployed code is a seconds-long check): a failing trial is logged (trial-failed) and never fails the
+cycle or delays the production data. With no source on trial there is no trials step.
 """
 
 from __future__ import annotations
@@ -39,14 +44,22 @@ from lc_core.cycle import CycleConfigError as ConfigError  # noqa: E402
 from lc_core.cycle import settings, timeout_seconds  # noqa: E402
 
 
-def ingest_jobs(registry: dict) -> list:
-    jobs = [s["pipeline"]["job"] for s in registry.get("sources", []) if (s.get("pipeline") or {}).get("job")]
+def ingest_jobs(registry: dict, stage: str = "production") -> list:
+    """The ingestion jobs of one stage, in registry order (every job's name checked, whatever its stage)."""
+    built = [s["pipeline"] for s in registry.get("sources", []) if (s.get("pipeline") or {}).get("job")]
+    for pipeline in built:
+        if pipeline.get("stage") not in ("trial", "production"):
+            raise ConfigError(f"job {pipeline['job']}: pipeline stage must be trial or production")
+    _check_names([p["job"] for p in built])
+    return [p["job"] for p in built if p["stage"] == stage]
+
+
+def _check_names(jobs: list) -> None:
     if len(jobs) != len(set(jobs)):
         raise ConfigError("two sources share a job")
     for job in jobs:
         if not job.replace("-", "").isalnum() or not job.startswith("ingest-"):
             raise ConfigError(f"job name {job!r} must be ingest-<letters, digits, dashes>")
-    return jobs
 
 
 def _run(job_expr: str, timeout: int) -> dict:
@@ -80,6 +93,7 @@ def render(registry: dict, config: dict, selftest: bool = False, fallbacks: dict
     s_all = s = settings(config)
     default_timeout = timeout_seconds(s_all, "default")
     jobs = ingest_jobs(registry)
+    trials = [] if selftest else ingest_jobs(registry, "trial")
     fallbacks = dict(fallbacks or {})  # {regular job: fallback job}, only those the owner approved
     if selftest:
         s, jobs = {"retry_wait_minutes": 1, "retries": 1}, SELFTEST_JOBS
@@ -132,6 +146,13 @@ def render(registry: dict, config: dict, selftest: bool = False, fallbacks: dict
             "except": {"as": "e", "steps": [{"dedi_check_failed": {"call": "sys.log", "args": {
                 "severity": "WARNING", "json": {"event": "dedi-check-failed", "error": "${e}"}}}}]},
         }})
+    if trials:
+        # Sources on trial: once each, after everything production needs. A failure is logged, never fatal.
+        steps.append({"trials": {"for": {"value": "job", "in": trials, "steps": [{"trial_run": {
+            "try": _run("job", default_timeout),
+            "except": {"as": "e", "steps": [{"trial_log_failure": {"call": "sys.log", "args": {
+                "severity": "WARNING", "json": {"event": "trial-failed", "job": "${job}", "error": "${e}"}}}}]},
+        }}]}}})
     steps += [
         {"report": {"switch": [{"condition": "${len(failed) > 0}", "steps": [{"fail": {"raise": {
             "code": "sources-failed",

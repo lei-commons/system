@@ -96,6 +96,14 @@ sources:
     inactive: [Deregistered, Closed, Ceased, Ceased IRL, De-Registered ICAV]
     unknown: [Converted, "Conv. to*"]
 
+  us-irs-eo-bmf:               # lc_ingest.bulk.IRS_STATUS spells out the IRS's exemption status codes
+    active: [Unconditional exemption, Conditional exemption, Trust described in 4947(a)(2),
+             Terminating private foundation status]
+
+  gb-ccew:
+    active: [Registered]
+    inactive: [Removed]
+
   au-asic:                     # lc_ingest.bulk.AU_STATUS spells out ASIC's codes
     active: [Registered, Strike-off action in progress]
     dissolved: [Deregistered, Dissolved]

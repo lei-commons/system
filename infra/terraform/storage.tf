@@ -23,6 +23,30 @@ resource "google_storage_bucket" "data" {
     }
   }
 
+  # Source trials keep only small quality reports (docs/source-trials.md, lc_ingest.trials). They are deleted
+  # when the trial ends (on promotion, by the job's first production run; dropped from the registry, by the
+  # deploy workflow), within 24 hours. These two rules are the safety net: a live trial rewrites its reports
+  # every daily run, so only a trial's leftovers ever reach 2 days, and replaced versions go after 1 day.
+  lifecycle_rule {
+    condition {
+      age            = 2
+      matches_prefix = ["trials/"]
+    }
+    action {
+      type = "Delete"
+    }
+  }
+
+  lifecycle_rule {
+    condition {
+      days_since_noncurrent_time = 1
+      matches_prefix             = ["trials/"]
+    }
+    action {
+      type = "Delete"
+    }
+  }
+
   lifecycle_rule {
     condition {
       age            = 7

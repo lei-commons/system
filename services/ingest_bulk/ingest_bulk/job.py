@@ -3,6 +3,12 @@
 The job's LC_SOURCE names its register (ie-cro, ...). Each run processes the register's file once per
 ISO week, through the conduct gateway, and only after the system is running and the owner has approved
 that source.
+
+A source on trial (config/sources.yaml stage; docs/source-trials.md) runs this same image, deployed by the
+same workflow, so it always runs production's code. It only measures: it keeps no records, only its quality
+report, in trials/<source>/, and measures a publication again only when the code changes (LC_CODE_VERSION,
+the deployed commit) or a new publication appears. Its reports go when the trial ends (lc_ingest.trials):
+on promotion, at the start of the first production run; dropped from the registry, by LC_CLEANUP=1.
 """
 
 from __future__ import annotations
@@ -42,7 +48,26 @@ def gate_for(profile: Profile):
     return gate
 
 
-def find_for(profile: Profile, today: date, part=None):
+TRIALS = "trials"  # the data bucket's prefix for trial reports (lc_ingest.trials)
+
+
+def code_version() -> str:
+    """The deployed commit (deploy-ingest-bulk.yml sets LC_CODE_VERSION), short: a trial re-measures when it changes."""
+    return (os.environ.get("LC_CODE_VERSION") or "local")[:12]
+
+
+def find_for(profile: Profile, today: date, part=None, code: str = None):
+    inner = _find_for(profile, today, part)
+    if not code:
+        return inner
+
+    def find(gateway, manifest=None):  # a trial: the same publication is measured again under new code
+        key, url, filename = inner(gateway, manifest)
+        return f"{key} @{code}", url, filename
+    return find
+
+
+def _find_for(profile: Profile, today: date, part=None):
     def find(gateway, manifest=None):
         if part:  # one of a register's several files: its own key, so each is processed once a week
             name, url = part
@@ -56,34 +81,76 @@ def find_for(profile: Profile, today: date, part=None):
     return find
 
 
-def run(profile: Profile, gateway, store, today=None, gate=None, allowlist=None, log=log) -> str:
-    """Process the register's file, or each of its files in turn. The outcome of the first that isn't done stops the rest."""
+def quality_for(profile: Profile, stage: str, today: date):
+    """For a source on trial: a fresh quality measure per attempt (lc_ingest.quality). Production: none."""
+    if stage != "trial":
+        return None
+    from lc_core.status import load as load_statuses
+    from lc_ingest.quality import Quality
+
+    statuses = load_statuses()
+    return lambda: Quality(profile.source, statuses=statuses, today=today)
+
+
+def run(profile: Profile, gateway, store, today=None, gate=None, allowlist=None, log=log, stage=None) -> str:
+    """Process the register's file, or each of its files in turn. The outcome of the first that isn't done stops the rest.
+    A source on trial (config/sources.yaml) only measures its data's quality, into ``store`` (trials/<source>/)."""
+    from lc_core.sources import stage as stage_of
+
     today = today or date.today()
     allowlist = allowlist or AllowList.load()
+    stage = stage or stage_of(profile.source)
+    quality = quality_for(profile, stage, today)
+    code = code_version() if stage == "trial" else None
     outcome = "already-done"
     for part in profile.parts or (None,):
-        outcome = run_ingest(gateway=gateway, store=store, gate=gate or gate_for(profile), find=find_for(profile, today, part),
+        outcome = run_ingest(gateway=gateway, store=store, gate=gate or gate_for(profile), find=find_for(profile, today, part, code),
                              read=profile.read, mapper=profile.record, source=profile.source,
-                             maker=f"ingestion@{profile.store}", allowlist=allowlist, log=log)
+                             maker=f"ingestion@{profile.store}", allowlist=allowlist, log=log, quality=quality)
         if outcome not in ("done", "already-done"):
             break
     return outcome
 
 
+def cleanup(source: str, bucket, log=log) -> int:
+    """LC_CLEANUP=1: a trial that left the registry. Delete its reports, every version, and stop. The deploy
+    workflow runs this once, then deletes the job (docs/source-trials.md)."""
+    from lc_ingest import trials
+
+    deleted = trials.remove(bucket, source)
+    log({"event": "trial-cleaned", "source": source, "objects": deleted, "why": "the trial left the registry"})
+    return 0
+
+
 def main() -> int:
     from google.cloud import storage
 
+    from lc_core.sources import stage as stage_of
+    from lc_ingest import trials
+
+    client = storage.Client()
+    bucket = os.environ["LC_DATA_BUCKET"]
+    if os.environ.get("LC_CLEANUP") == "1":
+        return cleanup(os.environ.get("LC_SOURCE", ""), client.bucket(bucket))
     profile = profile_for(os.environ.get("LC_SOURCE", ""))
     gateway = Gateway(os.environ["LC_GATEWAY_URL"], f"job:{profile.job}")
     allowlist = AllowList.load(os.environ["LC_FIELDS_CONFIG"])
-    bucket = os.environ["LC_DATA_BUCKET"]
-    client = storage.Client()
     record = Recorder(f"job:{profile.job}", log)
-    store = GcsStore(bucket, profile.store)
+    on_trial = stage_of(profile.source) == "trial"
+    # A trial keeps only its reports, apart from every store; production writes the source's store.
+    store = GcsStore(bucket, f"{TRIALS}/{profile.source}" if on_trial else profile.store)
     try:
+        if not on_trial:  # promoted (or never on trial): whatever a trial left is deleted, within a day of promotion
+            deleted = trials.remove(client.bucket(bucket), profile.source)
+            if deleted:
+                record({"event": "trial-cleaned", "source": profile.source, "objects": deleted, "why": "promoted"})
         with lease(client.bucket(bucket), profile.job):
             outcome = run(profile, gateway, store, allowlist=allowlist, log=record)
         health.note(store, outcome=outcome, log=record)  # a browser fallback reads it (ingest_browser)
+        if on_trial and outcome in ("done", "already-done"):
+            # A live trial's reports are rewritten every run, so the safety-net lifecycle rule never takes them.
+            record({"event": "trial-refreshed", "source": profile.source,
+                    "objects": trials.refresh(client.bucket(bucket), profile.source)})
     except Busy as exc:
         record({"event": "busy", "reason": str(exc)})
         outcome = "busy"

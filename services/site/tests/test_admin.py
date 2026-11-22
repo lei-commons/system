@@ -135,7 +135,7 @@ def test_the_site_says_whether_the_viewer_is_an_admin(split):
 def test_the_admin_tabs_are_marked_and_hidden_from_everyone_else():
     static = Path(__file__).resolve().parents[1] / "lc_site" / "static"
     html, css, app = ((static / n).read_text() for n in ("index.html", "app.css", "app.js"))
-    for route in ("sources", "system", "log", "approvals", "security"):
+    for route in ("sources", "trials", "system", "log", "approvals", "security"):
         assert f'data-route="{route}" data-area="admin"' in html, route
     assert 'body:not(.is-admin) #nav a[data-area="admin"] { display: none; }' in css
     admin_views = app[app.index("const ADMIN_VIEWS"):app.index("};", app.index("const ADMIN_VIEWS"))]

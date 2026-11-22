@@ -30,6 +30,10 @@ registry_hosts:
   - arquivos.receitafederal.gov.br
   - data.gov.sg
   - api-production.data.gov.sg
+  # Owner approved 2026-11-22 with the sources (system PR "sources batch 1", approved on /admin):
+  # the IRS EO BMF extract (us-irs-eo-bmf) and the Charity Commission's register extract on its Azure blob (gb-ccew).
+  - www.irs.gov
+  - ccewuksprdoneregsadata1.blob.core.windows.net
   # Owner approved 2026-11-09 for the ACRA datasets: data.gov.sg starts a download at
   # api-open and serves the file from a signed S3 link in its Singapore region.
   - api-open.data.gov.sg

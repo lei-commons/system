@@ -178,6 +178,31 @@ main:
               json:
                 event: dedi-check-failed
                 error: ${e}
+  - trials:
+      for:
+        value: job
+        in:
+        - ingest-us-irs
+        - ingest-gb-ccew
+        steps:
+        - trial_run:
+            try:
+              call: googleapis.run.v2.projects.locations.jobs.run
+              args:
+                name: ${"projects/" + project + "/locations/" + region + "/jobs/" + job}
+                connector_params:
+                  timeout: 7200
+            except:
+              as: e
+              steps:
+              - trial_log_failure:
+                  call: sys.log
+                  args:
+                    severity: WARNING
+                    json:
+                      event: trial-failed
+                      job: ${job}
+                      error: ${e}
   - report:
       switch:
       - condition: ${len(failed) > 0}

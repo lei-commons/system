@@ -323,3 +323,29 @@ def test_a_later_successful_run_with_nothing_to_record_clears_a_failure():
     assert fresh["state"] == OK and fresh["problem"]["recovered"] is True
     older = source_health(reader, [a], "ingest-br", "2026-11-19", succeeded_at="2026-11-18T06:14:18Z")
     assert older["state"] == BAD  # a success before the failure doesn't clear it
+
+
+def test_the_trials_page_shows_only_sources_on_trial_with_their_reports():
+    class TrialReader(Reader):
+        def bucket_json(self, bucket, name):
+            if name == "trials/us-irs-eo-bmf/trial-report.json":
+                return {"source": "us-irs-eo-bmf", "records": 3, "statusUnmapped": 0, "sample": [{"legalName": "A"}]}
+            if name == "trials/us-irs-eo-bmf/manifest.json":
+                return {"records": 0, "processed": ["2026-W48 region-1 @abc"], "lastKey": "2026-W48 region-1 @abc"}
+            if name == "trials/gb-ccew/trial-report.json":
+                raise PermissionError("no")
+            return super().bucket_json(bucket, name)
+
+    sources = [{"id": "gleif", "label": "GLEIF", "job": "ingest-gleif", "store": "gleif", "stage": "production"},
+               {"id": "us-irs-eo-bmf", "label": "IRS", "job": "ingest-us-irs", "store": "us-irs", "stage": "trial"},
+               {"id": "gb-ccew", "label": "CCEW", "job": "ingest-gb-ccew", "store": "gb-ccew", "stage": "trial"}]
+    trials = SystemView(TrialReader(), sources=sources).trials()["trials"]
+    assert [t["id"] for t in trials] == ["us-irs-eo-bmf", "gb-ccew"]  # production sources aren't listed
+    assert trials[0]["report"]["records"] == 3 and trials[0]["measured"] == 1 and trials[0]["lastKey"] == "2026-W48 region-1 @abc"
+    assert trials[1]["report"] is None and trials[1]["reportError"] == "PermissionError"
+
+
+def test_the_trials_api_is_admin_only():
+    from lc_site.server import ADMIN_API
+
+    assert ADMIN_API == "/api/v1/admin/"  # every /api/v1/admin/ path, trials included, needs the admin sign-in

@@ -106,6 +106,25 @@ class SystemView:
         data["snapshot"] = snapshot_meta or {}
         return data
 
+    def trials(self) -> dict:
+        """The Trials page: every source on trial (config/sources.yaml stage) with its latest quality report
+        (trials/<source>/trial-report.json, lc_ingest.quality) and its last failure. A trial keeps no records,
+        so nothing of it can reach the snapshot; this is where the owner reads it before promoting it."""
+        r = self._reader
+        out = []
+        for p in self._sources:
+            if p.get("stage") != "trial":
+                continue
+            base = f"trials/{p['id']}"
+            report, report_error = _try(lambda b=base: r.bucket_json("data", f"{b}/trial-report.json"))
+            manifest, _ = _try(lambda b=base: r.bucket_json("data", f"{b}/manifest.json"))
+            health, _ = _try(lambda b=base: r.bucket_json("data", f"{b}/health.json"))
+            out.append({"id": p["id"], "label": p["label"], "name": p.get("name"), "country": p.get("country"),
+                        "job": p["job"], "store": p["store"], "licence": p.get("licence"),
+                        "measured": len((manifest or {}).get("processed") or []), "lastKey": (manifest or {}).get("lastKey"),
+                        "health": health or None, "report": report or None, "reportError": report_error})
+        return {"trials": out, "promotion": "docs/source-trials.md"}
+
     def sources_page(self) -> dict:
         """The Data sources page: every source in the registry with the owner's edits, its terms, decisions and actions."""
         from lc_core import source_edits
@@ -205,7 +224,7 @@ class SystemView:
                 stores[src["relationships"]] = relationships
             row = job_rows.get(src["job"]) or {}
             latest = row.get("latestCreatedExecution") or {}
-            sources.append({k: src.get(k) for k in ("id", "name", "country", "licence", "cadence", "label", "refresh",
+            sources.append({k: src.get(k) for k in ("id", "name", "country", "licence", "cadence", "label", "refresh", "stage",
                                                      "job", "store", "records_as")}
                            | {"records": entities["records"], "last": entities["last"], "error": entities["error"],
                               "relationships": (relationships or {}).get("records"),
