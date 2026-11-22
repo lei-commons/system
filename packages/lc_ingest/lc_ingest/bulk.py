@@ -40,8 +40,8 @@ for a small charity they are often a trustee's own. Minted under GB-CCEW.
 
 Batch 2 (owner approved 2026-11-22), all on trial first (docs/source-trials.md):
 - Australia ABN (ABN Lookup bulk extract, data.gov.au, CC BY 3.0 AU): two weekly ZIPs of XML, every ABN.
-  Individuals (sole traders) and general or family partnerships, whose names are usually people's, are
-  dropped; so is any ABN with an ASIC number, because that company or body is already here through the ASIC
+  Individuals (sole traders), general or family partnerships and deceased estates, whose names are people's,
+  are dropped (estates since the first trial, which found 17,682); so is any ABN with an ASIC number, because that company or body is already here through the ASIC
   dataset. What's left is trusts, super funds, associations, government bodies, co-operatives and the like.
 - France RNA (Répertoire national des associations, waldec, data.gouv.fr, Licence Ouverte 2.0): one ZIP of
   per-département CSVs. The manager's address (adrg_*, often a volunteer's home) and the seat's street are never
@@ -603,7 +603,7 @@ def ckan_resource(gateway, package_url: str, choose, host: str) -> dict:
 # ---- Australia: ABN bulk extract ----
 
 ABN_PACKAGE = "https://data.gov.au/data/api/3/action/package_show?id=abn-bulk-extract"
-ABN_PEOPLE = {"IND", "PTR", "FPT"}  # individual or sole trader, other partnership, family partnership
+ABN_PEOPLE = {"IND", "PTR", "FPT", "DES"}  # individual or sole trader, other or family partnership, deceased estate
 ABN_STATUS = {"ACT": "Active", "CAN": "Cancelled"}
 
 
@@ -653,7 +653,7 @@ def abn_xml(binary_file):
 def abn_record(row: dict) -> dict:
     abn, kind = _clean(row.get("abn")).replace(" ", ""), _clean(row.get("type")).upper()
     if kind in ABN_PEOPLE:
-        raise Skip("natural person or partnership")
+        raise Skip("natural person, partnership or deceased estate")
     if _clean(row.get("asic")):
         raise Skip("has an ASIC number: in the directory through the ASIC dataset")
     name = _clean(row.get("name"))
