@@ -41,6 +41,17 @@ registry_hosts:
   - media.interieur.gouv.fr
   - datos.jus.gob.ar
   - eip.fia.gov.tw
+  # With the sources (system PR "sources batch 3", approved on /admin): Cyprus's register (cy-drcor, data.gov.cy),
+  # Slovenia's AJPES register (si-ajpes-prs, podatki.gov.si), the Dutch ANBI list (nl-anbi), Scotland's OSCR
+  # (gb-oscr), Canada's CRA charities (ca-cra-charities: open.canada.ca's catalogue and download links, which can
+  # redirect to its Azure blob store) and CMS NPPES (us-cms-nppes-org).
+  - data.gov.cy
+  - podatki.gov.si
+  - download.belastingdienst.nl
+  - www.oscr.org.uk
+  - open.canada.ca
+  - opencanada.blob.core.windows.net
+  - download.cms.gov
   # Owner approved 2026-11-09 for the ACRA datasets: data.gov.sg starts a download at
   # api-open and serves the file from a signed S3 link in its Singapore region.
   - api-open.data.gov.sg

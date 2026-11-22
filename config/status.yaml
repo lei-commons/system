@@ -114,6 +114,29 @@ sources:
   tw-mof-tax:                  # the dataset lists operating businesses only
     active: [Operating]
 
+  cy-drcor:                    # the register's own Greek words (registered, reminder sent, struck off, ...)
+    active: [Εγγεγραμμένη, Στάληκε επιστολή Υπενθύμισης]
+    struck-off: [Διαγραμμ*]
+    dissolved: [Διαλυ*]
+    in-liquidation: [Υπό Εκκαθάριση*]
+
+  si-ajpes-prs:                # lc_ingest.bulk_batch3: only deleted units carry a word
+    dissolved: [Deleted]
+
+  nl-anbi:                     # the list holds current public-benefit institutions
+    active: [ANBI]
+
+  gb-oscr:
+    active: [Active, Not Submitted, Not Monitored]
+    inactive: [Removed]
+
+  ca-cra-charities:            # the list holds registered charities
+    active: [Registered]
+
+  us-cms-nppes-org:            # lc_ingest.bulk_batch3: deactivated unless reactivated since
+    active: [Active]
+    inactive: [Deactivated]
+
   gb-ccew:
     active: [Registered]
     inactive: [Removed]
