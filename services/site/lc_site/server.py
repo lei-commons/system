@@ -4,7 +4,7 @@ Every request needs the owner's IAP-verified Google account. Nothing here is
 public, and it stays that way until the owner approves going public.
 
 The admin area (owner decision 2026-11-21) is separate: the pages under /admin/ and the API under
-/api/v1/admin/ (the System, Data sources, Log and Approvals pages, the second factor, every owner action). The load
+/api/v1/admin/ (the System, Data sources, Trials, Log and Approvals pages, the second factor, every owner action). The load
 balancer sends those paths to a backend of their own, where IAP asks for a recent sign-in with 2-step
 verification (config/site.yaml admin). Admin requests are accepted only with that backend's IAP token
 (LC_IAP_ADMIN_AUDIENCE), so the admin paths can't be reached through the ordinary backend. Until the
@@ -131,6 +131,11 @@ class Handler(BaseHTTPRequestHandler):
             if self.system is None:
                 return self._json(503, {"error": "the sources view isn't configured"})
             return self._json(200, self.system.sources_page())
+        if path == "/api/v1/admin/trials":
+            # Sources on trial and their data's quality (owner, 2026-11-22): read before promoting one.
+            if self.system is None:
+                return self._json(503, {"error": "the trials view isn't configured"})
+            return self._json(200, self.system.trials())
         if path == "/api/v1/admin/system":
             if self.system is None:
                 return self._json(503, {"error": "the system view isn't configured"})

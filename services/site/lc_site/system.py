@@ -106,6 +106,24 @@ class SystemView:
         data["snapshot"] = snapshot_meta or {}
         return data
 
+    def trials(self) -> dict:
+        """The Trials page: every source on trial (config/sources.yaml stage) with its latest quality report
+        (trial-report.json beside its store, lc_ingest.quality), its stored records and its job's last run.
+        Trial stores never reach the snapshot; this is where the owner reads them before promoting one."""
+        r = self._reader
+        out = []
+        for p in self._sources:
+            if p.get("stage") != "trial":
+                continue
+            report, report_error = _try(lambda s=p["store"]: r.bucket_json("data", f"{s}/trial-report.json"))
+            manifest, _ = _try(lambda s=p["store"]: r.bucket_json("data", f"{s}/manifest.json"))
+            health, _ = _try(lambda s=p["store"]: r.bucket_json("data", f"{s}/health.json"))
+            out.append({"id": p["id"], "label": p["label"], "name": p.get("name"), "country": p.get("country"),
+                        "job": p["job"], "store": p["store"], "licence": p.get("licence"),
+                        "storedRecords": (manifest or {}).get("records"), "lastKey": (manifest or {}).get("lastKey"),
+                        "health": health or None, "report": report or None, "reportError": report_error})
+        return {"trials": out, "promotion": "docs/source-trials.md"}
+
     def sources_page(self) -> dict:
         """The Data sources page: every source in the registry with the owner's edits, its terms, decisions and actions."""
         from lc_core import source_edits

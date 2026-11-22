@@ -366,3 +366,8 @@ body:not(.is-admin) #nav a[data-area="admin"] { display: none; }
 .feed.compact li { grid-template-columns: 16px 1fr; gap: 8px; }
 /* A card in a grid may shrink below its content's width (a wide table scrolls inside it instead). */
 .grid > * { min-width: 0; }
+
+/* Trials (admin): the quality report's tables, two or four to a row on wide screens, one on a phone. */
+.grid.two { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-top: 12px; }
+table.data.compact td { padding: 3px 8px; font-size: 13px; }
+table.data.compact td.num { text-align: right; white-space: nowrap; }
