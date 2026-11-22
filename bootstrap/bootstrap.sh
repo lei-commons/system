@@ -159,6 +159,9 @@ if [[ "$AUTO_APPROVE" != 1 ]]; then
   [[ "$ok" == "y" || "$ok" == "Y" ]] || { echo "Stopped. Nothing applied."; exit 0; }
 fi
 terraform apply -input=false day0.plan
+# Every change to the system is logged (owner, 2026-11-22): this apply goes into the decision log, with counts
+# and resource types only. Recording never stops the bootstrap.
+GCP_PROJECT_ID="$PROJECT" python3 ../../scripts/record_change.py terraform day0.plan || true
 
 # The control state belongs to the owner: write it once, and never over an existing file.
 # The budget field is in USD, so it is only set when the budget given here is USD too.

@@ -1,19 +1,20 @@
-// The router: #/ search, #/entity/ID, #/graph/ID, #/dashboards, #/log/DAY, #/data/DATE, and in the admin area
-// (/admin/) #/system, #/sources/FILTER and #/security. The admin area is the same app at another path: the load
-// balancer sends /admin/ and /api/v1/admin/ to a backend where IAP asks for a recent 2-step sign-in.
-import { h, errorBox, loadSourceNames, ADMIN } from "./lib.js";
+// The router: #/ search, #/entity/ID, #/graph/ID, #/dashboards, #/data/DATE, and in the admin area (/admin/)
+// #/system, #/sources/FILTER, #/log/DAY, #/approvals and #/security. The admin area is the same app at another
+// path: the load balancer sends /admin/ and /api/v1/admin/ to a backend where IAP asks for a recent 2-step
+// sign-in. Its tabs show only to an admin.
+import { api, h, errorBox, loadSourceNames, ADMIN } from "./lib.js";
 
 const PUBLIC_VIEWS = {
   search: () => import("./views/search.js"),
   entity: () => import("./views/entity.js"),
   graph: () => import("./views/graph.js"),
   dashboards: () => import("./views/dashboards.js"),
-  log: () => import("./views/log.js"),
   data: () => import("./views/data.js"),
 };
 const ADMIN_VIEWS = {
   system: () => import("./views/system.js"),
   sources: () => import("./views/sources.js"),
+  log: () => import("./views/log.js"),
   security: () => import("./views/security.js"),
   approvals: () => import("./views/approvals.js"),
 };
@@ -28,9 +29,14 @@ function setupNav() {
   }
   document.getElementById("admin-badge").hidden = !ADMIN;
   if (ADMIN) document.title = "lei-commons admin";
+  // The admin tabs stay hidden (app.css) unless this viewer is an admin: in the admin area that's known (the
+  // server let the page in); elsewhere the site says. Hiding is a courtesy: the server checks every request.
+  if (ADMIN) document.body.classList.add("is-admin");
+  else api("/api/v1/me").then((me) => document.body.classList.toggle("is-admin", !!me.admin)).catch(() => {});
 }
 
 let cleanup = null;
+let routed = 0; // which navigation is the current one
 
 function parse() {
   const raw = location.hash.replace(/^#\/?/, "");
@@ -55,11 +61,17 @@ async function route() {
     try { cleanup(); } catch (_) { /* a view's cleanup must never block navigation */ }
     cleanup = null;
   }
-  const root = document.getElementById("view");
+  // Each page draws into a container of its own: a page's late refresh (after an action, or a slow request)
+  // lands in its own container, which is no longer shown once the owner has moved on, never over the next page.
+  const root = h("div", { class: "view-page" });
+  document.getElementById("view").replaceChildren(root);
   root.replaceChildren(h("div", { class: "wrap" }, h("div", { class: "skeleton", style: { height: "120px" } })));
+  const mine = ++routed;
   try {
     const module = await views[name]();
-    cleanup = (await module.render(root, arg, params)) || null;
+    const done = (await module.render(root, arg, params)) || null;
+    if (mine === routed) cleanup = done;
+    else if (done) done(); // the owner moved on while this page was loading: stop its timers now
   } catch (error) {
     root.replaceChildren(h("div", { class: "wrap" }, errorBox(error)));
   }

@@ -24,7 +24,7 @@ import os
 from datetime import date as Date, timedelta
 from typing import Callable
 
-from .events import GENESIS, DecisionLog, Event, utcnow, verify
+from .events import DECISIONS, GENESIS, DecisionLog, Event, utcnow, verify
 
 SCALARS = (int, float, str, bool)
 
@@ -303,3 +303,76 @@ def log_bucket_name(data_bucket: str) -> str:
     if not data_bucket.endswith("-data"):
         raise ValueError(f"can't derive the decision log bucket from {data_bucket!r}")
     return data_bucket[: -len("-data")] + "-decision-log"
+
+
+# ---- single events: admin actions, deploys, merges, Terraform applies, guards ----
+# Everything that changes the system goes into the same chained log as the jobs' decisions (owner, 2026-11-22):
+# one new run object per event (or per batch), sealed into the day's chain with the rest the next morning.
+
+CORE = ("ts", "actor", "action", "subject", "decision", "reason", "trigger", "run_id", "refs")
+
+
+def _ts(value) -> str:
+    """An ISO UTC timestamp with milliseconds, as the jobs' events have, so the day's events sort by time."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        from datetime import datetime, timezone
+
+        return datetime.fromtimestamp(value, timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    text = str(value or "") or utcnow()
+    if len(text) == 20 and text.endswith("Z"):  # 2026-11-22T01:02:03Z
+        return text[:-1] + ".000Z"
+    return text
+
+
+def public_actor(actor: str) -> str:
+    """Who acted, as the log shows it. The owner's email never enters the log, which becomes public: "owner"."""
+    actor = str(actor or "").strip() or "unknown"
+    return "owner" if actor == "owner" or actor.startswith("owner:") else actor
+
+
+def to_event(record: dict) -> Event:
+    """The log event for one record {ts, actor, action, subject, decision, reason, trigger?, run_id?, refs?, ...}.
+    Other scalar fields go into refs. A decision outside the log's fixed set is kept in refs as ``outcome`` and
+    logged as ``done``."""
+    refs = dict(record.get("refs") or {})
+    refs.update({k: v for k, v in sorted(record.items())
+                 if k not in CORE and isinstance(v, SCALARS) and v is not None and v != ""})
+    decision = str(record.get("decision") or "done")
+    if decision not in DECISIONS:
+        refs["outcome"], decision = decision, "done"
+    reason = " ".join(str(record.get("reason") or "").split())[:500] or "no reason given"
+    return Event(public_actor(record.get("actor")), str(record.get("action") or "acted").strip() or "acted",
+                 " ".join(str(record.get("subject") or "").split()) or "the system", decision, reason,
+                 trigger=str(record.get("trigger") or ""), run_id=str(record.get("run_id") or ""), refs=refs,
+                 ts=_ts(record.get("ts")))
+
+
+def chain_text(records) -> str:
+    """The records as one chained run object (JSON lines), oldest first."""
+    events, head = sorted((to_event(r) for r in records), key=lambda e: e.ts), GENESIS
+    lines = []
+    for event in events:
+        event.seal(head)
+        head = event.hash
+        lines.append(event.to_line())
+    return "".join(line + "\n" for line in lines)
+
+
+def object_name(records, label: str = "") -> str:
+    """``runs/<day>/<time>-<actor>-<label or random>.jsonl``, named by the first event, like a job run's object."""
+    import secrets
+
+    first = min(to_event(r).ts for r in records)
+    actor = public_actor(min(records, key=lambda r: _ts(r.get("ts"))).get("actor"))
+    safe = "".join(c if c.isalnum() or c in "-." else "-" for c in f"{actor}-{label or secrets.token_hex(4)}")
+    return f"runs/{first[:10]}/{first.replace(':', '')}-{safe}.jsonl"
+
+
+def write_events(bucket, records, label: str = "") -> str:
+    """Write the records as one new run object in the log bucket (never over an existing one); its name."""
+    records = list(records)
+    if not records:
+        raise ValueError("nothing to record")
+    name = object_name(records, label)
+    bucket.blob(name).upload_from_string(chain_text(records), content_type="application/x-ndjson", if_generation_match=0)
+    return name

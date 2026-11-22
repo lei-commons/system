@@ -67,9 +67,12 @@ function card(pr, reload) {
 }
 
 export async function render(root) {
+  let active = true;
   const load = async () => {
+    if (!active) return;
     try {
       const d = await api(`${ADMIN_API}/approvals`);
+      if (!active) return; // the owner has moved to another page since: don't draw over it
       const waiting = d.pullRequests.filter((p) => !p.approved).length;
       root.replaceChildren(h("div", { class: "wrap" },
         h("h1", { style: { fontSize: "28px", letterSpacing: "-.02em" } }, "Approvals"),
@@ -79,8 +82,9 @@ export async function render(root) {
         h("p", {}, waiting ? `${waiting} waiting for you.` : "Nothing is waiting for you."),
         ...d.pullRequests.map((pr) => card(pr, load))));
     } catch (error) {
-      root.replaceChildren(h("div", { class: "wrap" }, errorBox(error)));
+      if (active) root.replaceChildren(h("div", { class: "wrap" }, errorBox(error)));
     }
   };
   await load();
+  return () => { active = false; };
 }

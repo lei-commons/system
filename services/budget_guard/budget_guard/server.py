@@ -41,8 +41,9 @@ class GcsState:
             raise Conflict() from exc
 
     def record(self, event):
-        name = f"budget-guard/{int(time.time() * 1000)}.json"
-        self._log.blob(name).upload_from_string(json.dumps(event), content_type="application/json", if_generation_match=0)
+        from lc_core.decisions import write_events  # chained with the day's other events (lc_core.decisions)
+
+        write_events(self._log, [event], label="budget-guard")
 
 
 def handle(body, store, log):

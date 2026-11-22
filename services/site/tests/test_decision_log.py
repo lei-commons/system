@@ -90,3 +90,44 @@ def test_results_are_cached(tmp_path):
     now[0] = 61
     reader.days()
     assert bucket.lists > first
+
+
+def test_admin_actions_and_guard_pauses_are_in_the_chain_and_the_owner_shows_without_an_email(tmp_path):
+    from lc_core.decisions import write_events
+
+    bucket = Bucket()
+    logged(bucket, tmp_path, "2026-11-22", "run1", {"event": "already-done", "source": "gb", "publish": "x"})
+    write_events(bucket, [{"ts": "2026-11-22T03:04:05Z", "actor": "owner:o@x.test", "action": "set-budget:1000",
+                           "subject": "monthly budget", "decision": "done", "reason": "lower the cap", "trigger": "site",
+                           "component": "budget"}], label="admin")
+    write_events(bucket, [{"ts": 1795395600.5, "actor": "service:budget-guard", "action": "pause", "subject": "control state",
+                           "decision": "paused", "reason": "spend reached the cap"}], label="budget-guard")
+    reader = DecisionLogReader(bucket, ttl=0)
+    day = reader.day("2026-11-22")
+    assert day["verified"] and [e["actor"] for e in day["events"]] == ["job:ingest-gb", "owner"]
+    budget = day["events"][1]
+    assert budget["action"] == "set-budget:1000" and budget["refs"] == {"component": "budget"} and budget["chained"]
+    assert "o@x.test" not in json.dumps(day)
+    seal = seal_day(bucket, "2026-11-22", str(tmp_path))
+    assert seal["events"] == 2 and reader.day("2026-11-22")["verified"]  # sealed with the jobs' decisions
+    assert reader.day("2026-11-23")["events"][0]["actor"] == "service:budget-guard"  # its own day (UTC)
+
+
+def test_actions_kept_beside_the_chain_before_the_change_still_show_on_their_day(tmp_path):
+    bucket = Bucket()
+    logged(bucket, tmp_path, "2026-11-21", "run1", {"event": "already-done", "source": "gb", "publish": "x"})
+    seal_day(bucket, "2026-11-21", str(tmp_path))
+    bucket.objects["owner-control/2026-11-21T16:45:10Z-a1b2c3.json"] = json.dumps({
+        "ts": "2026-11-21T16:45:10Z", "actor": "owner:o@x.test", "action": "set-budget:1000", "subject": "monthly budget",
+        "trigger": "site", "reason": "test", "decision": "done", "component": "budget"}).encode()
+    bucket.objects["owner-control/2026-11-20T07:39:11Z-d4e5f6.json"] = json.dumps({
+        "ts": "2026-11-20T07:39:11Z", "actor": "owner:o@x.test", "action": "source-approve:ee-rik", "subject": "source ee-rik",
+        "trigger": "site", "reason": "ok", "decision": "done", "component": "ee-rik"}).encode()
+    reader = DecisionLogReader(bucket, ttl=0)
+    assert [d["day"] for d in reader.days()["days"]] == ["2026-11-21", "2026-11-20"]
+    day = reader.day("2026-11-21")
+    assert day["sealed"] and day["verified"] and len(day["events"]) == 2
+    legacy = day["events"][1]
+    assert legacy["chained"] is False and legacy["actor"] == "owner" and legacy["ts"] == "2026-11-21T16:45:10.000Z"
+    assert legacy["refs"] == {"component": "budget"} and "o@x.test" not in json.dumps(day)
+    assert reader.day("2026-11-20")["events"][0]["action"] == "source-approve:ee-rik"

@@ -59,7 +59,8 @@ locals {
       "roles/storage.objectViewer" = ["console", "site", "loader"]
     }
     decision_log = {
-      "roles/storage.objectCreator" = ["ingest", "crawler", "resolver", "maker", "checker", "publisher", "workflow", "console", "budget-guard", "loader", "site"]
+      # The deployer records each merge and deploy (.github/workflows/changes.yml): create-only, like every writer.
+      "roles/storage.objectCreator" = ["ingest", "crawler", "resolver", "maker", "checker", "publisher", "workflow", "console", "budget-guard", "loader", "site", "deployer"]
       "roles/storage.objectViewer"  = ["publisher", "console", "site"]
     }
     ledger_baselines = {

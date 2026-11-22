@@ -56,7 +56,7 @@ Revocation: remove the key from the manifest; every file it signed stops verifyi
    and checks again (this also keeps the files fresh on a day the cycle failed). It writes
    `dedi/check.json` and `dedi-check-ok` / `dedi-check-failed`; a check that still fails exits non-zero,
    so the job fails and its alert emails the owner.
-4. **System page:** the DeDi card at the top links every file, with its records, when its content last
+4. **Data page:** the DeDi card at the top (moved from the System page, 2026-11-22) links every file, with its records, when its content last
    changed and until when it is fresh, the last publication and the last check.
 
 ## Private until the owner says otherwise
