@@ -11,7 +11,9 @@ GITHUB_REPOSITORY and OUTCOME (how the deploy ended: success, failure, cancelled
 
 Recording never stops a deploy: if the log can't be written (for example before the bootstrap rerun lets the
 deployer write it), this warns and exits 0. It prints the object's name only, because the logs are public.
-Standard library plus lc_core from this checkout, and gcloud for the upload.
+Standard library plus lc_core from this checkout, and gcloud for an access token. The upload goes straight to the
+Storage JSON API with ifGenerationMatch=0, which needs storage.objects.create only (the deployer's
+objectCreator); ``gcloud storage cp`` would also read the destination first, which that role doesn't allow.
 """
 
 from __future__ import annotations
@@ -20,7 +22,9 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -105,19 +109,23 @@ def event(kind: str, args: list, env, now=None) -> dict:
     raise SystemExit(f"unknown kind {kind!r}: deploy, merge or terraform")
 
 
-def upload(record: dict, project: str, label: str) -> str:
+def _token() -> str:
+    return subprocess.run(["gcloud", "auth", "print-access-token"], capture_output=True, text=True, timeout=60,
+                          check=True).stdout.strip()
+
+
+def upload(record: dict, project: str, label: str, token=None) -> str:
+    """Create the run object; never overwrite one (ifGenerationMatch=0). Errors carry the HTTP status only."""
     name = object_name([record], label)
-    with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False) as f:
-        f.write(chain_text([record]))
-        path = f.name
+    url = (f"https://storage.googleapis.com/upload/storage/v1/b/{project}-decision-log/o?"
+           + urllib.parse.urlencode({"uploadType": "media", "name": name, "ifGenerationMatch": "0"}))
+    request = urllib.request.Request(url, data=chain_text([record]).encode(), method="POST", headers={
+        "Authorization": f"Bearer {token or _token()}", "Content-Type": "application/x-ndjson"})
     try:
-        out = subprocess.run(["gcloud", "storage", "cp", path, f"gs://{project}-decision-log/{name}",
-                              "--if-generation-match=0", "--content-type=application/x-ndjson", "--quiet"],
-                             capture_output=True, text=True, timeout=120)
-    finally:
-        os.unlink(path)
-    if out.returncode != 0:
-        raise RuntimeError((out.stderr.strip().splitlines() or ["gcloud failed"])[-1][:160])
+        with urllib.request.urlopen(request, timeout=60) as response:
+            response.read()
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"HTTP {exc.code} {exc.reason}") from None
     return name
 
 

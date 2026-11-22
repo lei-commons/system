@@ -85,3 +85,42 @@ def test_the_bootstrap_records_its_terraform_apply_and_the_deployer_may_write_th
     iam = (ROOT / "infra" / "terraform" / "iam.tf").read_text()
     line = next(x for x in iam.splitlines() if '"roles/storage.objectCreator"' in x and '"site"' in x and '"loader"' in x)
     assert '"deployer"' in line
+
+
+def test_the_upload_creates_one_object_and_needs_create_permission_only(monkeypatch):
+    import urllib.error
+    import urllib.parse
+
+    sent = []
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b"{}"
+
+    def urlopen(request, timeout):
+        sent.append(request)
+        return Response()
+    monkeypatch.setattr(rc.urllib.request, "urlopen", urlopen)
+    e = rc.event("deploy", ["site"], {"GITHUB_SHA": HEAD, "GITHUB_RUN_ID": "9", "OUTCOME": "success"}, now="2026-11-22T04:30:00Z")
+    name = rc.upload(e, "p", "9", token="t")
+    url = urllib.parse.urlparse(sent[0].full_url)
+    query = dict(urllib.parse.parse_qsl(url.query))
+    assert url.path == "/upload/storage/v1/b/p-decision-log/o" and sent[0].get_method() == "POST"
+    assert query == {"uploadType": "media", "name": name, "ifGenerationMatch": "0"}  # create, never overwrite
+    assert sent[0].data.decode() == rc.chain_text([e]) and sent[0].get_header("Authorization") == "Bearer t"
+
+    def denied(request, timeout):
+        raise urllib.error.HTTPError(request.full_url, 403, "Forbidden", {}, None)
+    monkeypatch.setattr(rc.urllib.request, "urlopen", denied)
+    try:
+        rc.upload(e, "p", "9", token="t")
+    except RuntimeError as exc:
+        assert str(exc) == "HTTP 403 Forbidden"  # no account names in the public log
+    else:
+        raise AssertionError("a refused upload must raise")
