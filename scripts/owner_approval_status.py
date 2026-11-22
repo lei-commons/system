@@ -5,6 +5,8 @@
 Reads GITHUB_TOKEN, GITHUB_REPOSITORY, PR_NUMBER and PR_SHA. Lists the pull request's changed files and, with
 main's copy of the rules (lc_core.approval_rules):
 - no sensitive path: the status is success at once;
+- only the promotion of sources that passed their trial (lc_core.approval_rules.promotion_only, owner decision
+  2026-11-22): success at once too, naming the promoted sources;
 - a sensitive path: the status is pending, the pull request is assigned to the owner, and one comment lists the
   sensitive files and links to the admin page, where the owner approves it with a fresh authenticator code;
   the site then sets the status to success as the GitHub App (lc_site.approvals).
@@ -13,6 +15,7 @@ An approval the App already gave this exact commit is left as it is. Prints coun
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import sys
@@ -22,7 +25,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "packages" / "lc_core"))
 
-from lc_core.approval_rules import load  # noqa: E402
+from lc_core.approval_rules import PROMOTION_FILES, load, promotion_only  # noqa: E402
 
 API = "https://api.github.com"
 MARKER = "<!-- owner-approval -->"
@@ -61,6 +64,32 @@ def changed_paths(gh, repo: str, number: int) -> list:
     return paths
 
 
+def file_text(gh, repo: str, path: str, ref: str):
+    """A file's text at ``ref``, or None if it isn't there."""
+    import urllib.error
+
+    try:
+        item = gh.call("GET", f"/repos/{repo}/contents/{path}?ref={ref}")
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise
+    if not item or item.get("encoding") != "base64":
+        raise ValueError(f"{path}: the contents API gave no text (too big?)")
+    return base64.b64decode(item["content"]).decode("utf-8")
+
+
+def promoted_sources(gh, repo: str, number: int, sha: str, paths) -> list | None:
+    """The sources this pull request promotes, if that's all it does (compared with its merge base)."""
+    if not set(PROMOTION_FILES) & set(paths):
+        return None
+    pull = gh.call("GET", f"/repos/{repo}/pulls/{number}")
+    merge_base = gh.call("GET", f"/repos/{repo}/compare/{pull['base']['ref']}...{sha}")["merge_base_commit"]["sha"]
+    base = {p: file_text(gh, repo, p, merge_base) for p in PROMOTION_FILES}
+    head = {p: file_text(gh, repo, p, sha) for p in PROMOTION_FILES}
+    return promotion_only(paths, base, head)
+
+
 def already_approved(gh, repo: str, sha: str, rules) -> bool:
     statuses = gh.call("GET", f"/repos/{repo}/commits/{sha}/statuses?per_page=100") or []
     return any(s.get("context") == rules.context and s.get("state") == "success"
@@ -68,13 +97,21 @@ def already_approved(gh, repo: str, sha: str, rules) -> bool:
 
 
 def run(gh, repo: str, number: int, sha: str, rules, admin_url: str, log=print) -> str:
-    """Set the status; return what was decided: not-needed, approved or pending."""
-    sensitive = rules.sensitive(changed_paths(gh, repo, number))
+    """Set the status; return what was decided: not-needed, promotion, approved or pending."""
+    paths = changed_paths(gh, repo, number)
+    sensitive = rules.sensitive(paths)
     if not sensitive:
         gh.call("POST", f"/repos/{repo}/statuses/{sha}", {"state": "success", "context": rules.context,
                                                           "description": "No sensitive paths: no approval needed"})
         log("not-needed: no sensitive paths")
         return "not-needed"
+    promoted = promoted_sources(gh, repo, number, sha, paths)
+    if promoted:
+        gh.call("POST", f"/repos/{repo}/statuses/{sha}", {
+            "state": "success", "context": rules.context,
+            "description": f"Promotes trial sources only ({', '.join(promoted)}): no approval needed"[:140]})
+        log(f"promotion: {len(promoted)} sources promoted from trial, nothing else changed")
+        return "promotion"
     if already_approved(gh, repo, sha, rules):
         log(f"approved: the owner already approved {sha[:7]}")
         return "approved"

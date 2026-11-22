@@ -14,11 +14,24 @@ REPO, SHA = "lei-commons/system", "abc1234def"
 
 
 class FakeGitHub:
-    def __init__(self, files, statuses=(), comments=()):
+    def __init__(self, files, statuses=(), comments=(), contents=None):
         self.files, self.statuses, self.comments, self.calls = files, list(statuses), list(comments), []
+        self.contents = contents or {}  # {(path, ref): text}
 
     def call(self, method, path, body=None):
         self.calls.append((method, path, body))
+        if method == "GET" and path == f"/repos/{REPO}/pulls/7":
+            return {"base": {"ref": "main"}}
+        if method == "GET" and "/compare/" in path:
+            return {"merge_base_commit": {"sha": "base999"}}
+        if method == "GET" and "/contents/" in path:
+            name, ref = path.split("/contents/", 1)[1].split("?ref=")
+            text = self.contents.get((name, ref))
+            if text is None:
+                import urllib.error
+                raise urllib.error.HTTPError(path, 404, "Not Found", {}, None)
+            import base64
+            return {"encoding": "base64", "content": base64.b64encode(text.encode()).decode()}
         if method == "GET" and "/files" in path:
             page = int(path.rsplit("page=", 1)[1])
             return self.files[(page - 1) * 100: page * 100]
@@ -106,3 +119,26 @@ def test_the_private_repositories_call_system_mains_gate():
     rules = load()
     assert rules.sensitive(["private-repos/install.sh", "ledger/sync.yml", ".github/workflows/snapshot.yml"]) == [
         ".github/workflows/snapshot.yml", "ledger/sync.yml", "private-repos/install.sh"]
+
+
+def test_a_promotion_of_trial_sources_passes_without_the_owner():
+    registry = (ROOT / "config" / "sources.yaml").read_text(encoding="utf-8")
+    data = yaml.safe_load(registry)
+    trial = next(s for s in data["sources"] if (s.get("pipeline") or {}).get("stage") == "trial")
+    trial["pipeline"]["stage"] = "production"
+    promoted = yaml.safe_dump(data, allow_unicode=True, sort_keys=False)
+    contents = {("config/sources.yaml", "base999"): registry, ("config/sources.yaml", SHA): promoted}
+    gh = FakeGitHub([{"filename": "config/sources.yaml"}], contents=contents)
+    assert run(gh) == "promotion"
+    (status,) = gh.posted("statuses")
+    assert status["state"] == "success" and status["description"].startswith("Promotes trial sources only")
+    assert trial["id"] in status["description"]
+    assert gh.posted("assignees") == [] and gh.posted("comments") == []
+
+
+def test_a_registry_change_beyond_promotion_still_waits_for_the_owner():
+    registry = (ROOT / "config" / "sources.yaml").read_text(encoding="utf-8")
+    contents = {("config/sources.yaml", "base999"): registry,
+                ("config/sources.yaml", SHA): registry.replace("stage: trial", "stage: production", 1) + "\n# x\n"}
+    gh = FakeGitHub([{"filename": "config/sources.yaml"}, {"filename": "scripts/render_cycle.py"}], contents=contents)
+    assert run(gh) == "pending"
