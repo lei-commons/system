@@ -96,6 +96,14 @@ class Approvals:
         return any(s.get("context") == self.rules.context and s.get("state") == "success"
                    and (s.get("creator") or {}).get("login") == f"{self.rules.app_name}[bot]" for s in statuses)
 
+    def _promotion(self, repo, sha) -> bool:
+        """The owner-approval workflow passed this commit as a promotion of trial sources only (owner decision
+        2026-11-22; lc_core.approval_rules.promotion_only)."""
+        statuses = self.github.call("GET", f"/repos/{repo}/commits/{sha}/statuses?per_page=100") or []
+        return any(s.get("context") == self.rules.context and s.get("state") == "success"
+                   and (s.get("creator") or {}).get("login") == "github-actions[bot]"
+                   and (s.get("description") or "").startswith("Promotes trial sources only") for s in statuses)
+
     def pending(self, fresh=False) -> dict:
         with self._lock:
             if not fresh and self._cache is not None and time.time() - self._cached_at < CACHE_SECONDS:
@@ -108,6 +116,8 @@ class Approvals:
                 if not sensitive:
                     continue
                 sha = pr["head"]["sha"]
+                if self._promotion(r["full_name"], sha):
+                    continue  # promotes trial sources only: the workflow passed it, no approval needed
                 out.append({"repo": r["full_name"], "number": pr["number"], "title": pr["title"],
                             "url": pr["html_url"], "author": (pr.get("user") or {}).get("login"),
                             "draft": bool(pr.get("draft")), "sha": sha, "updatedAt": pr.get("updated_at"),

@@ -18,6 +18,9 @@ github_app:
   app_id: 5655569
   installation_id: 179552998
   key_secret: github-app-lei-commons-guardian
+# One exception, decided in code (lc_core.approval_rules.promotion_only; owner decision 2026-11-22): a pull request
+# that only promotes sources from trial to production (registry stage, the rendered cycle, tests, docs) passes
+# without the owner's approval. docs/source-trials.md.
 sensitive_paths:
   # How the system is built, deployed and given access.
   - ".github/**"
