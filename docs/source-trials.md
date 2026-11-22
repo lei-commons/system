@@ -52,7 +52,8 @@ Owner decisions 2026-11-22:
   - the status words, and how many records have a word `config/status.yaml` doesn't map;
   - legal forms and countries;
   - the shapes of registration numbers;
-  - anomalies: repeated IDs, the same name and postcode twice, names that are too short, too long, have no
+  - anomalies (a name holding an email address or phone number is dropped before it is measured, because it
+    may be a person's): repeated IDs, the same name and postcode twice, names that are too short, too long, have no
     letters or hold a web address, dates in the future, before 1600 or out of order, and anything that looks
     like an email or phone number.
 

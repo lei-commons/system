@@ -9,8 +9,8 @@ import zipfile
 import pytest
 
 from lc_core.directory_id import mint
-from lc_ingest.bulk import (ARGENTINA, AUSTRALIA_ABN, FRANCE_RNA, PROFILES, TAIWAN_TAX, _roc_date, abn_xml, ar_csv,
-                            ar_locate, rna_locate)
+from lc_ingest.bulk import (ARGENTINA, AUSTRALIA_ABN, FRANCE_RNA, IRELAND, PROFILES, TAIWAN_TAX, _roc_date, abn_xml,
+                            ar_csv, rna_locate)
 from lc_ingest.gleif import Skip
 
 
@@ -142,17 +142,56 @@ def test_argentina_keeps_companies_and_drops_natural_persons():
                                  "postalCode": "B1900", "country": "AR"}
 
 
-def test_argentina_takes_the_newest_full_file_not_the_sample():
+AR_RESOURCES = {"result": {"resources": [
+    {"id": "6096331b", "name": "Registro Nacional de Sociedades - Muestreo", "format": "CSV",
+     "last_modified": "2024-12-06T16:14:14", "url": "https://datos.jus.gob.ar/x/muestreo.csv"},
+    {"id": "61987339", "name": "Registro Nacional de Sociedades - Asociaciones sin fines de lucro - 20261118",
+     "format": "CSV", "last_modified": "2026-11-20T11:26:09", "url": "https://datos.jus.gob.ar/x/asociaciones.csv"},
+    {"id": "13a1a66f", "name": "Registro Nacional de Sociedades - 2026", "format": "ZIP",
+     "last_modified": "2026-09-18T11:26:19", "url": "https://datos.jus.gob.ar/x/rns-2026.zip"},
+    {"id": "a0301845", "name": "Registro Nacional de Sociedades - Asociaciones sin fines de lucro - 2026", "format": "ZIP",
+     "last_modified": "2026-11-20T11:24:14", "url": "https://datos.jus.gob.ar/x/asociaciones-2026.zip"},
+    {"id": "cf93b46f", "name": "Registro Nacional de Sociedades - 2025", "format": "ZIP",
+     "last_modified": "2026-03-02T13:20:45", "url": "https://datos.jus.gob.ar/x/rns-2025.zip"},
+    {"id": "6aade8f9", "name": "Registro Nacional de Sociedades - Gráficos estadísticos", "format": "gráfico",
+     "url": "https://public.tableau.com/x"},
+    {"id": "1c5fa113", "name": "Registro Nacional de Sociedades - 2026 - Tercer bimestre", "format": "ZIP",
+     "last_modified": "2026-08-12T09:50:09", "url": "https://datos.jus.gob.ar/x/rns-2026-b3.zip"}]}}
+
+
+def test_argentina_reads_the_newest_yearly_companies_file_and_the_newest_non_profits_file():
+    """The first trial (2026-11-22) read the newest resource, which was the non-profits file: no companies at all."""
     class Gateway:
         def get_json(self, url):
-            return {"result": {"resources": [
-                {"id": "aaaaaaaa1", "name": "Muestreo", "format": "CSV", "last_modified": "2026-11-01T00:00:00",
-                 "url": "https://datos.jus.gob.ar/x/muestreo.csv"},
-                {"id": "bbbbbbbb2", "name": "RNS 2026 semestre 1", "format": "ZIP", "last_modified": "2026-07-01T00:00:00",
-                 "url": "https://datos.jus.gob.ar/x/2026-1.zip"},
-                {"id": "cccccccc3", "name": "RNS 2026 octubre", "format": "CSV", "last_modified": "2026-10-15T00:00:00",
-                 "url": "https://datos.jus.gob.ar/x/2026-10.csv"}]}}
-    assert ar_locate(Gateway()) == ("20261015 cccccccc", "https://datos.jus.gob.ar/x/2026-10.csv")
+            return AR_RESOURCES
+    names = [name for name, _ in ARGENTINA.parts]
+    assert names == ["companies", "non-profits"] and ARGENTINA.locate is None
+    assert ARGENTINA.parts[0][1](Gateway()) == "https://datos.jus.gob.ar/x/rns-2026.zip"
+    assert ARGENTINA.parts[1][1](Gateway()) == "https://datos.jus.gob.ar/x/asociaciones.csv"
+
+
+def test_argentina_keeps_one_row_per_cuit_the_newest_member_first():
+    old = AR_HEADER + "30712345679,ACME VIEJA S.A.,2008-05-12 00:00:00,SOCIEDAD ANONIMA,2026-01-01,,,,,,\n"
+    new = (AR_HEADER + "30712345679,ACME S.A.,2008-05-12 00:00:00,SOCIEDAD ANONIMA,2026-09-01,,,,,,\n"
+           + "30712345679,ACME S.A.,2008-05-12 00:00:00,SOCIEDAD ANONIMA,2026-09-01,,,,,,\n"
+           + "30500000007,OTRA S.R.L.,2001-01-01 00:00:00,SOCIEDAD DE RESPONSABILIDAD LIMITADA,2026-09-01,,,,,,\n")
+    kept, _ = mapped(ARGENTINA, ar_csv(zipped({"rns_202601.csv": old, "rns_202609.csv": new})))
+    assert [(r["registrationNumber"], r["legalName"]) for r in kept] == [("30712345679", "ACME S.A."),
+                                                                          ("30500000007", "OTRA S.R.L.")]
+    plain, _ = mapped(ARGENTINA, ar_csv(io.BytesIO(new.encode())))
+    assert len(plain) == 2
+
+
+def test_trial_profiles_drop_a_name_holding_an_email_or_phone():
+    text = (AR_HEADER + "30712345679,ASOC. AMIGOS TEL 011 4555-1234,2008-05-12 00:00:00,ASOCIACION CIVIL,,,,,,,\n"
+            + "30500000007,CLUB info@club.org.ar,2001-01-01 00:00:00,ASOCIACION CIVIL,,,,,,,\n"
+            + "30600000004,CLUB ATLETICO 1905,2001-01-01 00:00:00,ASOCIACION CIVIL,,,,,,,\n")
+    kept, why = mapped(ARGENTINA, ar_csv(io.BytesIO(text.encode())))
+    assert [r["registrationNumber"] for r in kept] == ["30600000004"]
+    assert why == ["name holds an email address or phone number"] * 2
+    for source in ("us-irs-eo-bmf", "gb-ccew", "au-abr-abn", "fr-rna", "ar-rns", "tw-mof-tax"):
+        assert PROFILES[source].guard_names
+    assert not IRELAND.guard_names  # production profiles are unchanged
 
 
 def test_taiwan_drops_sole_proprietorships_and_partnerships_and_reads_roc_dates():
