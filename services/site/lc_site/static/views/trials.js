@@ -55,9 +55,9 @@ function trialCard(t) {
       h("span", { class: "flag big" }, t.country && t.country !== "*" ? flag(t.country) : "🌐"),
       h("div", {}, h("div", { class: "source-name" }, t.label, h("span", { class: "pill busy", style: { marginLeft: "8px" } }, "trial")),
         h("div", { class: "muted" }, `${t.name || t.id} · job ${t.job} · ${t.licence || "licence unstated"}`))),
-    t.report ? h("p", { class: "muted" }, `Latest report: ${q.publish || "?"} (${q.at || "?"}). Stored: ${fmt(t.storedRecords)} records.`)
+    t.report ? h("p", { class: "muted" }, `Latest report: ${q.publish || "?"} (${q.at || "?"}). Files measured so far: ${fmt(t.measured)}. A trial keeps no records, only this report.`)
       : h("p", { class: "muted" }, t.reportError ? `The report can't be read right now (${t.reportError}).`
-        : "No complete run yet: the job runs once on deploy and then in the cycle's last step."),
+        : "No complete run yet: the job runs once on deploy, then in the cycle's last step whenever there is a new publication or new code to measure."),
     failure ? h("p", { class: "held" }, `Last failure ${failure.at}: ${failure.error}: ${failure.message}`) : null,
     h("div", { class: "kpis" },
       tile(fmt(q.records), "records mapped (latest file)", "t1"),

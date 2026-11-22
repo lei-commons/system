@@ -22,10 +22,11 @@
 # pipeline: present once a source is built and running in the daily cycle. The site's
 #   System page and the status views are drawn from these entries, so adding a source
 #   here (with its job and store) is all they need.
-#   stage: trial or production (owner, 2026-11-22). Every new source starts in trial: its job runs after the
-#   production cycle into its own store and reports its data's quality (lc_ingest.quality, the "quality"
-#   event in status.yml, trial-report.json beside the store), and the snapshot leaves it out. It moves to
-#   production only by a pull request changing this field, approved by the owner on the admin page.
+#   stage: trial or production (owner, 2026-11-22; docs/source-trials.md). Only a new source (or a completely
+#   changed one, as a second pipeline) is on trial: its job, production's own image, only measures its data's
+#   quality and keeps a small report (trials/<source>/, the "quality" event in status.yml, the admin Trials
+#   tab); the snapshot leaves it out. It moves to production once, by a pull request changing this field,
+#   approved by the owner on the admin page, and is never measured again.
 #   job: Cloud Run job; store: prefix in the data bucket; records_as: the id records carry;
 #   label: the name shown everywhere; refresh: how often the source publishes something new;
 #   dataset: the dataset's name in the snapshot's NOTICE; attribution: the credit the licence asks

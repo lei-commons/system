@@ -7,11 +7,12 @@ new source needs only its entry here.
 
 Every pipeline names its stage (owner, 2026-11-22: "verify and test all the data sources, quality of data,
 etc within the test mode before processing them into production database"):
-- trial: the job runs (after the production cycle, never failing it) into its own store and reports the data's
-  quality (lc_ingest.quality), but the snapshot leaves it out, so nothing of it reaches the database, the
-  site, the releases or DeDi;
-- production: the snapshot merges it. A source moves to production only by a pull request that changes its
-  stage, which the owner approves on the admin page (config/** is a sensitive path).
+- trial, for a new source (or a completely changed one, as a second pipeline) only: the job, production's own
+  image, only measures the data's quality (lc_ingest.quality) and keeps nothing but a small report, after the
+  production cycle and never failing it; the snapshot leaves it out;
+- production: the snapshot merges it, and it is never measured again. A source moves to production once, by a
+  pull request that changes its stage, which the owner approves on the admin page (config/** is sensitive).
+See docs/source-trials.md.
 """
 
 from __future__ import annotations

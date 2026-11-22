@@ -23,6 +23,19 @@ resource "google_storage_bucket" "data" {
     }
   }
 
+  # Source trials keep only small quality reports (docs/source-trials.md): gone 60 days after they were
+  # written, so a finished or abandoned trial leaves nothing behind. A live trial rewrites its report each
+  # time it measures a new publication or new code.
+  lifecycle_rule {
+    condition {
+      age            = 60
+      matches_prefix = ["trials/"]
+    }
+    action {
+      type = "Delete"
+    }
+  }
+
   lifecycle_rule {
     condition {
       age            = 7

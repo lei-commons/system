@@ -108,19 +108,20 @@ class SystemView:
 
     def trials(self) -> dict:
         """The Trials page: every source on trial (config/sources.yaml stage) with its latest quality report
-        (trial-report.json beside its store, lc_ingest.quality), its stored records and its job's last run.
-        Trial stores never reach the snapshot; this is where the owner reads them before promoting one."""
+        (trials/<source>/trial-report.json, lc_ingest.quality) and its last failure. A trial keeps no records,
+        so nothing of it can reach the snapshot; this is where the owner reads it before promoting it."""
         r = self._reader
         out = []
         for p in self._sources:
             if p.get("stage") != "trial":
                 continue
-            report, report_error = _try(lambda s=p["store"]: r.bucket_json("data", f"{s}/trial-report.json"))
-            manifest, _ = _try(lambda s=p["store"]: r.bucket_json("data", f"{s}/manifest.json"))
-            health, _ = _try(lambda s=p["store"]: r.bucket_json("data", f"{s}/health.json"))
+            base = f"trials/{p['id']}"
+            report, report_error = _try(lambda b=base: r.bucket_json("data", f"{b}/trial-report.json"))
+            manifest, _ = _try(lambda b=base: r.bucket_json("data", f"{b}/manifest.json"))
+            health, _ = _try(lambda b=base: r.bucket_json("data", f"{b}/health.json"))
             out.append({"id": p["id"], "label": p["label"], "name": p.get("name"), "country": p.get("country"),
                         "job": p["job"], "store": p["store"], "licence": p.get("licence"),
-                        "storedRecords": (manifest or {}).get("records"), "lastKey": (manifest or {}).get("lastKey"),
+                        "measured": len((manifest or {}).get("processed") or []), "lastKey": (manifest or {}).get("lastKey"),
                         "health": health or None, "report": report or None, "reportError": report_error})
         return {"trials": out, "promotion": "docs/source-trials.md"}
 

@@ -77,7 +77,8 @@ def test_irs_reads_all_four_regions_once_a_week():
             return len(body)
 
     store, gw = MemStore(), Gateway()
-    out = run(IRS, gw, store, today=date(2026, 11, 23), gate=lambda: None, allowlist=AllowList.load(), log=lambda r: None)
+    out = run(IRS, gw, store, today=date(2026, 11, 23), gate=lambda: None, allowlist=AllowList.load(), log=lambda r: None,
+              stage="production")  # as it will run once promoted
     assert out == "done" and [u.rsplit("/", 1)[1] for u in gw.fetched] == ["eo1.csv", "eo2.csv", "eo3.csv", "eo4.csv"]
     assert all(u.startswith("https://www.irs.gov/pub/irs-soi/") for u in gw.fetched)
     records = {k: v for s in store.shards.values() for k, v in s.items()}
@@ -138,40 +139,76 @@ class ReportStore(MemStore):
         self.json[name] = data
 
 
-def irs_gateway(body):
+def irs_gateway(body, fetched=None):
     class Gateway:
         def download(self, target, file):
+            if fetched is not None:
+                fetched.append(target)
             text = (IRS_HEADER + (body if target.endswith("eo1.csv") else "")).encode()
             file.write(text)
             return len(text)
     return Gateway()
 
 
-def test_a_trial_run_reports_its_quality_with_counts_only_in_the_log():
+def trial(store, body, events, code="abc123", fetched=None, today=date(2026, 11, 23)):
+    import os
+    os.environ["LC_CODE_VERSION"] = code
+    try:
+        return run(IRS, irs_gateway(body, fetched), store, today=today, gate=lambda: None, allowlist=AllowList.load(),
+                   log=events.append, stage="trial")
+    finally:
+        del os.environ["LC_CODE_VERSION"]
+
+
+def test_a_trial_only_measures_and_logs_counts_only():
     body = IRS_ROW + IRS_ABROAD + IRS_ROW.replace("010018922", "010018923") + IRS_ROW.replace("010018922", "12")
     store, events = ReportStore(), []
-    out = run(IRS, irs_gateway(body), store, today=date(2026, 11, 23), gate=lambda: None, allowlist=AllowList.load(),
-              log=events.append, stage="trial")
-    assert out == "done"
+    assert trial(store, body, events) == "done"
     quality = [e for e in events if e["event"] == "quality"]
     assert len(quality) == 4  # one per regional file; the three empty ones measure nothing
     q = quality[0]["quality"]
     assert q["records"] == 3 and q["skipped"] == {"no number or name": 1}
     assert q["fill"]["legalName"] == 100.0 and q["addressFill"]["country"] == 66.7 and q["statusUnmapped"] == 0
     assert q["anomalies"] == {"same name, country and postcode as an earlier record": 1}  # the repeated post
-    assert q["numberShapes"] == [["999999999", 3]] or q["numberShapes"] == [("999999999", 3)]
-    assert "AMERICAN LEGION" not in repr(quality)  # no names in the public log
-    report = store.json["trial-report.json"]
-    assert report["source"] == "us-irs-eo-bmf" and len(report["sample"]) <= 25
-    region_1 = store.json["trial-reports/2026-W48_region-1.json"]  # one report per file; trial-report.json is the latest
+    assert [tuple(x) for x in q["numberShapes"]] == [("999999999", 3)]
+    assert "AMERICAN LEGION" not in repr(events)  # no names in the public log
+    # Nothing but the reports is kept: no records, no changes, no copy of the file.
+    assert store.shards == {} and store.changes == {}
+    region_1 = store.json["trial-reports/2026-W48_region-1_abc123.json"]  # one report per file and code
     assert region_1["records"] == 3 and region_1["sample"][0]["legalName"] == "AMERICAN LEGION POST"  # private sample
+    assert store.manifest["records"] == 0 and store.manifest["processed"][0] == "2026-W48 region-1 @abc123"
+    assert [e for e in events if e["event"] == "measured"][0]["records"] == 3
 
 
-def test_a_production_run_measures_nothing():
+def test_a_trial_measures_again_only_for_new_code_or_a_new_publication():
+    store, fetched = ReportStore(), []
+    trial(store, IRS_ROW, [], fetched=fetched)
+    assert len(fetched) == 4
+    again = []
+    assert trial(store, IRS_ROW, again, fetched=fetched) == "already-done" and len(fetched) == 4  # nothing fetched
+    assert trial(store, IRS_ROW, [], code="def456", fetched=fetched) == "done" and len(fetched) == 8  # new code
+    assert trial(store, IRS_ROW, [], code="def456", fetched=fetched, today=date(2026, 11, 30)) == "done"  # next week
+    assert len(fetched) == 12
+
+
+def test_production_runs_the_same_code_without_measuring():
     store, events = ReportStore(), []
     run(IRS, irs_gateway(IRS_ROW), store, today=date(2026, 11, 23), gate=lambda: None, allowlist=AllowList.load(),
         log=events.append, stage="production")
-    assert not [e for e in events if e["event"] == "quality"] and store.json == {}
+    assert not [e for e in events if e["event"] in ("quality", "measured")] and store.json == {}
+    assert store.shards and store.manifest["processed"][0] == "2026-W48 region-1"  # no code in production's keys
+
+
+def test_trials_are_deployed_by_production_s_own_workflow_with_its_commit():
+    import yaml
+    from pathlib import Path
+
+    wf = (Path(__file__).resolve().parents[3] / ".github" / "workflows" / "deploy-ingest-bulk.yml").read_text()
+    assert "LC_CODE_VERSION=$GITHUB_SHA" in wf and '"$IMAGE:$GITHUB_SHA"' in wf
+    jobs_script = wf.split("python3 - <<'PY'", 1)[1].split("PY", 1)[0]
+    assert "stage" not in jobs_script  # every ingest-bulk pipeline, trial or production, gets the same image
+    tf = (Path(__file__).resolve().parents[3] / "infra" / "terraform" / "storage.tf").read_text()
+    assert 'matches_prefix = ["trials/"]' in tf and "age            = 60" in tf
 
 
 def test_quality_flags_implausible_data():

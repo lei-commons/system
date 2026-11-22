@@ -145,6 +145,8 @@ def test_trials_run_last_once_each_and_never_fail_the_cycle():
     caught = trial["steps"][0]["trial_run"]["except"]["steps"][0]["trial_log_failure"]["args"]["json"]
     assert caught["event"] == "trial-failed" and "failed" not in repr(trial["steps"][0]["trial_run"]["except"]).replace("trial-failed", "")
     assert "trials" not in [next(iter(s)) for s in rc.render(registry, CONFIG, selftest=True)["main"]["steps"]]
+    # With no source on trial, there is no trials step at all.
+    assert "trials" not in [next(iter(s)) for s in rc.render(REGISTRY, CONFIG)["main"]["steps"]]
 
 
 def test_terraform_deploys_the_rendered_file_and_takes_the_schedule_from_the_config():

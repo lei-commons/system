@@ -10,9 +10,10 @@ again after ``retry_wait_minutes``, up to ``retries`` rounds; then the snapshot 
 run (these two still stop the cycle if they fail); finally, if any source never succeeded, the cycle
 ends as failed, naming them, so the owner is alerted and the day isn't counted as clean.
 
-Sources on trial (config/sources.yaml pipeline stage, owner 2026-11-22) run last, after the snapshot, the load
-and the DeDi check, once each: a failing trial is logged (trial-failed) and never fails the cycle or delays
-the production data, and the snapshot leaves trial stores out.
+Sources on trial (config/sources.yaml pipeline stage, owner 2026-11-22; docs/source-trials.md) run last,
+after the snapshot, the load and the DeDi check, once each, and only measure (a publication already measured
+with the deployed code is a seconds-long check): a failing trial is logged (trial-failed) and never fails the
+cycle or delays the production data. With no source on trial there is no trials step.
 """
 
 from __future__ import annotations

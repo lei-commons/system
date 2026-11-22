@@ -62,7 +62,7 @@ jobs:
             gcloud run jobs deploy "$job" --region "$REGION" --image "$IMAGE:$GITHUB_SHA" \
               --service-account "lc-ingest@$PROJECT.iam.gserviceaccount.com" \
               --network lc-jobs --subnet "lc-jobs-$REGION" --vpc-egress all-traffic \
-              --set-env-vars "LC_SOURCE=$source,LC_GATEWAY_URL=$GATEWAY,LC_DATA_BUCKET=$PROJECT-data,LC_CONTROL_STATE_URI=gs://$PROJECT-control/state.json" \
+              --set-env-vars "LC_SOURCE=$source,LC_GATEWAY_URL=$GATEWAY,LC_DATA_BUCKET=$PROJECT-data,LC_CONTROL_STATE_URI=gs://$PROJECT-control/state.json,LC_CODE_VERSION=$GITHUB_SHA" \
               --max-retries 0 --task-timeout 10800 --memory 8Gi --cpu 2
           done < jobs.txt
       # Only a job this deploy created runs now (its first run); the daily cycle runs the others, one at a time.

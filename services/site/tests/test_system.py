@@ -328,11 +328,11 @@ def test_a_later_successful_run_with_nothing_to_record_clears_a_failure():
 def test_the_trials_page_shows_only_sources_on_trial_with_their_reports():
     class TrialReader(Reader):
         def bucket_json(self, bucket, name):
-            if name == "us-irs/trial-report.json":
+            if name == "trials/us-irs-eo-bmf/trial-report.json":
                 return {"source": "us-irs-eo-bmf", "records": 3, "statusUnmapped": 0, "sample": [{"legalName": "A"}]}
-            if name == "us-irs/manifest.json":
-                return {"records": 3, "lastKey": "2026-W48 region-1"}
-            if name == "gb-ccew/trial-report.json":
+            if name == "trials/us-irs-eo-bmf/manifest.json":
+                return {"records": 0, "processed": ["2026-W48 region-1 @abc"], "lastKey": "2026-W48 region-1 @abc"}
+            if name == "trials/gb-ccew/trial-report.json":
                 raise PermissionError("no")
             return super().bucket_json(bucket, name)
 
@@ -341,7 +341,7 @@ def test_the_trials_page_shows_only_sources_on_trial_with_their_reports():
                {"id": "gb-ccew", "label": "CCEW", "job": "ingest-gb-ccew", "store": "gb-ccew", "stage": "trial"}]
     trials = SystemView(TrialReader(), sources=sources).trials()["trials"]
     assert [t["id"] for t in trials] == ["us-irs-eo-bmf", "gb-ccew"]  # production sources aren't listed
-    assert trials[0]["report"]["records"] == 3 and trials[0]["storedRecords"] == 3 and trials[0]["lastKey"] == "2026-W48 region-1"
+    assert trials[0]["report"]["records"] == 3 and trials[0]["measured"] == 1 and trials[0]["lastKey"] == "2026-W48 region-1 @abc"
     assert trials[1]["report"] is None and trials[1]["reportError"] == "PermissionError"
 
 

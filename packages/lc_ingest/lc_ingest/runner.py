@@ -87,9 +87,11 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
     ``guard_settings`` (lc_core.guard.GuardSettings) defaults to config/sources.yaml's
     ``volume_guard``. It is read before anything is fetched, so a bad setting stops the run.
 
-    ``quality``, for a source on trial: a function returning a fresh lc_ingest.quality.Quality. Every mapped
-    record of the attempt that succeeds is measured; a done run logs the ``quality`` event (counts only) and
-    writes ``trial-report.json`` (with a sample) beside the store.
+    ``quality``, for a source on trial (docs/source-trials.md): a function returning a fresh
+    lc_ingest.quality.Quality. The run then only measures: every mapped record of the attempt that succeeds is
+    measured, the ``quality`` event is logged (counts only) and ``trial-report.json`` (with a sample) written to
+    ``store``; nothing else is kept (no records, no changes, no copy of the file), and ``store``'s manifest
+    notes the key as measured. The caller gives a trial its own small store and a key that names the code.
     """
     try:
         gate()
@@ -128,8 +130,9 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
                 with open(download, "rb") as f:
                     for record in map_records(read(f), counts, allowlist, mapper=mapper, kind=kind):
                         if measure is not None:
-                            measure.add(record)
-                        partitions.add(record)
+                            measure.add(record)  # a trial measures and keeps nothing
+                        else:
+                            partitions.add(record)
                 shards = partitions.close()
                 break
             except Denied as exc:
@@ -146,6 +149,9 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
                 sleep(backoff * attempt)
         if attempt > 1:
             log({"event": "download-recovered", "source": source, "publish": key, "attempt": attempt})
+        if measure is not None:  # a trial: the report is all it keeps
+            os.remove(download)
+            return _measured(store, manifest, key, source, measure, counts, size, log)
         store.keep_source(filename, download)  # only a file that checked and read cleanly is kept
         os.remove(download)  # the disk is memory on Cloud Run
 
@@ -229,12 +235,17 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
     log({"event": "done", "source": source, "publish": key, "bytes": size, "changes": changes_written,
          "records_changed": changed_existing + new_records, "existing_changed": changed_existing,
          "new_records": new_records, "total": manifest["records"], **dict(counts)})
-    if measure is not None:
-        log({"event": "quality", "source": source, "publish": key, "quality": measure.summary(counts)})
-        try:
-            report = measure.report(counts, publish=key)
-            store.write_json(f"trial-reports/{key.replace(' ', '_').replace('/', '-')}.json", report)  # one per file
-            store.write_json("trial-report.json", report)  # the latest
-        except Exception as exc:  # noqa: BLE001 - the report must never fail a run that stored its data
-            log({"event": "trial-report-unwritten", "error": type(exc).__name__})
+    return "done"
+
+
+def _measured(store, manifest, key, source, measure, counts, size, log) -> str:
+    """A trial's end: the quality event (counts only), the report with its sample, and the key noted as measured."""
+    log({"event": "quality", "source": source, "publish": key, "bytes": size, "quality": measure.summary(counts)})
+    report = measure.report(counts, publish=key)
+    store.write_json(f"trial-reports/{key.replace(' ', '_').replace('/', '-').replace('@', '')}.json", report)  # one per file
+    store.write_json("trial-report.json", report)  # the latest
+    manifest["processed"] = (manifest["processed"] + [key])[-KEEP_PROCESSED:]
+    manifest["lastKey"] = key
+    store.write_manifest(manifest)
+    log({"event": "measured", "source": source, "publish": key, "records": measure.records})
     return "done"
