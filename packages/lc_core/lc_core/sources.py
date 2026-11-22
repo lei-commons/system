@@ -4,6 +4,14 @@ Everything that lists sources reads it: the site's pages and its source names, t
 snapshot (which sources, in what merge order, with what licence and attribution),
 the daily cycle's steps (Terraform), the status workflow and the owner's run-a-job actions. So a
 new source needs only its entry here.
+
+Every pipeline names its stage (owner, 2026-11-22: "verify and test all the data sources, quality of data,
+etc within the test mode before processing them into production database"):
+- trial: the job runs (after the production cycle, never failing it) into its own store and reports the data's
+  quality (lc_ingest.quality), but the snapshot leaves it out, so nothing of it reaches the database, the
+  site, the releases or DeDi;
+- production: the snapshot merges it. A source moves to production only by a pull request that changes its
+  stage, which the owner approves on the admin page (config/** is a sensitive path).
 """
 
 from __future__ import annotations
@@ -16,6 +24,7 @@ import yaml
 DEFAULT_PATH = Path(__file__).resolve().parents[3] / "config" / "sources.yaml"
 REQUIRED = ("job", "store", "records_as", "label", "refresh", "dataset", "attribution")
 ROLES = ("register", "lei")  # registers' values win in a merge; LEI sources (GLEIF) come last
+STAGES = ("trial", "production")
 
 
 def _path(path):
@@ -37,6 +46,8 @@ def pipelines(path=None) -> list:
         missing = [k for k in REQUIRED if k != "attribution" and not pipeline.get(k)]
         if missing or "attribution" not in pipeline:
             raise ValueError(f"source {source['id']}: pipeline is missing {missing or ['attribution']}")
+        if pipeline.get("stage") not in STAGES:
+            raise ValueError(f"source {source['id']}: pipeline stage must be trial or production (new sources start in trial)")
         role = pipeline.get("role", "register")
         if role not in ROLES:
             raise ValueError(f"source {source['id']}: role must be one of {ROLES}")
@@ -50,14 +61,26 @@ def pipelines(path=None) -> list:
         out.append({"id": source["id"], "name": source.get("name"), "country": source.get("country"),
                     "licence": source.get("licence"), "cadence": source.get("cadence"), "status": source.get("status"),
                     "url": source.get("url"), "terms_url": source.get("terms_url"), "record_url": record_url,
-                    **{k: pipeline[k] for k in REQUIRED}, "relationships": pipeline.get("relationships"), "role": role})
+                    **{k: pipeline[k] for k in REQUIRED}, "relationships": pipeline.get("relationships"), "role": role,
+                    "stage": pipeline["stage"]})
     return out
 
 
 def merge_order(path=None) -> list:
-    """The built sources in merge order: registers (file order), then LEI sources."""
-    built = pipelines(path)
+    """The production sources in merge order: registers (file order), then LEI sources. Trial sources never
+    reach the snapshot."""
+    built = [p for p in pipelines(path) if p["stage"] == "production"]
     return [p for p in built if p["role"] == "register"] + [p for p in built if p["role"] == "lei"]
+
+
+def trials(path=None) -> list:
+    """The sources on trial (file order): built and run, kept out of the snapshot until promoted."""
+    return [p for p in pipelines(path) if p["stage"] == "trial"]
+
+
+def stage(source_id: str, path=None) -> str | None:
+    """A built source's stage (trial or production), or None if it isn't built."""
+    return next((p["stage"] for p in pipelines(path) if p["id"] == source_id), None)
 
 
 def jobs(path=None) -> list:

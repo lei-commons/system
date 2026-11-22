@@ -3,7 +3,7 @@
 import pytest
 import yaml
 
-from lc_core.sources import DEFAULT_PATH, daily_diffs, jobs, merge_order, names, pipelines
+from lc_core.sources import DEFAULT_PATH, daily_diffs, jobs, merge_order, names, pipelines, stage, trials
 
 
 def write(tmp_path, sources):
@@ -13,7 +13,7 @@ def write(tmp_path, sources):
 
 
 def entry(sid, job, store, records_as, role=None, **extra):
-    pipeline = {"job": job, "store": store, "records_as": records_as, "label": sid.upper(), "refresh": "daily",
+    pipeline = {"stage": "production", "job": job, "store": store, "records_as": records_as, "label": sid.upper(), "refresh": "daily",
                 "dataset": f"{sid} data", "attribution": ""}
     if role:
         pipeline["role"] = role
@@ -44,6 +44,8 @@ def test_registers_merge_before_lei_sources_whatever_the_file_order(tmp_path):
                                "dataset": "d"}}], "attribution"),
     ([{"id": "a", "pipeline": {"job": "ingest-a", "store": "a", "records_as": "a", "label": "A", "refresh": "x",
                                "attribution": ""}}], "dataset"),
+    ([entry("a", "ingest-a", "a", "a", stage=None)], "stage must be trial or production"),
+    ([entry("a", "ingest-a", "a", "a", stage="live")], "stage must be trial or production"),
 ])
 def test_bad_registries_are_refused(tmp_path, bad, why):
     with pytest.raises(ValueError, match=why):
@@ -77,3 +79,17 @@ def test_bad_daily_diffs_are_refused(tmp_path, over, why):
     path = write(tmp_path, [entry("a", "ingest-a", "a", "a", daily_diffs={**DIFFS, **over})])
     with pytest.raises(ValueError, match=why):
         daily_diffs("a", path)
+
+
+def test_a_source_on_trial_runs_but_never_reaches_the_snapshot(tmp_path):
+    path = write(tmp_path, [entry("a", "ingest-a", "a", "a"), entry("t", "ingest-t", "t", "t", stage="trial"),
+                            entry("gleif", "ingest-gleif", "gleif", "gleif", role="lei")])
+    assert [p["records_as"] for p in merge_order(path)] == ["a", "gleif"]  # the snapshot's sources
+    assert [p["id"] for p in trials(path)] == ["t"] and "ingest-t" in jobs(path)
+    assert stage("t", path) == "trial" and stage("a", path) == "production" and stage("nope", path) is None
+
+
+def test_the_real_registry_keeps_new_sources_on_trial():
+    on_trial = {p["id"] for p in trials()}
+    assert {"us-irs-eo-bmf", "gb-ccew"} <= on_trial
+    assert not on_trial & {p["id"] for p in merge_order()}

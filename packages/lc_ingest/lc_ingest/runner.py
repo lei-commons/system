@@ -65,7 +65,8 @@ class _Partitions:
 
 def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: str, allowlist: AllowList, log,
                kind: str = "entity", seen: bool = False, prepare=None, fetch=None, attempts: int = DOWNLOAD_ATTEMPTS,
-               check_as: str = None, sleep=time.sleep, backoff: float = 30.0, guard_settings=None) -> str:
+               check_as: str = None, sleep=time.sleep, backoff: float = 30.0, guard_settings=None,
+               quality=None) -> str:
     """Return the outcome: halted, denied, already-done, held or done.
 
     ``find(gateway, manifest)`` returns (key, url, filename). ``key`` identifies
@@ -85,6 +86,10 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
 
     ``guard_settings`` (lc_core.guard.GuardSettings) defaults to config/sources.yaml's
     ``volume_guard``. It is read before anything is fetched, so a bad setting stops the run.
+
+    ``quality``, for a source on trial: a function returning a fresh lc_ingest.quality.Quality. Every mapped
+    record of the attempt that succeeds is measured; a done run logs the ``quality`` event (counts only) and
+    writes ``trial-report.json`` (with a sample) beside the store.
     """
     try:
         gate()
@@ -113,6 +118,7 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
             # Download, check and read are one step: a file cut short, an error page or a corrupt archive
             # is fetched again, every time logged, and nothing from it is kept (lc_ingest.filecheck).
             counts.clear()
+            measure = quality() if quality else None
             partitions = _Partitions(os.path.join(work, f"in-{attempt}"))
             os.makedirs(os.path.join(work, f"in-{attempt}"), exist_ok=True)
             try:
@@ -121,6 +127,8 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
                 filecheck.check(download, check_as or filecheck.kind_for(filename))
                 with open(download, "rb") as f:
                     for record in map_records(read(f), counts, allowlist, mapper=mapper, kind=kind):
+                        if measure is not None:
+                            measure.add(record)
                         partitions.add(record)
                 shards = partitions.close()
                 break
@@ -221,4 +229,12 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
     log({"event": "done", "source": source, "publish": key, "bytes": size, "changes": changes_written,
          "records_changed": changed_existing + new_records, "existing_changed": changed_existing,
          "new_records": new_records, "total": manifest["records"], **dict(counts)})
+    if measure is not None:
+        log({"event": "quality", "source": source, "publish": key, "quality": measure.summary(counts)})
+        try:
+            report = measure.report(counts, publish=key)
+            store.write_json(f"trial-reports/{key.replace(' ', '_').replace('/', '-')}.json", report)  # one per file
+            store.write_json("trial-report.json", report)  # the latest
+        except Exception as exc:  # noqa: BLE001 - the report must never fail a run that stored its data
+            log({"event": "trial-report-unwritten", "error": type(exc).__name__})
     return "done"

@@ -127,3 +127,66 @@ def test_the_new_profiles_are_registered_and_estonia_waits():
     for source in ("us-irs-eo-bmf", "gb-ccew"):
         assert source in PROFILES and built[source]["job"] == PROFILES[source].job
     assert "ee-rik" not in PROFILES and "ee-rik" not in built  # its terms must be accepted: the owner decides
+
+
+class ReportStore(MemStore):
+    def __init__(self):
+        super().__init__()
+        self.json = {}
+
+    def write_json(self, name, data):
+        self.json[name] = data
+
+
+def irs_gateway(body):
+    class Gateway:
+        def download(self, target, file):
+            text = (IRS_HEADER + (body if target.endswith("eo1.csv") else "")).encode()
+            file.write(text)
+            return len(text)
+    return Gateway()
+
+
+def test_a_trial_run_reports_its_quality_with_counts_only_in_the_log():
+    body = IRS_ROW + IRS_ABROAD + IRS_ROW.replace("010018922", "010018923") + IRS_ROW.replace("010018922", "12")
+    store, events = ReportStore(), []
+    out = run(IRS, irs_gateway(body), store, today=date(2026, 11, 23), gate=lambda: None, allowlist=AllowList.load(),
+              log=events.append, stage="trial")
+    assert out == "done"
+    quality = [e for e in events if e["event"] == "quality"]
+    assert len(quality) == 4  # one per regional file; the three empty ones measure nothing
+    q = quality[0]["quality"]
+    assert q["records"] == 3 and q["skipped"] == {"no number or name": 1}
+    assert q["fill"]["legalName"] == 100.0 and q["addressFill"]["country"] == 66.7 and q["statusUnmapped"] == 0
+    assert q["anomalies"] == {"same name, country and postcode as an earlier record": 1}  # the repeated post
+    assert q["numberShapes"] == [["999999999", 3]] or q["numberShapes"] == [("999999999", 3)]
+    assert "AMERICAN LEGION" not in repr(quality)  # no names in the public log
+    report = store.json["trial-report.json"]
+    assert report["source"] == "us-irs-eo-bmf" and len(report["sample"]) <= 25
+    region_1 = store.json["trial-reports/2026-W48_region-1.json"]  # one report per file; trial-report.json is the latest
+    assert region_1["records"] == 3 and region_1["sample"][0]["legalName"] == "AMERICAN LEGION POST"  # private sample
+
+
+def test_a_production_run_measures_nothing():
+    store, events = ReportStore(), []
+    run(IRS, irs_gateway(IRS_ROW), store, today=date(2026, 11, 23), gate=lambda: None, allowlist=AllowList.load(),
+        log=events.append, stage="production")
+    assert not [e for e in events if e["event"] == "quality"] and store.json == {}
+
+
+def test_quality_flags_implausible_data():
+    from lc_ingest.quality import Quality
+
+    q = Quality("x", today=date(2026, 11, 22))
+    base = {"directoryId": "LE1", "legalName": "GOOD CO", "registrationNumber": "123", "legalAddress": {"country": "US"}}
+    for record in (base, {**base, "directoryId": "LE1"}, {**base, "directoryId": "LE2", "legalName": "1234"},
+                   {**base, "directoryId": "LE3", "legalName": "X", "incorporationDate": "2030-01-01"},
+                   {**base, "directoryId": "LE4", "legalName": "OLD", "incorporationDate": "1999-01-01",
+                    "dissolutionDate": "1990-01-01"},
+                   {**base, "directoryId": "LE5", "legalName": "CALL CO", "otherNames": ["ring +44 20 7946 0000"]},
+                   {**base, "directoryId": "LE6", "legalName": "MAIL CO", "website": "info@mail.example.com"}):
+        q.add(record)
+    a = q.summary()["anomalies"]
+    assert a["directory ID repeated in the file"] == 1 and a["name without letters"] == 1
+    assert a["name shorter than 2 characters"] == 1 and a["incorporationDate in the future"] == 1
+    assert a["dissolved before incorporated"] == 1 and a["contact-like value (email or phone)"] == 2

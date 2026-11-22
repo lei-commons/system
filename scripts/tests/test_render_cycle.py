@@ -12,7 +12,8 @@ spec = importlib.util.spec_from_file_location("render_cycle", ROOT / "scripts" /
 rc = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(rc)
 
-REGISTRY = {"sources": [{"id": "a", "pipeline": {"job": "ingest-aa"}}, {"id": "b"}, {"id": "c", "pipeline": {"job": "ingest-cc"}}]}
+REGISTRY = {"sources": [{"id": "a", "pipeline": {"job": "ingest-aa", "stage": "production"}}, {"id": "b"},
+                        {"id": "c", "pipeline": {"job": "ingest-cc", "stage": "production"}}]}
 CONFIG = {"schedule_utc": "02:00", "sources": {"retry_wait_minutes": 10, "retries": 5, "browser_fallback_after_failures": 3},
           "gate": {"clean_days": 4}, "watchdogs": {"dedi_check_utc": "14:17"}, "timeouts_minutes": {"default": 120}}
 
@@ -113,18 +114,37 @@ def test_bad_settings_are_refused(change, message):
 
 def test_a_duplicate_or_odd_job_name_is_refused():
     with pytest.raises(rc.ConfigError):
-        rc.render({"sources": [{"pipeline": {"job": "ingest-aa"}}, {"pipeline": {"job": "ingest-aa"}}]}, CONFIG)
+        rc.render({"sources": [{"pipeline": {"job": "ingest-aa", "stage": "production"}},
+                               {"pipeline": {"job": "ingest-aa", "stage": "trial"}}]}, CONFIG)
     with pytest.raises(rc.ConfigError):
-        rc.render({"sources": [{"pipeline": {"job": "ingest-a; rm"}}]}, CONFIG)
+        rc.render({"sources": [{"pipeline": {"job": "ingest-a; rm", "stage": "production"}}]}, CONFIG)
+    with pytest.raises(rc.ConfigError, match="stage"):
+        rc.render({"sources": [{"pipeline": {"job": "ingest-aa"}}]}, CONFIG)
 
 
 def test_the_committed_cycle_matches_the_registry_and_config():
     assert rc.main(["--check"]) == 0
     doc = yaml.safe_load((ROOT / "infra" / "workflows" / "daily-cycle.yaml").read_text())
     registry = yaml.safe_load((ROOT / "config" / "sources.yaml").read_text())
-    jobs = [s["pipeline"]["job"] for s in registry["sources"] if (s.get("pipeline") or {}).get("job")]
+    built = [s["pipeline"] for s in registry["sources"] if (s.get("pipeline") or {}).get("job")]
     init = {k: v for a in steps(doc)["init"]["assign"] for k, v in a.items()}
-    assert init["sources"] == jobs
+    assert init["sources"] == [p["job"] for p in built if p["stage"] == "production"]
+    trials = [p["job"] for p in built if p["stage"] == "trial"]
+    assert (steps(doc)["trials"]["for"]["in"] if trials else []) == trials
+
+
+def test_trials_run_last_once_each_and_never_fail_the_cycle():
+    registry = {"sources": [*REGISTRY["sources"], {"id": "t", "pipeline": {"job": "ingest-tt", "stage": "trial"}}]}
+    doc = rc.render(registry, CONFIG)
+    names = [next(iter(step)) for step in doc["main"]["steps"]]
+    init = {k: v for a in steps(doc)["init"]["assign"] for k, v in a.items()}
+    assert "ingest-tt" not in init["sources"]  # never in the production rounds, retries or the failed list
+    assert names.index("trials") > names.index("load_db") and names[-2:] == ["report", "done"]
+    trial = steps(doc)["trials"]["for"]
+    assert trial["in"] == ["ingest-tt"]
+    caught = trial["steps"][0]["trial_run"]["except"]["steps"][0]["trial_log_failure"]["args"]["json"]
+    assert caught["event"] == "trial-failed" and "failed" not in repr(trial["steps"][0]["trial_run"]["except"]).replace("trial-failed", "")
+    assert "trials" not in [next(iter(s)) for s in rc.render(registry, CONFIG, selftest=True)["main"]["steps"]]
 
 
 def test_terraform_deploys_the_rendered_file_and_takes_the_schedule_from_the_config():

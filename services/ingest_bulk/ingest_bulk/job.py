@@ -56,15 +56,30 @@ def find_for(profile: Profile, today: date, part=None):
     return find
 
 
-def run(profile: Profile, gateway, store, today=None, gate=None, allowlist=None, log=log) -> str:
-    """Process the register's file, or each of its files in turn. The outcome of the first that isn't done stops the rest."""
+def quality_for(profile: Profile, stage: str, today: date):
+    """For a source on trial: a fresh quality measure per attempt (lc_ingest.quality). Production: none."""
+    if stage != "trial":
+        return None
+    from lc_core.status import load as load_statuses
+    from lc_ingest.quality import Quality
+
+    statuses = load_statuses()
+    return lambda: Quality(profile.source, statuses=statuses, today=today)
+
+
+def run(profile: Profile, gateway, store, today=None, gate=None, allowlist=None, log=log, stage=None) -> str:
+    """Process the register's file, or each of its files in turn. The outcome of the first that isn't done stops the rest.
+    A source on trial (config/sources.yaml) also measures its data's quality."""
+    from lc_core.sources import stage as stage_of
+
     today = today or date.today()
     allowlist = allowlist or AllowList.load()
+    quality = quality_for(profile, stage or stage_of(profile.source), today)
     outcome = "already-done"
     for part in profile.parts or (None,):
         outcome = run_ingest(gateway=gateway, store=store, gate=gate or gate_for(profile), find=find_for(profile, today, part),
                              read=profile.read, mapper=profile.record, source=profile.source,
-                             maker=f"ingestion@{profile.store}", allowlist=allowlist, log=log)
+                             maker=f"ingestion@{profile.store}", allowlist=allowlist, log=log, quality=quality)
         if outcome not in ("done", "already-done"):
             break
     return outcome

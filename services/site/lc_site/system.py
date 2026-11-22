@@ -208,7 +208,7 @@ class SystemView:
                 stores[src["relationships"]] = relationships
             row = job_rows.get(src["job"]) or {}
             latest = row.get("latestCreatedExecution") or {}
-            sources.append({k: src.get(k) for k in ("id", "name", "country", "licence", "cadence", "label", "refresh",
+            sources.append({k: src.get(k) for k in ("id", "name", "country", "licence", "cadence", "label", "refresh", "stage",
                                                      "job", "store", "records_as")}
                            | {"records": entities["records"], "last": entities["last"], "error": entities["error"],
                               "relationships": (relationships or {}).get("records"),

@@ -22,6 +22,10 @@
 # pipeline: present once a source is built and running in the daily cycle. The site's
 #   System page and the status views are drawn from these entries, so adding a source
 #   here (with its job and store) is all they need.
+#   stage: trial or production (owner, 2026-11-22). Every new source starts in trial: its job runs after the
+#   production cycle into its own store and reports its data's quality (lc_ingest.quality, the "quality"
+#   event in status.yml, trial-report.json beside the store), and the snapshot leaves it out. It moves to
+#   production only by a pull request changing this field, approved by the owner on the admin page.
 #   job: Cloud Run job; store: prefix in the data bucket; records_as: the id records carry;
 #   label: the name shown everywhere; refresh: how often the source publishes something new;
 #   dataset: the dataset's name in the snapshot's NOTICE; attribution: the credit the licence asks
@@ -109,7 +113,7 @@ sources:
     approved_by: owner
     approved_at: "2026-11-11"
     approval_note: In use before the approvals page; approved by the owner on 2026-11-11.
-    pipeline: {job: ingest-gleif, store: gleif, records_as: gleif, label: GLEIF, refresh: new files daily, relationships: gleif-rr,
+    pipeline: {stage: production, job: ingest-gleif, store: gleif, records_as: gleif, label: GLEIF, refresh: new files daily, relationships: gleif-rr,
                role: lei, dataset: GLEIF LEI golden copy, attribution: "", record_url: "https://search.gleif.org/#/record/{lei}"}
 
   - id: gb-coh
@@ -141,7 +145,7 @@ sources:
       access: owner-key    # streaming API for daily changes
       secret: sources/gb-coh/api-key
       status: awaiting-owner
-    pipeline: {job: ingest-gb, store: gb, records_as: gb-coh, label: Companies House, refresh: monthly register,
+    pipeline: {stage: production, job: ingest-gb, store: gb, records_as: gb-coh, label: Companies House, refresh: monthly register,
                dataset: Companies House basic company data,
                record_url: "https://find-and-update.company-information.service.gov.uk/company/{registrationNumber}",
                attribution: "Contains public sector information licensed under the Open Government Licence v3.0."}
@@ -171,7 +175,7 @@ sources:
     approved_by: owner
     approved_at: "2026-11-11"
     approval_note: In use before the approvals page; approved by the owner on 2026-11-11.
-    pipeline: {job: ingest-ny, store: us-ny, records_as: us-ny-dos, label: New York Department of State, refresh: weekly,
+    pipeline: {stage: production, job: ingest-ny, store: us-ny, records_as: us-ny-dos, label: New York Department of State, refresh: weekly,
                dataset: "New York Department of State, active corporations (data.ny.gov)",
                attribution: "Source: New York State Department of State, via data.ny.gov."}
 
@@ -196,7 +200,7 @@ sources:
         addresses are never downloaded. General partnerships and sole proprietorships are dropped as people;
         any entity type not yet reviewed is dropped too.
       verified: false
-    pipeline: {job: ingest-co, image: ingest-socrata, store: us-co, records_as: us-co-sos, label: Colorado Secretary of State, refresh: weekly,
+    pipeline: {stage: production, job: ingest-co, image: ingest-socrata, store: us-co, records_as: us-co-sos, label: Colorado Secretary of State, refresh: weekly,
                dataset: "Business Entities in Colorado (data.colorado.gov)",
                attribution: "Source: Colorado Department of State, via data.colorado.gov."}
 
@@ -236,7 +240,7 @@ sources:
         leading zeros ("057491-14"); the dataset has neither (5749114). gleif_identity (above) reads GLEIF's form
         as the register's, so Oregon companies with an LEI merge (2026-11-20).
       verified: false
-    pipeline: {job: ingest-or, image: ingest-socrata, store: us-or, records_as: us-or-sos, label: Oregon Secretary of State, refresh: weekly,
+    pipeline: {stage: production, job: ingest-or, image: ingest-socrata, store: us-or, records_as: us-or-sos, label: Oregon Secretary of State, refresh: weekly,
                dataset: "Active Businesses - ALL (data.oregon.gov)",
                attribution: "Source: Oregon Secretary of State, Corporation Division, via data.oregon.gov."}
 
@@ -261,7 +265,7 @@ sources:
         owner characteristics (woman-, veteran-, minority-, disability- or LGBTQI-owned) are never downloaded.
         General partnerships, unknown types, name reservations and rejected filings are dropped.
       verified: false
-    pipeline: {job: ingest-ct, image: ingest-socrata, store: us-ct, records_as: us-ct-sots, label: Connecticut Secretary of the State, refresh: weekly,
+    pipeline: {stage: production, job: ingest-ct, image: ingest-socrata, store: us-ct, records_as: us-ct-sots, label: Connecticut Secretary of the State, refresh: weekly,
                dataset: "Connecticut Business Registry - Business Master (data.ct.gov)",
                attribution: "Source: Connecticut Secretary of the State, via data.ct.gov."}
 
@@ -290,7 +294,7 @@ sources:
     approved_by: owner
     approved_at: "2026-11-11"
     approval_note: In use before the approvals page; approved by the owner on 2026-11-11.
-    pipeline: {job: ingest-br, store: br, records_as: br-rfb, label: Receita Federal (Brazil), refresh: monthly release,
+    pipeline: {stage: production, job: ingest-br, store: br, records_as: br-rfb, label: Receita Federal (Brazil), refresh: monthly release,
                dataset: "Receita Federal do Brasil, dados abertos do CNPJ",
                attribution: "Source: Receita Federal do Brasil, Cadastro Nacional da Pessoa Jurídica (open data)."}
 
@@ -330,7 +334,7 @@ sources:
     approved_by: owner
     approved_at: "2026-11-11"
     approval_note: In use before the approvals page; approved by the owner on 2026-11-11.
-    pipeline: {job: ingest-sg, store: sg, records_as: sg-acra, label: ACRA (Singapore), refresh: monthly,
+    pipeline: {stage: production, job: ingest-sg, store: sg, records_as: sg-acra, label: ACRA (Singapore), refresh: monthly,
                dataset: ACRA Information on Corporate Entities (data.gov.sg),
                attribution: "Contains information from ACRA Information on Corporate Entities accessed from data.gov.sg, made available under the Singapore Open Data Licence version 1.0."}
 
@@ -400,7 +404,7 @@ sources:
         updated daily, with a single compressed download of all valid businesses (YTJ API v3). Sole traders
         (toiminimi) are people and would be dropped.
       verified: false
-    pipeline: {job: ingest-fi, image: ingest-bulk, store: fi, records_as: fi-prh, label: Finnish Trade Register (PRH),
+    pipeline: {stage: production, job: ingest-fi, image: ingest-bulk, store: fi, records_as: fi-prh, label: Finnish Trade Register (PRH),
                refresh: weekly, dataset: "PRH open data: all companies (avoindata.prh.fi)",
                attribution: "Source: Finnish Patent and Registration Office (PRH), open data, licensed under CC BY 4.0."}
 
@@ -424,7 +428,7 @@ sources:
         is only in the CRO's separate paid bulk licence, which is not needed). Business names (often people) are a
         separate register and would not be used.
       verified: false
-    pipeline: {job: ingest-ie, image: ingest-bulk, store: ie, records_as: ie-cro, label: Companies Registration Office (Ireland),
+    pipeline: {stage: production, job: ingest-ie, image: ingest-bulk, store: ie, records_as: ie-cro, label: Companies Registration Office (Ireland),
                refresh: weekly, dataset: "Company Records (opendata.cro.ie)",
                attribution: "Contains Irish Public Sector Data (Companies Registration Office) licensed under a Creative Commons Attribution 4.0 International (CC BY 4.0) licence.",
                # If the regular download fails consistently (not a refusal), a browser fetches the same file
@@ -453,7 +457,7 @@ sources:
         sole traders, are a separate dataset and would not be used. A third-party page puts it at about
         2.1 million companies (unverified).
       verified: false
-    pipeline: {job: ingest-au, image: ingest-bulk, store: au, records_as: au-asic, label: ASIC (Australia),
+    pipeline: {stage: production, job: ingest-au, image: ingest-bulk, store: au, records_as: au-asic, label: ASIC (Australia),
                refresh: monthly extract, dataset: "ASIC Company Dataset (data.gov.au)",
                attribution: "Contains data from the Australian Securities and Investments Commission (ASIC), licensed under CC BY 3.0 AU.",
                # If the regular download fails consistently (not a refusal), a browser fetches the current
@@ -484,7 +488,7 @@ sources:
       verified: false
     # Fetched with a real browser (lc_browser): the NTA offers its full file only through its download
     # page's form. Owner exception 2026-11-16, conditional on per-record attribution (PDL 1.0).
-    pipeline: {job: ingest-jp, image: ingest-browser, store: jp, records_as: jp-nta, label: National Tax Agency (Japan),
+    pipeline: {stage: production, job: ingest-jp, image: ingest-browser, store: jp, records_as: jp-nta, label: National Tax Agency (Japan),
                refresh: monthly, dataset: "Corporate Number Publication Site: nationwide full data (CSV, Unicode)",
                record_url: "https://www.houjin-bangou.nta.go.jp/en/henkorireki-johoto.html?selHouzinNo={registrationNumber}",
                attribution: "Source: National Tax Agency Corporate Number Publication Site (https://www.houjin-bangou.nta.go.jp/). Edited by lei-commons: text normalised (NFKC) and mapped to an LEI-compatible format; corporations excluded from the NTA's search are left out.",
@@ -514,7 +518,7 @@ sources:
         only: provincial registers are separate. Directors would not be used. The file layout reportedly changed
         in April 2026 (unverified).
       verified: false
-    pipeline: {job: ingest-ca, image: ingest-bulk, store: ca, records_as: ca-ised, label: Corporations Canada,
+    pipeline: {stage: production, job: ingest-ca, image: ingest-bulk, store: ca, records_as: ca-ised, label: Corporations Canada,
                refresh: weekly, dataset: "Federal Corporations (open.canada.ca)",
                record_url: "https://ised-isde.canada.ca/cc/lgcy/fdrlCrpDtls.html?corpId={registrationNumber}",
                attribution: "Contains information licensed under the Open Government Licence – Canada."}
@@ -746,7 +750,7 @@ sources:
         is often a person and would be dropped.
       verified: false
     # Built 2026-11-22 (owner approved the source the same day): lc_ingest.bulk IRS, the four regional CSVs weekly.
-    pipeline: {job: ingest-us-irs, image: ingest-bulk, store: us-irs, records_as: us-irs-eo-bmf,
+    pipeline: {stage: trial, job: ingest-us-irs, image: ingest-bulk, store: us-irs, records_as: us-irs-eo-bmf,
                label: IRS exempt organizations (United States), refresh: monthly extract, read weekly,
                dataset: "Exempt Organizations Business Master File Extract (irs.gov)",
                attribution: "Source: IRS Exempt Organizations Business Master File Extract (EO BMF), a US government work."}
@@ -1188,7 +1192,7 @@ sources:
         Trustees kept as names only or dropped; no contact details.
       verified: false
     # Built 2026-11-22 (owner approved the source the same day): lc_ingest.bulk CCEW, the register extract weekly.
-    pipeline: {job: ingest-gb-ccew, image: ingest-bulk, store: gb-ccew, records_as: gb-ccew,
+    pipeline: {stage: trial, job: ingest-gb-ccew, image: ingest-bulk, store: gb-ccew, records_as: gb-ccew,
                label: Charity Commission for England and Wales, refresh: daily extract, read weekly,
                dataset: "Register of Charities full extract (Charity Commission)",
                attribution: "Contains public sector information licensed under the Open Government Licence v3.0 (Charity Commission for England and Wales)."}
