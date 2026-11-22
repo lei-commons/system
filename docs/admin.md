@@ -18,9 +18,11 @@ authentication before the directory opens to the public.
   head commit with a reason and a fresh code; the site then sets its `owner-approval` status to success as the
   `lei-commons-guardian` GitHub App. The owner-approval workflow (`pull_request_target`, so always main's own
   copy and rules) sets the status for every pull request: success at once when nothing sensitive changes,
-  otherwise pending, assigned to the owner, with a comment linking here. Branch protection on `system` requires
-  it; the private repositories can't be protected on GitHub's free plan, so there the session never merges a
-  sensitive change without it;
+  otherwise pending, assigned to the owner, with a comment linking here. Branch protection on `system`'s main
+  requires it, with `tests`, `lint` and `conduct-policy`, for admins too (set 2026-11-22). The private
+  repositories that take pull requests (releases, intake, the ledgers) call the same workflow and rules
+  (`private-repos/owner-approval.yml`, installed by `private-repos/install.sh`); GitHub's free plan can't protect
+  their branches, so there the session never merges a sensitive change without it;
 - **Log**: the decision log, a day at a time, with the day's summary first (owner, 2026-11-22; see below);
 - **Second factor**: set up the authenticator, or rotate its key.
 

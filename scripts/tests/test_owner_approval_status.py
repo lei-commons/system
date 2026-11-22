@@ -81,11 +81,28 @@ def test_many_files_are_read_page_by_page():
 def test_the_workflow_runs_mains_rules_never_the_pull_requests_code():
     wf = yaml.safe_load((ROOT / ".github" / "workflows" / "owner-approval.yml").read_text())
     triggers = wf.get("on") or wf.get(True)
-    assert list(triggers) == ["pull_request_target"]
+    assert list(triggers) == ["pull_request_target", "workflow_call"]
     steps = wf["jobs"]["owner-approval"]["steps"]
     checkout = next(s for s in steps if s.get("uses", "").startswith("actions/checkout"))
-    assert checkout["with"]["ref"] == "${{ github.event.repository.default_branch }}"
+    assert checkout["with"]["repository"] == "lei-commons/system" and checkout["with"]["ref"] == "main"
     assert checkout["with"]["persist-credentials"] is False
     text = (ROOT / ".github" / "workflows" / "owner-approval.yml").read_text()
     assert "head.ref" not in text and "pull_request.head.repo" not in text
     assert set(wf["permissions"]) == {"contents", "statuses", "pull-requests", "issues"}
+
+
+def test_the_private_repositories_call_system_mains_gate():
+    wf = yaml.safe_load((ROOT / "private-repos" / "owner-approval.yml").read_text())
+    triggers = wf.get("on") or wf.get(True)
+    assert list(triggers) == ["pull_request_target"]
+    assert wf["jobs"] == {"owner-approval": {"uses": "lei-commons/system/.github/workflows/owner-approval.yml@main"}}
+    # The called workflow can only use the permissions given here, and needs all of them.
+    called = yaml.safe_load((ROOT / ".github" / "workflows" / "owner-approval.yml").read_text())
+    assert wf["permissions"] == called["permissions"]
+    install = (ROOT / "private-repos" / "install.sh").read_text()
+    repos = install.split('REPOS="', 1)[1].split('"', 1)[0].split()
+    assert "control" not in repos and {"releases", "intake"} <= set(repos)
+    from lc_core.approval_rules import load
+    rules = load()
+    assert rules.sensitive(["private-repos/install.sh", "ledger/sync.yml", ".github/workflows/snapshot.yml"]) == [
+        ".github/workflows/snapshot.yml", "ledger/sync.yml", "private-repos/install.sh"]
