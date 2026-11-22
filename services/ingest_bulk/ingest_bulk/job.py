@@ -71,6 +71,8 @@ def _find_for(profile: Profile, today: date, part=None):
     def find(gateway, manifest=None):
         if part:  # one of a register's several files: its own key, so each is processed once a week
             name, url = part
+            if callable(url):  # a file that moves: its catalogue is asked now, after the gate
+                url = url(gateway)
             key = f"{profile.key(today)} {name}"
             return key, url, f"{profile.filename}-{profile.key(today)}-{name}{profile.extension}"
         if profile.locate:  # the register's file moves with each publication: ask its catalogue where it is

@@ -182,8 +182,12 @@ main:
       for:
         value: job
         in:
+        - ingest-au-abn
         - ingest-us-irs
+        - ingest-fr-rna
+        - ingest-ar
         - ingest-gb-ccew
+        - ingest-tw-tax
         steps:
         - trial_run:
             try:

@@ -7,7 +7,7 @@ name: deploy-ingest-bulk
 on:
   push:
     branches: [main]
-    paths: ["services/ingest_bulk/**", "packages/lc_ingest/**", "packages/lc_core/**", "config/fields.yaml", ".github/workflows/deploy-ingest-bulk.yml", "config/sources.yaml"]
+    paths: ["services/ingest_bulk/**", "packages/lc_ingest/**", "packages/lc_core/**", "config/fields.yaml", ".github/workflows/deploy-ingest-bulk.yml", "config/sources.yaml", "config/status.yaml", "config/labels.yaml"]
 
 permissions:
   contents: read

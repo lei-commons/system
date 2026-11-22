@@ -1,0 +1,177 @@
+"""Sources approved by the owner on 2026-11-22, batch 2, all on trial first: the Australian ABN extract, France's
+RNA, Argentina's RNS and Taiwan's tax registrations. Files are synthetic, in the layouts the publishers document;
+the first trial run confirms them (a mismatch names the columns or tags, never values)."""
+
+import csv
+import io
+import zipfile
+
+import pytest
+
+from lc_core.directory_id import mint
+from lc_ingest.bulk import (ARGENTINA, AUSTRALIA_ABN, FRANCE_RNA, PROFILES, TAIWAN_TAX, _roc_date, abn_xml, ar_csv,
+                            ar_locate, rna_locate)
+from lc_ingest.gleif import Skip
+
+
+def zipped(files: dict):
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as z:
+        for name, text in files.items():
+            z.writestr(name, text.encode("utf-8") if isinstance(text, str) else text)
+    out.seek(0)
+    return out
+
+
+def mapped(profile, rows):
+    kept, why = [], []
+    for row in rows:
+        try:
+            kept.append(profile.record(row))
+        except Skip as exc:
+            why.append(str(exc))
+    return kept, why
+
+
+ABN_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<Transfer>
+<ABR recordLastUpdatedDate="20261101" replaced="N"><ABN status="ACT" ABNStatusFromDate="20000101">51824753556</ABN>
+ <EntityType><EntityTypeInd>DTT</EntityTypeInd><EntityTypeText>Discretionary Trading Trust</EntityTypeText></EntityType>
+ <MainEntity><NonIndividualName type="MN"><NonIndividualNameText>THE TRUSTEE FOR ACME TRUST</NonIndividualNameText></NonIndividualName>
+ <BusinessAddress><AddressDetails><State>NSW</State><Postcode>2000</Postcode></AddressDetails></BusinessAddress></MainEntity>
+ <OtherEntity><NonIndividualName type="TRD"><NonIndividualNameText>ACME TRADING</NonIndividualNameText></NonIndividualName></OtherEntity>
+</ABR>
+<ABR recordLastUpdatedDate="20261101" replaced="N"><ABN status="ACT" ABNStatusFromDate="20000101">11111111111</ABN>
+ <EntityType><EntityTypeInd>IND</EntityTypeInd><EntityTypeText>Individual/Sole Trader</EntityTypeText></EntityType>
+ <LegalEntity><IndividualName type="LGL"><GivenName>JANE</GivenName><FamilyName>CITIZEN</FamilyName></IndividualName></LegalEntity>
+</ABR>
+<ABR recordLastUpdatedDate="20261101" replaced="N"><ABN status="CAN" ABNStatusFromDate="20100101">22222222222</ABN>
+ <EntityType><EntityTypeInd>PRV</EntityTypeInd><EntityTypeText>Australian Private Company</EntityTypeText></EntityType>
+ <MainEntity><NonIndividualName type="MN"><NonIndividualNameText>ACME PTY LTD</NonIndividualNameText></NonIndividualName></MainEntity>
+ <ASICNumber ASICNumberType="undetermined">123456789</ASICNumber>
+</ABR>
+<ABR recordLastUpdatedDate="20261101" replaced="N"><ABN status="CAN" ABNStatusFromDate="20100101">33333333333</ABN>
+ <EntityType><EntityTypeInd>FPT</EntityTypeInd><EntityTypeText>Family Partnership</EntityTypeText></EntityType>
+ <MainEntity><NonIndividualName type="MN"><NonIndividualNameText>J &amp; K CITIZEN</NonIndividualNameText></NonIndividualName></MainEntity>
+</ABR>
+</Transfer>"""
+
+
+def test_abn_keeps_organisations_not_people_partnerships_or_asic_companies():
+    rows = list(abn_xml(zipped({"20261101_Public01.xml": ABN_XML})))
+    kept, why = mapped(AUSTRALIA_ABN, rows)
+    assert [r["registrationNumber"] for r in kept] == ["51824753556"]
+    assert why == ["natural person or partnership", "has an ASIC number: in the directory through the ASIC dataset",
+                   "natural person or partnership"]
+    r = kept[0]
+    assert r["directoryId"] == mint("AU", "AU-ABN", "51824753556") and r["legalForm"] == "Discretionary Trading Trust"
+    assert r["otherNames"] == ["ACME TRADING"] and r["legalStatus"] == "Active"
+    assert r["legalAddress"] == {"region": "NSW", "postalCode": "2000", "country": "AU"}
+    assert "CITIZEN" not in repr(kept) and "JANE" not in repr(kept)  # the individual and the partners never come through
+
+
+def test_abn_stops_with_tag_names_if_the_layout_changed():
+    with pytest.raises(ValueError, match=r"no ABR records; the file has the tags \['Entity', 'Name'"):
+        list(abn_xml(zipped({"a.xml": "<Name><Entity>SECRET CO</Entity></Name>"})))
+
+
+def test_abn_files_are_found_in_the_catalogue_after_the_gate():
+    class Gateway:
+        asked = []
+
+        def get_json(self, url):
+            self.asked.append(url)
+            return {"result": {"resources": [
+                {"url": "https://data.gov.au/data/dataset/x/resource/1/download/public_split_1_10.zip"},
+                {"url": "https://data.gov.au/data/dataset/x/resource/2/download/public_split_11_20.zip"}]}}
+
+    names = [name for name, _ in AUSTRALIA_ABN.parts]
+    assert names == ["split-1-10", "split-11-20"]
+    assert AUSTRALIA_ABN.parts[1][1](Gateway()).endswith("public_split_11_20.zip")
+
+
+RNA_HEADER = ("id;id_ex;siret;rup_mi;gestion;date_creat;date_decla;date_publi;date_disso;nature;groupement;titre;"
+              "titre_court;objet;objet_social1;objet_social2;adrs_complement;adrs_numvoie;adrs_repetition;adrs_typevoie;"
+              "adrs_libvoie;adrs_distrib;adrs_codeinsee;adrs_codepostal;adrs_libcommune;adrg_declarant;adrg_complemid;"
+              "adrg_complemgeo;adrg_libvoie;adrg_distrib;adrg_codepostal;adrg_achemine;adrg_pays;dir_civilite;siteweb;"
+              "publiweb;observation;position;maj_time\n")
+
+
+def rna_line(number, title, position="A", disso="0001-01-01"):
+    return (f"{number};;;;;1987-03-12;2015-01-01;2015-02-01;{disso};D;S;{title};;Culture;;;;12;;RUE;DES LILAS;;"
+            f"75111;75011;PARIS;;M. DUPONT;;3 AVENUE PRIVEE;;69001;LYON;FRANCE;M;;;;{position};2026-10-01\n")
+
+
+def test_rna_keeps_city_and_postcode_never_the_managers_address_or_street():
+    archive = zipped({"rna_waldec_20261101_dpt_75.csv": RNA_HEADER + rna_line("W751000001", "AMIS DU QUARTIER"),
+                      "rna_waldec_20261101_dpt_69.csv": RNA_HEADER + rna_line("W691000002", "CLUB DE BOULES", "D",
+                                                                              "2020-06-30")})
+    kept, why = mapped(FRANCE_RNA, FRANCE_RNA.read(archive))
+    assert [r["registrationNumber"] for r in kept] == ["W691000002", "W751000001"]  # members in name order
+    paris = kept[1]
+    assert paris["directoryId"] == mint("FR", "FR-RNA", "W751000001") and paris["legalForm"] == "Association déclarée"
+    assert paris["legalAddress"] == {"city": "PARIS", "postalCode": "75011", "country": "FR"}
+    assert paris["incorporationDate"] == "1987-03-12" and "dissolutionDate" not in paris
+    assert kept[0]["legalStatus"] == "Dissolved" and kept[0]["dissolutionDate"] == "2020-06-30"
+    assert not any(x in repr(kept) for x in ("DUPONT", "AVENUE PRIVEE", "LILAS", "69001"))
+
+
+def test_rna_picks_the_newest_waldec_file():
+    class Gateway:
+        def get_json(self, url):
+            return {"resources": [{"title": "rna_import_20261101.zip", "url": "https://media.interieur.gouv.fr/rna/i.zip"},
+                                  {"title": "rna_waldec_20261001.zip", "url": "https://media.interieur.gouv.fr/rna/a.zip"},
+                                  {"title": "rna_waldec_20261101.zip", "url": "https://media.interieur.gouv.fr/rna/b.zip"}]}
+    assert rna_locate(Gateway()) == ("rna_waldec_20261101", "https://media.interieur.gouv.fr/rna/b.zip")
+
+
+AR_HEADER = ("cuit,razon_social,fecha_hora_contrato_social,tipo_societario,fecha_actualizacion,numero_inscripcion,"
+             "dom_legal_provincia,dom_legal_localidad,dom_legal_calle,dom_legal_numero,dom_legal_cp\n")
+
+
+def test_argentina_keeps_companies_and_drops_natural_persons():
+    text = (AR_HEADER + "30712345679,ACME S.A.,2008-05-12 00:00:00,SOCIEDAD ANONIMA,2026-10-01,123,"
+                        "BUENOS AIRES,LA PLATA,CALLE 7,1234,B1900\n"
+            + "20123456786,JUAN PEREZ,2010-01-01 00:00:00,,2026-10-01,,,,,,\n")
+    for body in (io.BytesIO(text.encode()), zipped({"rns_2026.csv": text})):  # plain or zipped
+        kept, why = mapped(ARGENTINA, ar_csv(body))
+        assert [r["registrationNumber"] for r in kept] == ["30712345679"] and why == ["natural person"]
+    r = kept[0]
+    assert r["directoryId"] == mint("AR", "AR-CUIT", "30712345679") and r["incorporationDate"] == "2008-05-12"
+    assert r["legalAddress"] == {"addressLines": ["CALLE 7 1234"], "city": "LA PLATA", "region": "BUENOS AIRES",
+                                 "postalCode": "B1900", "country": "AR"}
+
+
+def test_argentina_takes_the_newest_full_file_not_the_sample():
+    class Gateway:
+        def get_json(self, url):
+            return {"result": {"resources": [
+                {"id": "aaaaaaaa1", "name": "Muestreo", "format": "CSV", "last_modified": "2026-11-01T00:00:00",
+                 "url": "https://datos.jus.gob.ar/x/muestreo.csv"},
+                {"id": "bbbbbbbb2", "name": "RNS 2026 semestre 1", "format": "ZIP", "last_modified": "2026-07-01T00:00:00",
+                 "url": "https://datos.jus.gob.ar/x/2026-1.zip"},
+                {"id": "cccccccc3", "name": "RNS 2026 octubre", "format": "CSV", "last_modified": "2026-10-15T00:00:00",
+                 "url": "https://datos.jus.gob.ar/x/2026-10.csv"}]}}
+    assert ar_locate(Gateway()) == ("20261015 cccccccc", "https://datos.jus.gob.ar/x/2026-10.csv")
+
+
+def test_taiwan_drops_sole_proprietorships_and_partnerships_and_reads_roc_dates():
+    header = "營業地址,統一編號,總機構統一編號,營業人名稱,資本額,設立日期,組織別名稱,使用統一發票,行業代號,名稱\n"
+    text = (header + "臺北市中正區重慶南路一段2號,12345675,,台灣測試股份有限公司,1000000,1050101,股份有限公司,Y,461411,批發\n"
+            + "臺北市大安區,23456789,,王小明商行,10000,0990315,獨資,Y,471911,零售\n"
+            + "臺中市,34567891,,好朋友合夥,20000,1001231,合夥,N,,\n")
+    kept, why = mapped(TAIWAN_TAX, TAIWAN_TAX.read(zipped({"BGMOPEN1.csv": text})))
+    assert [r["registrationNumber"] for r in kept] == ["12345675"] and why == ["sole proprietorship or partnership"] * 2
+    r = kept[0]
+    assert r["directoryId"] == mint("TW", "TW-UBN", "12345675") and r["incorporationDate"] == "2016-01-01"
+    assert r["legalStatus"] == "Operating" and r["industryCodes"] == ["461411"]
+    assert _roc_date("990315") == "2010-03-15" and _roc_date("x") is None
+
+
+def test_batch_2_is_registered_on_trial():
+    from lc_core.sources import pipelines
+
+    built = {p["id"]: p for p in pipelines()}
+    for source in ("au-abr-abn", "fr-rna", "ar-rns", "tw-mof-tax"):
+        assert source in PROFILES and built[source]["job"] == PROFILES[source].job
+        assert built[source]["stage"] == "trial"

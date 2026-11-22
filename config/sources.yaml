@@ -709,7 +709,11 @@ sources:
         associations and co-operatives (estimate). Sole traders (entity type IND) are people and would be dropped.
         Licence read from a search snippet of data.gov.au; to confirm.
       verified: false
-
+    # Built 2026-11-22 (owner approved the source the same day), on trial: lc_ingest.bulk AUSTRALIA_ABN.
+    pipeline: {stage: trial, job: ingest-au-abn, image: ingest-bulk, store: au-abn, records_as: au-abr-abn,
+               label: Australian Business Register (ABN), refresh: weekly,
+               dataset: "ABN Bulk Extract (data.gov.au)",
+               attribution: "Contains data from the Australian Business Register (ABN Lookup), licensed under CC BY 3.0 AU."}
   - id: in-ogd-company-master
     name: "India RoC-wise company master data (MCA, via data.gov.in and AIKosh)"
     country: "IN"
@@ -795,7 +799,11 @@ sources:
         and would be new even with SIRENE. Name, purpose, seat, dates. The management address can be a volunteer's
         home and would be dropped. Excludes Alsace-Moselle. Same host as SIRENE (data.gouv.fr).
       verified: false
-
+    # Built 2026-11-22 (owner approved the source the same day), on trial: lc_ingest.bulk FRANCE_RNA.
+    pipeline: {stage: trial, job: ingest-fr-rna, image: ingest-bulk, store: fr-rna, records_as: fr-rna,
+               label: Répertoire national des associations (France), refresh: monthly,
+               dataset: "RNA waldec (data.gouv.fr)",
+               attribution: "Ministère de l'Intérieur, Répertoire national des associations, Licence Ouverte 2.0 (Etalab)."}
   - id: pe-sunat-ruc
     name: "Peru SUNAT padrón reducido del RUC"
     country: "PE"
@@ -954,7 +962,11 @@ sources:
         National register of companies from all provinces (CUIT, name, type, dates, address), monthly, CC BY 4.0
         read on the publisher's page. About 1M legal persons (estimate). The cleanest licence in Latin America.
       verified: false
-
+    # Built 2026-11-22 (owner approved the source the same day), on trial: lc_ingest.bulk ARGENTINA.
+    pipeline: {stage: trial, job: ingest-ar, image: ingest-bulk, store: ar, records_as: ar-rns,
+               label: Registro Nacional de Sociedades (Argentina), refresh: monthly,
+               dataset: "Registro Nacional de Sociedades (datos.jus.gob.ar)",
+               attribution: "Ministerio de Justicia de la Nación, Registro Nacional de Sociedades, CC BY 4.0."}
   - id: cl-sii-pj
     name: "Chile SII nómina de personas jurídicas"
     country: "CL"
@@ -1313,7 +1325,11 @@ sources:
         partnerships, associations, schools, foundations and foreign branches (about 0.1-0.2M, estimate); sole
         proprietorships dropped.
       verified: false
-
+    # Built 2026-11-22 (owner approved the source the same day), on trial: lc_ingest.bulk TAIWAN_TAX.
+    pipeline: {stage: trial, job: ingest-tw-tax, image: ingest-bulk, store: tw-tax, records_as: tw-mof-tax,
+               label: Ministry of Finance business registrations (Taiwan), refresh: daily, read weekly,
+               dataset: "全國營業(稅籍)登記資料集 (data.gov.tw 9400)",
+               attribution: "Ministry of Finance, R.O.C. (Taiwan), Open Government Data License, version 1.0."}
   - id: ca-cra-charities
     name: "Canada Revenue Agency list of charities (T3010 open data)"
     country: "CA"
