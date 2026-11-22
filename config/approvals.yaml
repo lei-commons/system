@@ -27,6 +27,8 @@ sensitive_paths:
   - "constitution.md"
   - "scripts/check_system_state.py"
   - "agents/**"
+  - "ledger/**"         # the ledger repositories' workflow, installed from here
+  - "private-repos/**"  # the private repositories' owner-approval workflow, installed from here
   # The egress gateway (what the system may reach).
   - "services/conduct_proxy/**"
   # Authentication, the second factor, owner actions and control state.

@@ -5,11 +5,17 @@
 #
 # pull_request_target runs main's copy of this workflow and of the rules, never the pull request's code, so a
 # pull request can't change its own gate. Nothing from the pull request is checked out or run.
+#
+# The private repositories call this same workflow (workflow_call, from their own pull_request_target
+# workflow, private-repos/owner-approval.yml) and are judged by system main's rules, so there is one copy of the
+# gate and one set of rules everywhere. GitHub's free plan can't protect their branches: there the session never
+# merges a sensitive change until the status is success.
 name: owner-approval
 
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
+  workflow_call: # the private repositories (private-repos/owner-approval.yml)
 
 permissions:
   contents: read
@@ -28,7 +34,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.repository.default_branch }}  # main's rules, never the pull request's
+          repository: lei-commons/system # the rules and the script, also when a private repository calls this
+          ref: main # main's rules, never the pull request's
           persist-credentials: false
           sparse-checkout: |
             config/approvals.yaml

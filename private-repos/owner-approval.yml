@@ -1,0 +1,25 @@
+# The owner's approval for sensitive changes, in a private lei-commons repository (owner decision 2026-11-21).
+# Installed as .github/workflows/owner-approval.yml by private-repos/install.sh; the canonical copy is in
+# lei-commons/system. It calls system main's own owner-approval workflow, which judges the pull request by
+# system main's config/approvals.yaml (in these repositories, chiefly .github/**): success at once when nothing
+# sensitive changes; otherwise pending, assigned to the owner, with a comment linking to the admin page, where the
+# owner approves the exact head commit with a fresh authenticator code.
+#
+# pull_request_target runs this repository's main copy of this file, never the pull request's, and nothing from
+# the pull request is checked out or run. GitHub's free plan can't protect these branches, so the session never
+# merges a sensitive change here until the owner-approval status is success.
+name: owner-approval
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  statuses: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  owner-approval:
+    uses: lei-commons/system/.github/workflows/owner-approval.yml@main
