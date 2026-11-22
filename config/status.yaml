@@ -100,6 +100,20 @@ sources:
     active: [Unconditional exemption, Conditional exemption, Trust described in 4947(a)(2),
              Terminating private foundation status]
 
+  au-abr-abn:                  # lc_ingest.bulk.ABN_STATUS spells out the ABN's status codes
+    active: [Active]
+    inactive: [Cancelled]
+
+  fr-rna:                      # lc_ingest.bulk.RNA_POSITION spells out the RNA's position codes
+    active: [Active]
+    dissolved: [Dissolved]
+    inactive: [Deleted]
+
+  ar-rns: {}                   # the register publishes no status word: its records get unknown
+
+  tw-mof-tax:                  # the dataset lists operating businesses only
+    active: [Operating]
+
   gb-ccew:
     active: [Registered]
     inactive: [Removed]

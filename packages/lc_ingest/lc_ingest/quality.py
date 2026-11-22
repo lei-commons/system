@@ -115,6 +115,8 @@ class Quality:
             self.anomalies["name longer than 250 characters"] += 1
         if name and not any(c.isalpha() for c in name):
             self.anomalies["name without letters"] += 1
+        if "\ufffd" in name:
+            self.anomalies["name with undecodable characters (wrong encoding?)"] += 1
         if re.search(r"https?://|www\.", name, re.I):
             self.anomalies["name holding a web address"] += 1
         key = hashlib.blake2b(f"{name.casefold()}|{address.get('country', '')}|{address.get('postalCode', '')}".encode(),

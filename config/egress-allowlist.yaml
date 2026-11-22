@@ -34,6 +34,13 @@ registry_hosts:
   # the IRS EO BMF extract (us-irs-eo-bmf) and the Charity Commission's register extract on its Azure blob (gb-ccew).
   - www.irs.gov
   - ccewuksprdoneregsadata1.blob.core.windows.net
+  # Owner approved 2026-11-22 with the sources (system PR "sources batch 2", approved on /admin): France's RNA
+  # (fr-rna: data.gouv.fr's catalogue, files on the Interior ministry's media host), Argentina's RNS (ar-rns) and
+  # Taiwan's tax registrations (tw-mof-tax). The ABN extract (au-abr-abn) is on data.gov.au, already listed.
+  - www.data.gouv.fr
+  - media.interieur.gouv.fr
+  - datos.jus.gob.ar
+  - eip.fia.gov.tw
   # Owner approved 2026-11-09 for the ACRA datasets: data.gov.sg starts a download at
   # api-open and serves the file from a signed S3 link in its Singapore region.
   - api-open.data.gov.sg
