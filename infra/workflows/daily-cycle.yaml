@@ -22,6 +22,7 @@ main:
         - ingest-au
         - ingest-jp
         - ingest-ca
+        - ingest-tw-tax
       - failed: []
       - fallbacks:
           ingest-ie: ingest-ie-browser
@@ -190,7 +191,6 @@ main:
         - ingest-cy
         - ingest-gb-ccew
         - ingest-si
-        - ingest-tw-tax
         - ingest-ca-cra
         - ingest-nl-anbi
         - ingest-gb-oscr

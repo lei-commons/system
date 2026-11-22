@@ -218,4 +218,4 @@ def test_batch_2_is_registered_on_trial():
     built = {p["id"]: p for p in pipelines()}
     for source in ("au-abr-abn", "fr-rna", "ar-rns", "tw-mof-tax"):
         assert source in PROFILES and built[source]["job"] == PROFILES[source].job
-        assert built[source]["stage"] == "trial"
+        assert built[source]["stage"] == ("production" if source == "tw-mof-tax" else "trial")  # promoted 2026-11-22

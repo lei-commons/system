@@ -1340,8 +1340,9 @@ sources:
         partnerships, associations, schools, foundations and foreign branches (about 0.1-0.2M, estimate); sole
         proprietorships dropped.
       verified: false
-    # Built 2026-11-22 (owner approved the source the same day), on trial: lc_ingest.bulk TAIWAN_TAX.
-    pipeline: {stage: trial, job: ingest-tw-tax, image: ingest-bulk, store: tw-tax, records_as: tw-mof-tax,
+    # Built 2026-11-22 (owner approved the source the same day): lc_ingest.bulk TAIWAN_TAX. Trial 2026-11-22
+    # (2026-W47 @85eb87cde494): 821,742 records, no repeated IDs, every status mapped; promoted (owner approval).
+    pipeline: {stage: production, job: ingest-tw-tax, image: ingest-bulk, store: tw-tax, records_as: tw-mof-tax,
                label: Ministry of Finance business registrations (Taiwan), refresh: daily, read weekly,
                dataset: "全國營業(稅籍)登記資料集 (data.gov.tw 9400)",
                attribution: "Ministry of Finance, R.O.C. (Taiwan), Open Government Data License, version 1.0."}
