@@ -165,7 +165,7 @@ jobs:
           pip install pyyaml
           python -c "import yaml,glob,sys; [yaml.safe_load(open(f)) for f in glob.glob('config/*.yaml')+glob.glob('.github/workflows/*.yml')]"
       - name: shellcheck
-        run: shellcheck bootstrap/*.sh agents/harness/*.sh
+        run: shellcheck bootstrap/*.sh agents/harness/*.sh private-repos/*.sh
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.9.8"
