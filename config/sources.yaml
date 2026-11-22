@@ -779,6 +779,11 @@ sources:
         dropped. Provider records rather than a register: hospitals have many sub-part NPIs and no EIN is published,
         so merging is harder.
       verified: false
+    # Built 2026-11-22 (owner approved the source the same day), on trial: lc_ingest.bulk_batch3 US_NPPES, the monthly full file, organisations only.
+    pipeline: {stage: trial, job: ingest-us-nppes, image: ingest-bulk, store: us-nppes, records_as: us-cms-nppes-org,
+               label: CMS NPPES organisation providers (United States), refresh: monthly,
+               dataset: "NPPES Data Dissemination, monthly full file (CMS)",
+               attribution: "Centers for Medicare & Medicaid Services, NPPES (public domain)."}
 
   - id: fr-rna
     name: "France Répertoire National des Associations (Ministère de l'Intérieur)"
@@ -1104,6 +1109,11 @@ sources:
         About 576k companies including struck-off ones; trade names (may be sole traders) excluded; officials kept
         as names and roles only. Many SPVs, useful for LEI coverage.
       verified: false
+    # Built 2026-11-22 (owner approved the source the same day), on trial: lc_ingest.bulk_batch3 CYPRUS, the organisations file monthly.
+    pipeline: {stage: trial, job: ingest-cy, image: ingest-bulk, store: cy, records_as: cy-drcor,
+               label: Registrar of Companies (Cyprus), refresh: monthly, read weekly,
+               dataset: "Register of companies, business names and partnerships (data.gov.cy)",
+               attribution: "Department of Registrar of Companies and Intellectual Property, Republic of Cyprus (data.gov.cy), CC BY 4.0."}
 
   - id: ch-zefix
     name: "Switzerland Zefix central business name index (LINDAS linked data)"
@@ -1285,6 +1295,11 @@ sources:
         Twice-monthly CSV, CC BY 4.0 read on the publisher's page: registration number, name, address, legal form.
         About 120-150k entities after dropping sole traders (s.p.) and room renters (about 42% of units).
       verified: false
+    # Built 2026-11-22 (owner approved the source the same day), on trial: lc_ingest.bulk_batch3 SLOVENIA.
+    pipeline: {stage: trial, job: ingest-si, image: ingest-bulk, store: si, records_as: si-ajpes-prs,
+               label: AJPES business register (Slovenia), refresh: twice monthly, read weekly,
+               dataset: "Poslovni register Slovenije (podatki.gov.si)",
+               attribution: "AJPES, Poslovni register Slovenije, CC BY 4.0."}
 
   - id: cz-csu-res
     name: "Czech Register of Economic Subjects (RES, Czech Statistical Office)"
@@ -1348,6 +1363,11 @@ sources:
         About 86k registered charities keyed by business number; perhaps half are provincial corporations or trusts
         not in the federal register. Directors kept as names and roles only, or dropped. Yearly.
       verified: false
+    # Built 2026-11-22 (owner approved the source the same day), on trial: lc_ingest.bulk_batch3 CANADA_CRA, the newest year's identification file.
+    pipeline: {stage: trial, job: ingest-ca-cra, image: ingest-bulk, store: ca-cra, records_as: ca-cra-charities,
+               label: Canada Revenue Agency charities, refresh: yearly, read weekly,
+               dataset: "List of charities, Identification (open.canada.ca)",
+               attribution: "Contains information licensed under the Open Government Licence - Canada (Canada Revenue Agency)."}
 
   - id: nl-anbi
     name: "Netherlands ANBI public-benefit institutions (Belastingdienst)"
@@ -1367,6 +1387,11 @@ sources:
         Weekly file of about 44k public-benefit institutions with RSIN, KVK number, name and town; all new (the
         Dutch company register is paid, and its free dataset has no names or numbers).
       verified: false
+    # Built 2026-11-22 (owner approved the source the same day), on trial: lc_ingest.bulk_batch3 NETHERLANDS_ANBI.
+    pipeline: {stage: trial, job: ingest-nl-anbi, image: ingest-bulk, store: nl-anbi, records_as: nl-anbi,
+               label: Belastingdienst ANBI list (Netherlands), refresh: weekly,
+               dataset: "Open data ANBI (Belastingdienst)",
+               attribution: "Belastingdienst, open data ANBI, CC0."}
 
   - id: au-acnc
     name: "Australian Charities and Not-for-profits Commission register"
@@ -1425,6 +1450,11 @@ sources:
         Companies House. Personal data is outside the OGL and dropped. OSCR bars direct marketing and presenting a
         copy as the official register.
       verified: false
+    # Built 2026-11-22 (owner approved the source the same day), on trial: lc_ingest.bulk_batch3 SCOTLAND_OSCR, the register download weekly.
+    pipeline: {stage: trial, job: ingest-gb-oscr, image: ingest-bulk, store: gb-oscr, records_as: gb-oscr,
+               label: Scottish Charity Regulator (OSCR), refresh: daily download, read weekly,
+               dataset: "Scottish Charity Register download (OSCR)",
+               attribution: "Contains information from the Scottish Charity Register supplied by the Office of the Scottish Charity Regulator and licensed under the Open Government Licence v3.0."}
 
   - id: gb-ccni
     name: "Register of Charities, Northern Ireland (Charity Commission for Northern Ireland)"
