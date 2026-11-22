@@ -297,3 +297,23 @@ def test_quality_flags_implausible_data():
     assert a["directory ID repeated in the file"] == 1 and a["name without letters"] == 1
     assert a["name shorter than 2 characters"] == 1 and a["incorporationDate in the future"] == 1
     assert a["dissolved before incorporated"] == 1 and a["contact-like value (email or phone)"] == 2
+
+
+def test_the_image_carries_the_status_map_a_trial_measures_against():
+    from pathlib import Path
+
+    docker = (Path(__file__).resolve().parents[1] / "Dockerfile").read_text()
+    for name in ("status.yaml", "labels.yaml"):
+        assert f"COPY config/{name} config/{name}" in docker and f"/app/config/{name}" in docker
+
+
+def test_a_trial_without_the_status_map_still_measures(monkeypatch):
+    import lc_core.status
+
+    def broken(*a, **k):
+        raise FileNotFoundError("status.yaml")
+    monkeypatch.setattr(lc_core.status, "load", broken)
+    store, events = ReportStore(), []
+    assert trial(store, IRS_ROW, events) == "done"
+    q = [e for e in events if e["event"] == "quality"][0]["quality"]
+    assert q["records"] == 1 and q["statusUnmapped"] is None  # unknown, never a false "all mapped"

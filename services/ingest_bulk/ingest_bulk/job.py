@@ -90,7 +90,10 @@ def quality_for(profile: Profile, stage: str, today: date):
     from lc_core.status import load as load_statuses
     from lc_ingest.quality import Quality
 
-    statuses = load_statuses()
+    try:
+        statuses = load_statuses()
+    except Exception:  # noqa: BLE001 - a trial still measures everything else; statusUnmapped is then None
+        statuses = None
     return lambda: Quality(profile.source, statuses=statuses, today=today)
 
 

@@ -163,7 +163,7 @@ class Quality:
             "fill": {f: _pct(self.fill[f], n) for f in FIELDS if self.fill[f]},
             "addressFill": {f: _pct(self.address[f], n) for f in ADDRESS_FIELDS if self.address[f]},
             "statusWords": self.status_words.most_common(TOP),
-            "statusUnmapped": self.unmapped,
+            "statusUnmapped": self.unmapped if self.statuses is not None else None,  # None: the map couldn't be read
             "legalForms": self.forms.most_common(TOP),
             "countries": self.countries.most_common(10),
             "numberShapes": self.shapes.most_common(5),
