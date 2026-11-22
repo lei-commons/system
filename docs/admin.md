@@ -21,10 +21,32 @@ authentication before the directory opens to the public.
   otherwise pending, assigned to the owner, with a comment linking here. Branch protection on `system` requires
   it; the private repositories can't be protected on GitHub's free plan, so there the session never merges a
   sensitive change without it;
+- **Log**: the decision log, a day at a time, with the day's summary first (owner, 2026-11-22; see below);
 - **Second factor**: set up the authenticator, or rotate its key.
 
-The rest of the site (Search, Graph explorer, Dashboards, Data, Log) stays at `/`. It is still private behind
-IAP; going public later removes IAP there and never touches the admin area.
+The rest of the site (Search, Graph explorer, Dashboards, Data) stays at `/`. It is still private behind IAP;
+going public later removes IAP there and never touches the admin area. The admin tabs show only to an admin
+(the page asks `/api/v1/me`); hiding them is a courtesy, since the server checks every request.
+
+## Everything is logged
+
+Owner decision 2026-11-22: every system event, admin action and change is summarised and logged, not only the
+data jobs. All of it goes into the same hash-chained decision log (`lc_core.decisions.write_events`), sealed
+each morning with the jobs' decisions and anchored in Rekor with the snapshot:
+
+| What | Recorded by | Actor |
+| --- | --- | --- |
+| The jobs' decisions (downloads, loads, snapshots, DeDi) | each job (`lc_core.decisions.Recorder`) | `job:<name>` |
+| Every admin action and refused code: state, budget, runs, tools, sources, second factor, approvals | the site and the console | `owner` |
+| Every merge into `system`'s main | `.github/workflows/changes.yml` (`scripts/record_change.py`) | `github:system` |
+| Every deploy, when it finishes (done, failed or stopped) | `.github/workflows/changes.yml` | `github:deploy-<name>` |
+| Every Terraform apply (counts and resource types) | `bootstrap/bootstrap.sh` | `owner` |
+| The budget guard's pause | the budget guard | `service:budget-guard` |
+
+The owner shows as `owner`, never their email, because the log becomes public with the rest of the system.
+Before 2026-11-22 admin actions and the guard's pauses were kept beside the chain (`owner-control/`,
+`budget-guard/`); the Log page still shows them on their day, marked "not chained". Recording never stops the
+change it records: a failure to write is itself logged (`decision-unrecorded`) or warned in the workflow.
 
 ## The two layers
 

@@ -6,7 +6,7 @@ name: deploy-budget-guard
 on:
   push:
     branches: [main]
-    paths: ["services/budget_guard/**"]
+    paths: ["services/budget_guard/**", "packages/lc_core/**", ".github/workflows/deploy-budget-guard.yml"]
 
 permissions:
   contents: read

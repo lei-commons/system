@@ -141,3 +141,60 @@ def test_helpers():
     assert log_bucket_name("lei-commons-prod-data") == "lei-commons-prod-decision-log"
     with pytest.raises(ValueError):
         log_bucket_name("elsewhere")
+
+
+# ---- single events: admin actions, deploys, merges, Terraform applies, guards ----
+
+def test_a_single_event_becomes_a_chained_run_object_sealed_with_the_day(tmp_path):
+    from lc_core.decisions import write_events
+
+    bucket = Bucket()
+    run(bucket, "job:ingest-gb", [{"event": "already-done", "source": "gb", "publish": "x"}], "r1", tmp_path)
+    day = next(iter(bucket.objects))[len("runs/"):][:10]
+    name = write_events(bucket, [{"ts": f"{day}T23:59:58Z", "actor": "owner:o@x.test", "action": "set-budget:1000",
+                                  "subject": "monthly budget", "decision": "done", "reason": "lower\nthe cap",
+                                  "trigger": "site", "component": "budget", "amount": 1000, "nested": {"x": 1}}], label="admin")
+    assert name.startswith(f"runs/{day}/{day}T235958.000Z-owner-admin")
+    (line,) = bucket.objects[name].decode().splitlines()
+    event = json.loads(line)
+    assert verify([line])[0] and event["actor"] == "owner" and "o@x.test" not in line
+    assert event["reason"] == "lower the cap" and event["refs"] == {"amount": 1000, "component": "budget"}
+    assert event["ts"] == f"{day}T23:59:58.000Z" and event["trigger"] == "site"
+    seal = seal_day(bucket, day, str(tmp_path))
+    assert seal["events"] == 2
+
+
+def test_a_decision_outside_the_fixed_set_is_kept_and_nothing_overwrites(tmp_path):
+    from lc_core.decisions import chain_text, public_actor, write_events
+
+    (line,) = chain_text([{"actor": "service:budget-guard", "action": "pause", "decision": "set up", "reason": ""}]).splitlines()
+    event = json.loads(line)
+    assert event["decision"] == "done" and event["refs"] == {"outcome": "set up"}
+    assert event["reason"] == "no reason given" and event["subject"] == "the system"
+    assert public_actor("owner:a@b.c") == public_actor("owner") == "owner" and public_actor("github:system") == "github:system"
+    bucket = Bucket()
+    record = {"ts": "2026-11-22T01:00:00Z", "actor": "github:deploy-site", "action": "deployed", "subject": "site",
+              "decision": "done", "reason": "x"}
+    write_events(bucket, [record], label="42")
+    with pytest.raises(PreconditionFailed):  # the same run's record twice: never replaced
+        write_events(bucket, [record], label="42")
+    with pytest.raises(ValueError):
+        write_events(bucket, [])
+
+
+def test_the_owners_actions_are_written_into_the_chain():
+    from lc_core.owner import GoogleBackend
+
+    class Storage:
+        def __init__(self):
+            self.buckets = {}
+
+        def bucket(self, name):
+            return self.buckets.setdefault(name, Bucket())
+
+    backend = GoogleBackend.__new__(GoogleBackend)
+    backend.project, backend._storage = "p", Storage()
+    backend.record({"ts": "2026-11-22T03:04:05Z", "actor": "owner:o@x.test", "action": "pause", "subject": "control state",
+                    "decision": "done", "reason": "maintenance", "trigger": "site"})
+    (name,) = backend._storage.buckets["p-decision-log"].objects
+    assert name.startswith("runs/2026-11-22/") and "owner-admin" in name

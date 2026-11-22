@@ -4,7 +4,7 @@ Every request needs the owner's IAP-verified Google account. Nothing here is
 public, and it stays that way until the owner approves going public.
 
 The admin area (owner decision 2026-11-21) is separate: the pages under /admin/ and the API under
-/api/v1/admin/ (the System and Data sources pages, the second factor, every owner action). The load
+/api/v1/admin/ (the System, Data sources, Log and Approvals pages, the second factor, every owner action). The load
 balancer sends those paths to a backend of their own, where IAP asks for a recent sign-in with 2-step
 verification (config/site.yaml admin). Admin requests are accepted only with that backend's IAP token
 (LC_IAP_ADMIN_AUDIENCE), so the admin paths can't be reached through the ordinary backend. Until the
@@ -136,6 +136,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(503, {"error": "the system view isn't configured"})
             meta = self.snapshot.meta if self.snapshot is not None else {}
             return self._json(200, self.system.collect({k: meta.get(k) for k in ("date", "snapshotRoot")}))
+        if path == "/api/v1/admin/log" or path.startswith("/api/v1/admin/log/"):
+            # The decision log is the admin area's (owner, 2026-11-22): every job's decisions, admin action,
+            # merge, deploy and Terraform apply, a day at a time.
+            if self.decisions is None:
+                return self._json(503, {"error": "the decision log isn't configured"})
+            if path == "/api/v1/admin/log":
+                return self._json(200, self.decisions.days())
+            day = self.decisions.day(path[len("/api/v1/admin/log/"):])
+            return self._json(200, day) if day else self._json(404, {"error": "not a day"})
         if path == "/api/v1/admin/approvals":
             if self.approvals is None:
                 return self._json(503, {"error": "approvals aren't configured"})
@@ -211,13 +220,8 @@ class Handler(BaseHTTPRequestHandler):
             if self.downloads is None:
                 return self._json(503, {"error": "downloads aren't configured"})
             return self._json(*self.downloads.recipe(path[len("/api/v1/snapshots/"):-len("/recipe")]))
-        if path == "/api/v1/log" or path.startswith("/api/v1/log/"):
-            if self.decisions is None:
-                return self._json(503, {"error": "the decision log isn't configured"})
-            if path == "/api/v1/log":
-                return self._json(200, self.decisions.days())
-            day = self.decisions.day(path[len("/api/v1/log/"):])
-            return self._json(200, day) if day else self._json(404, {"error": "not a day"})
+        if path == "/api/v1/me":  # which tabs to show: the admin area's only to an admin
+            return self._json(200, {"admin": self._owner(False) is not None})
         snap = self.snapshot
         if snap is None:
             return self._json(503, {"error": "no snapshot yet"})

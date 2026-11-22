@@ -4,8 +4,9 @@ FROM python:3.12-slim
 
 RUN useradd --create-home --uid 10001 guard
 WORKDIR /app
+COPY packages/lc_core packages/lc_core
 COPY services/budget_guard services/budget_guard
-RUN pip install --no-cache-dir ./services/budget_guard
+RUN pip install --no-cache-dir ./packages/lc_core ./services/budget_guard
 
 USER guard
 ENV PYTHONUNBUFFERED=1

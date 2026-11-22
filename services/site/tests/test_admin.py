@@ -66,9 +66,17 @@ class Snap:
     meta, count, relationship_count = {"date": "d", "snapshotRoot": "r"}, 0, 0
 
 
+class Decisions:
+    def days(self):
+        return {"days": [{"day": "2026-11-21", "sealed": False, "events": None, "head": None}]}
+
+    def day(self, day):
+        return {"day": day, "events": []} if day == "2026-11-21" else None
+
+
 def serve(admin_audience, second=None):
     srv = make_server(Snap(), [OWNER], "site-aud", ("127.0.0.1", 0), iap=fake_iap, system=System(), actions=Actions(),
-                      admin_audience=admin_audience, second_factor=second)
+                      admin_audience=admin_audience, second_factor=second, decisions=Decisions())
     threading.Thread(target=srv.serve_forever, daemon=True).start()
 
     def call(path, token, method="GET", body=None, headers=None):
@@ -107,6 +115,32 @@ def test_the_ordinary_paths_still_work_and_the_old_admin_paths_are_gone(split):
     assert split("/api/v1/system", "admin")[0] == 403  # an admin token is no good outside the admin area
     assert split("/api/v1/act", "site", "POST", {"action": "pause"}, SAME_ORIGIN)[0] == 405
     assert split("/admin/anything-else", "admin")[0] == 404
+
+
+def test_the_decision_log_is_in_the_admin_area(split):
+    status, body = split("/api/v1/admin/log", "admin")
+    assert status == 200 and json.loads(body)["days"][0]["day"] == "2026-11-21"
+    assert split("/api/v1/admin/log/2026-11-21", "admin")[0] == 200
+    assert split("/api/v1/admin/log/not-a-day", "admin")[0] == 404
+    assert split("/api/v1/admin/log", "site")[0] == 403  # through the ordinary backend: refused
+    assert split("/api/v1/log", "site")[0] == 404 and split("/api/v1/log/2026-11-21", "site")[0] == 404  # moved
+
+
+def test_the_site_says_whether_the_viewer_is_an_admin(split):
+    status, body = split("/api/v1/me", "site")
+    assert status == 200 and json.loads(body) == {"admin": True}
+    assert split("/api/v1/me", "nobody")[0] == 403  # the site is the owner's alone until it goes public
+
+
+def test_the_admin_tabs_are_marked_and_hidden_from_everyone_else():
+    static = Path(__file__).resolve().parents[1] / "lc_site" / "static"
+    html, css, app = ((static / n).read_text() for n in ("index.html", "app.css", "app.js"))
+    for route in ("sources", "system", "log", "approvals", "security"):
+        assert f'data-route="{route}" data-area="admin"' in html, route
+    assert 'body:not(.is-admin) #nav a[data-area="admin"] { display: none; }' in css
+    admin_views = app[app.index("const ADMIN_VIEWS"):app.index("};", app.index("const ADMIN_VIEWS"))]
+    public_views = app[app.index("const PUBLIC_VIEWS"):app.index("};", app.index("const PUBLIC_VIEWS"))]
+    assert "log:" in admin_views and "log:" not in public_views
 
 
 def test_before_the_admin_backend_exists_admin_paths_are_checked_like_the_rest():

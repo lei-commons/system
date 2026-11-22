@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 
 from lc_core.actions import catalogue, source_catalogue
 from lc_core.approvals import effective as effective_approvals
+from lc_core.decisions import public_actor
 
 CACHE_SECONDS = 30
 DECISIONS_SHOWN = 20
@@ -225,7 +226,8 @@ class SystemView:
         for name in reversed(names):
             event, _ = _try(lambda n=name: r.bucket_json("decision_log", n))
             if event:
-                decisions.append({k: event.get(k) for k in ("ts", "actor", "action", "decision", "reason", "amount", "component")})
+                decisions.append({k: event.get(k) for k in ("ts", "actor", "action", "decision", "reason", "amount", "component")}
+                                 | {"actor": public_actor(event.get("actor"))})
 
         return {
             "collectedAt": self._clock(),

@@ -4,8 +4,8 @@ Each action needs, at the moment it is taken: the owner's IAP login (checked by
 the caller), a reason, and a fresh authenticator code (lc_core.totp; a code
 works once, system-wide). Then it writes the control state or the source
 approvals, only if they haven't changed since they were read, or starts a job.
-Every attempt that reaches a decision is recorded in the decision log under
-``owner-control/``.
+Every attempt that reaches a decision is recorded in the decision log, chained with
+every other event of the day (lc_core.decisions.write_events; the owner shows as "owner", never their email).
 
 Changes to the sources registry (add, edit, remove, a suggestion for Claude;
 lc_core.source_edits) are checked before the code is: a form with a mistake
@@ -17,7 +17,6 @@ values: the values and their history stay in the control bucket.
 from __future__ import annotations
 
 import json
-import secrets
 from dataclasses import dataclass, field
 
 from . import source_edits
@@ -126,9 +125,9 @@ class GoogleBackend:
         return ((response.json().get("metadata") or {}).get("name") or "").rsplit("/", 1)[-1]
 
     def record(self, event: dict) -> None:
-        name = f"owner-control/{event['ts']}-{secrets.token_hex(3)}.json"
-        self._storage.bucket(f"{self.project}-decision-log").blob(name).upload_from_string(
-            json.dumps(event, indent=2, sort_keys=True), content_type="application/json", if_generation_match=0)
+        from .decisions import write_events
+
+        write_events(self._storage.bucket(f"{self.project}-decision-log"), [event], label="admin")
 
 
 def current_registry(backend, registry: list) -> list:
