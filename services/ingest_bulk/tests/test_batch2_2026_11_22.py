@@ -54,6 +54,10 @@ ABN_XML = """<?xml version="1.0" encoding="UTF-8"?>
  <EntityType><EntityTypeInd>FPT</EntityTypeInd><EntityTypeText>Family Partnership</EntityTypeText></EntityType>
  <MainEntity><NonIndividualName type="MN"><NonIndividualNameText>J &amp; K CITIZEN</NonIndividualNameText></NonIndividualName></MainEntity>
 </ABR>
+<ABR recordLastUpdatedDate="20261101" replaced="N"><ABN status="ACT" ABNStatusFromDate="20200101">44444444444</ABN>
+ <EntityType><EntityTypeInd>DES</EntityTypeInd><EntityTypeText>Deceased Estate</EntityTypeText></EntityType>
+ <MainEntity><NonIndividualName type="MN"><NonIndividualNameText>THE ESTATE OF JOHN CITIZEN</NonIndividualNameText></NonIndividualName></MainEntity>
+</ABR>
 </Transfer>"""
 
 
@@ -61,8 +65,9 @@ def test_abn_keeps_organisations_not_people_partnerships_or_asic_companies():
     rows = list(abn_xml(zipped({"20261101_Public01.xml": ABN_XML})))
     kept, why = mapped(AUSTRALIA_ABN, rows)
     assert [r["registrationNumber"] for r in kept] == ["51824753556"]
-    assert why == ["natural person or partnership", "has an ASIC number: in the directory through the ASIC dataset",
-                   "natural person or partnership"]
+    assert why == ["natural person, partnership or deceased estate",
+                   "has an ASIC number: in the directory through the ASIC dataset",
+                   "natural person, partnership or deceased estate", "natural person, partnership or deceased estate"]
     r = kept[0]
     assert r["directoryId"] == mint("AU", "AU-ABN", "51824753556") and r["legalForm"] == "Discretionary Trading Trust"
     assert r["otherNames"] == ["ACME TRADING"] and r["legalStatus"] == "Active"
