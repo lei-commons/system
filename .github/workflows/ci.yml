@@ -105,6 +105,8 @@ jobs:
           docker build -f services/ingest_sg/Dockerfile -t ingest-sg .
           docker build -f services/ingest_bulk/Dockerfile -t ingest-bulk .
           docker run --rm ingest-bulk python -c "from lc_ingest.bulk import PROFILES; from lc_core.sources import pipelines; assert set(PROFILES) <= {p['id'] for p in pipelines()}"
+          # A trial measures status words against the status map, inside the image (docs/source-trials.md).
+          docker run --rm ingest-bulk python -c "from lc_core.status import load; m = load(); assert m.sources(), 'no status map'"
           docker build -f services/ingest_socrata/Dockerfile -t ingest-socrata .
       - name: The browser image starts Chromium as its own (non-root) user, and its tests pass inside it
         run: |
