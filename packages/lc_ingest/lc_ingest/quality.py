@@ -28,7 +28,7 @@ TOP = 20
 DISTINCT_CAP = 2000          # vocabularies (status words, forms) beyond this are counted as "(other)"
 SAMPLE = 25
 EMAIL = re.compile(r"[^\s@]+@[^\s@]+\.[a-z]{2,}", re.I)
-PHONE = re.compile(r"(?:\+|\b00)\d[\d ()-]{7,}\d|\b0\d{2,4}[ -]?\d{3}[ -]?\d{3,4}\b")
+PHONE = re.compile(r"(?:\+|\b00)\d[\d ()-]{7,}\d|\b0\d{2,4}[ -]?\d{3,4}[ -]?\d{3,4}\b")
 ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
