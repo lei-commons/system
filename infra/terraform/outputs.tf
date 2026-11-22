@@ -26,11 +26,6 @@ output "gateway_audience" {
   value       = local.gateway_enabled ? google_cloud_run_v2_service.gateway[0].uri : ""
 }
 
-output "console_url" {
-  description = "The owner console. Empty until console_enabled is true."
-  value       = var.console_enabled ? google_cloud_run_v2_service.console[0].uri : ""
-}
-
 output "site_url" {
   description = "The private site and API (its own address once it is served only through its load balancer, config/site.yaml). Empty until site_enabled is true."
   value       = local.site_lb_only ? "https://${local.site_domain}/" : (var.site_enabled ? google_cloud_run_v2_service.site[0].uri : "")

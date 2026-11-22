@@ -1,6 +1,6 @@
 # Day zero
 
-Everything the human owner does once, by hand, before the agents take over. About 30 minutes. After this, the owner only uses the owner console (pause, stop, restart, manual mode, take over, set budget, approve sources).
+Everything the human owner does once, by hand, before the agents take over. About 30 minutes. After this, the owner only uses the admin page, https://lei-commons.nfh.global/admin/ (pause, stop, restart, manual mode, take over, set budget, approve sources; `docs/admin.md`). The separate owner console was retired on 2026-11-22.
 
 The system starts **paused**. Nothing runs and nothing is spent on models until you switch it to running.
 

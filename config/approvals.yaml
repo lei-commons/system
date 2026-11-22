@@ -29,9 +29,8 @@ sensitive_paths:
   - "agents/**"
   - "ledger/**"         # the ledger repositories' workflow, installed from here
   - "private-repos/**"  # the private repositories' owner-approval workflow, installed from here
-  # The egress gateway (what the system may reach) and the owner console.
+  # The egress gateway (what the system may reach).
   - "services/conduct_proxy/**"
-  - "services/console/**"
   # Authentication, the second factor, owner actions and control state.
   - "packages/lc_core/lc_core/iap.py"
   - "packages/lc_core/lc_core/totp.py"

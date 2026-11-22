@@ -189,17 +189,8 @@ resource "google_cloud_run_v2_job" "load_db" {
   depends_on = [google_project_service.apis, google_secret_manager_secret_iam_member.db_admin_loader]
 }
 
-# The owner console and the site start these jobs when the owner asks ("Run now",
-# confirmed with a fresh second-factor code). Granted on each job, not project-wide.
-resource "google_cloud_run_v2_job_iam_member" "console_runs" {
-  for_each = var.cycle_enabled && var.console_enabled ? toset(local.cycle_steps) : toset([])
-
-  location = var.region
-  name     = each.value
-  role     = "roles/run.invoker"
-  member   = "serviceAccount:${google_service_account.sa["console"].email}"
-}
-
+# The site starts these jobs when the owner asks on the admin page ("Run now", confirmed with a fresh
+# second-factor code). Granted on each job, not project-wide.
 resource "google_cloud_run_v2_job_iam_member" "site_runs" {
   for_each = var.cycle_enabled && var.site_enabled ? toset(local.cycle_steps) : toset([])
 

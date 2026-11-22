@@ -121,9 +121,6 @@ class SystemView:
         statuses = effective_approvals(entries, decisions if not decisions_error else {})
         if decisions_error:  # can't read the owner's decisions: show nothing as approved, as the jobs do
             statuses = {k: {**v, "status": "unknown"} for k, v in statuses.items()}
-        services, _ = _try(lambda: r.api(f"https://run.googleapis.com/v2/projects/{r.project}/locations/{r.region}/services")
-                           .get("services", []), [])
-        console = next((s.get("uri") for s in services if s["name"].rsplit("/", 1)[1] == "owner-console"), None)
         actions = {}
         for a in source_catalogue(entries, statuses) if not decisions_error else []:
             actions.setdefault(a["id"].split(":", 1)[1], []).append(a)
@@ -152,7 +149,7 @@ class SystemView:
                      or (x["approval"]["status"] == "approved" and not (x["assessment"] or {}).get("verified")))
         changes = [{k: e.get(k) for k in ("at", "by", "source", "change")} | {"fields": sorted((e.get("after") or {}))}
                    for e in reversed((edits or {}).get("history") or [])][:20] if not edits_error else []
-        return {"total": len(rows), **counts, "review": review, "sources": rows, "console": console,
+        return {"total": len(rows), **counts, "review": review, "sources": rows,
                 "decisionsError": decisions_error, "editsError": edits_error, "editable": editable, "changes": changes,
                 "limits": {"hint": source_edits.HINT_MAX, "summary": source_edits.SUMMARY_MAX, "name": source_edits.NAME_MAX,
                            "text": source_edits.TEXT_MAX},
@@ -256,8 +253,6 @@ class SystemView:
             "cyclesError": cycles_error,
             "stores": stores,
             "sources": sources,
-            # Owner actions are taken inline on the site's pages (lc_site.actions); the console offers them too.
-            "console": next((s.get("uri") for s in services if s["name"].rsplit("/", 1)[1] == "owner-console"), None),
             "actions": catalogue(self._sources, control or {}) if control is not None else [],
             "steps": steps,
             "lastCycle": last_cycle(cycles, job_rows, steps),

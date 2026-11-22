@@ -12,7 +12,7 @@ def test_the_real_rules_load_and_cover_the_sensitive_parts():
     sensitive = [
         ".github/workflows/deploy-site.yml", "infra/terraform/site_lb.tf", "bootstrap/bootstrap.sh",
         "config/sources.yaml", "config/approvals.yaml", "constitution.md", "scripts/check_system_state.py",
-        "services/conduct_proxy/conduct_proxy/upstream.py", "services/console/lc_console/server.py",
+        "services/conduct_proxy/conduct_proxy/upstream.py",
         "packages/lc_core/lc_core/totp.py", "packages/lc_core/lc_core/second_factor.py",
         "packages/lc_core/lc_core/approval_rules.py", "services/site/lc_site/server.py",
         "services/site/lc_site/approvals.py", "services/site/Dockerfile", "agents/harness/main.py",

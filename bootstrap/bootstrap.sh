@@ -27,7 +27,6 @@ BUDGET="1500"
 AUTO_APPROVE=0
 BUDGET_PUBSUB=true
 GATEWAY_IMAGE=""
-CONSOLE=false
 BUDGET_GUARD=false
 SITE=false
 CYCLE=false
@@ -47,7 +46,7 @@ while [[ $# -gt 0 ]]; do
     --budget) BUDGET="$2"; shift 2 ;;
     --no-budget-pubsub) BUDGET_PUBSUB=false; shift ;;
     --gateway-image) GATEWAY_IMAGE="$2"; shift 2 ;;
-    --console) CONSOLE=true; shift ;;
+    --console) echo "note: --console is ignored: the owner console was retired on 2026-11-22 (the admin page took over)"; shift ;;
     --budget-guard) BUDGET_GUARD=true; shift ;;
     --site) SITE=true; shift ;;
     --cycle) CYCLE=true; shift ;;
@@ -120,9 +119,6 @@ if [[ -z "$GATEWAY_IMAGE" ]]; then
   GATEWAY_IMAGE="$(gcloud run services describe conduct-gateway --project "$PROJECT" --region "$REGION" \
     --format='value(spec.template.spec.containers[0].image)' 2>/dev/null || true)"
 fi
-if [[ "$CONSOLE" == false ]] && gcloud run services describe owner-console --project "$PROJECT" --region "$REGION" >/dev/null 2>&1; then
-  CONSOLE=true
-fi
 if [[ "$CYCLE" == false ]] && gcloud run jobs describe load-db --project "$PROJECT" --region "$REGION" >/dev/null 2>&1; then
   CYCLE=true
 fi
@@ -147,7 +143,6 @@ TF_VARS=(
   -var "budget_currency=${CURRENCY}"
   -var "budget_pubsub_enabled=${BUDGET_PUBSUB}"
   -var "gateway_image=${GATEWAY_IMAGE}"
-  -var "console_enabled=${CONSOLE}"
   -var "budget_guard_enabled=${BUDGET_GUARD}"
   -var "site_enabled=${SITE}"
   -var "cycle_enabled=${CYCLE}"

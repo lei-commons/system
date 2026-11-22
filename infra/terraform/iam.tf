@@ -11,7 +11,6 @@ locals {
     checker      = "Checker agents (model calls that review changes)"
     publisher    = "Builds, signs and publishes snapshots"
     workflow     = "Runs the daily cycle"
-    console      = "Owner console backend (behind IAP, owner only)"
     budget-guard = "Pauses the system when spend reaches the owner's cap; cannot resume"
     gateway      = "Runs the conduct gateway, the only route to the internet for jobs"
     site         = "Serves the private site and API from the latest snapshot; reads snapshots only"
@@ -35,7 +34,6 @@ locals {
     checker   = ["roles/aiplatform.user"]
     publisher = ["roles/bigquery.jobUser", "roles/bigquery.dataEditor"]
     workflow  = ["roles/run.invoker", "roles/run.viewer", "roles/workflows.invoker"]
-    console   = ["roles/datastore.user"]
     # budget-guard has no project roles beyond logging; it writes only the control bucket.
     budget-guard = []
     gateway      = []
@@ -52,16 +50,16 @@ locals {
     data = {
       "roles/storage.objectUser"    = ["ingest", "crawler", "resolver", "publisher"]
       "roles/storage.objectCreator" = ["maker", "checker"]
-      "roles/storage.objectViewer"  = ["maker", "checker", "console", "site"]
+      "roles/storage.objectViewer"  = ["maker", "checker", "site"]
     }
     snapshots = {
       "roles/storage.objectUser"   = ["publisher"]
-      "roles/storage.objectViewer" = ["console", "site", "loader"]
+      "roles/storage.objectViewer" = ["site", "loader"]
     }
     decision_log = {
       # The deployer records each merge and deploy (.github/workflows/changes.yml): create-only, like every writer.
-      "roles/storage.objectCreator" = ["ingest", "crawler", "resolver", "maker", "checker", "publisher", "workflow", "console", "budget-guard", "loader", "site", "deployer"]
-      "roles/storage.objectViewer"  = ["publisher", "console", "site"]
+      "roles/storage.objectCreator" = ["ingest", "crawler", "resolver", "maker", "checker", "publisher", "workflow", "budget-guard", "loader", "site", "deployer"]
+      "roles/storage.objectViewer"  = ["publisher", "site"]
     }
     ledger_baselines = {
       "roles/storage.objectCreator" = ["maker"]
@@ -69,12 +67,11 @@ locals {
     }
     frames = {
       "roles/storage.objectCreator" = ["publisher", "workflow"]
-      "roles/storage.objectViewer"  = ["console"]
     }
     control = {
       "roles/storage.objectViewer" = local.runtime_sas
-      # The site takes the owner's actions inline (IAP plus a fresh code each time), as the console does.
-      "roles/storage.objectUser" = ["console", "budget-guard", "site"]
+      # The site takes the owner's actions on the admin page (IAP re-authentication plus a fresh code each time).
+      "roles/storage.objectUser" = ["budget-guard", "site"]
     }
   }
 

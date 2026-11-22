@@ -32,7 +32,7 @@ variable "github_org_id" {
 }
 
 variable "monthly_budget_usd" {
-  description = "Initial monthly budget. Changed live by the owner in the console afterwards; Terraform does not revert it."
+  description = "Initial monthly budget. Changed live by the owner on the admin page afterwards; Terraform does not revert it."
   type        = number
   default     = 1500
 }
@@ -73,12 +73,6 @@ variable "budget_guard_enabled" {
   default     = false
 }
 
-variable "console_enabled" {
-  description = "Create the owner console. Push the image first: the deploy-console workflow does this."
-  type        = bool
-  default     = false
-}
-
 variable "gateway_image" {
   description = "Conduct gateway image, by digest, from bootstrap/build-gateway.sh. Empty until the first build; the gateway and egress check are created once it is set."
   type        = string
@@ -92,7 +86,7 @@ variable "enable_deny_policy" {
 }
 
 variable "owner_key_sources" {
-  description = "Sources whose access needs an owner-provided credential. One empty secret is created per source; the owner adds the value in the console."
+  description = "Sources whose access needs an owner-provided credential. One empty secret is created per source; the owner adds the value as a new secret version."
   type        = list(string)
   default     = ["gb-coh-api-key", "in-mca-credentials"]
 }

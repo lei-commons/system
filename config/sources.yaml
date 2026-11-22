@@ -9,7 +9,7 @@
 #   verified: false until the owner (or counsel) has checked it.
 #   risk: low | medium | high | unknown
 # approval: the starting status before any owner decision: approved | pending (default).
-#   The owner approves, denies or keeps pending on the Data sources page (owner console,
+#   The owner approves, denies or keeps pending on the Data sources page (admin area,
 #   fresh second-factor code); those decisions override this. Only approved sources are
 #   fetched, and only approved sources' records reach the snapshot, database and site.
 # Owner edits: on the Data sources page the owner can add a source, edit its attributes

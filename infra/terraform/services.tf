@@ -1,4 +1,4 @@
-# Firestore (work queue, console state), Artifact Registry, BigQuery, Pub/Sub,
+# Firestore (work queue), Artifact Registry, BigQuery, Pub/Sub,
 # Secret Manager and the budget.
 
 resource "google_firestore_database" "default" {
@@ -46,8 +46,8 @@ resource "google_pubsub_topic" "control" {
 }
 
 # Empty secrets for sources that need an owner-provided credential
-# (decision: owner enters them in the console's Sources page; until then the
-# source runs in web-discovery mode).
+# (the owner adds the value as a new secret version; until then the source runs
+# in web-discovery mode).
 resource "google_secret_manager_secret" "source" {
   for_each  = toset(var.owner_key_sources)
   secret_id = "source-${each.value}"
@@ -68,13 +68,6 @@ resource "google_secret_manager_secret_iam_member" "ingest_reads" {
   secret_id = each.value.id
   role      = "roles/secretmanager.secretAccessor"
   member    = google_service_account.sa["ingest"].member
-}
-
-resource "google_secret_manager_secret_iam_member" "console_adds" {
-  for_each  = google_secret_manager_secret.source
-  secret_id = each.value.id
-  role      = "roles/secretmanager.secretVersionAdder"
-  member    = google_service_account.sa["console"].member
 }
 
 # The budget sends spend updates to Pub/Sub several times a day. The budget

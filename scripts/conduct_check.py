@@ -39,7 +39,6 @@ PROTECTED = [
     "infra/",
     "bootstrap/",
     "services/conduct_proxy/",
-    "services/console/",
     "services/budget_guard/",
     "services/site/",
     "packages/lc_core/lc_core/iap.py",

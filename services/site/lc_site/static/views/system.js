@@ -52,14 +52,14 @@ function layout(d) {
   });
   const bottom = TOP + n * ROW + 40;
   Object.assign(nodes, {
-    console: [30, bottom, "Owner console", "two factors", svc("owner-console")],
+    admin: [30, bottom, "Admin page", "two factors", svc("lei-commons-site")],
     control: [260, bottom, "Control state", "owner only", control],
     guard: [490, bottom, "Budget guard", "pauses at the cap", svc("budget-guard")],
     agents: [720, bottom, "Agents", "off until you switch them on", "idle"],
   });
   const flows = [...d.sources.flatMap((s) => [[`src:${s.store}`, "gateway"], ["gateway", `job:${s.job}`], [`job:${s.job}`, "data"]]),
     ["data", "snapshot"], ["snapshot", "site"]];
-  const links = [["egress", "gateway"], ["console", "control"], ["guard", "control"], ["control", "agents"]];
+  const links = [["egress", "gateway"], ["admin", "control"], ["guard", "control"], ["control", "agents"]];
   return { nodes, flows, links, height: bottom + H + 20 };
 }
 
