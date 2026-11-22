@@ -745,7 +745,11 @@ sources:
         subsection and NTEE codes. Most are in no state register we read (about 1.6-1.8M new). The 'in care of' name
         is often a person and would be dropped.
       verified: false
-
+    # Built 2026-11-22 (owner approved the source the same day): lc_ingest.bulk IRS, the four regional CSVs weekly.
+    pipeline: {job: ingest-us-irs, image: ingest-bulk, store: us-irs, records_as: us-irs-eo-bmf,
+               label: IRS exempt organizations (United States), refresh: monthly extract, read weekly,
+               dataset: "Exempt Organizations Business Master File Extract (irs.gov)",
+               attribution: "Source: IRS Exempt Organizations Business Master File Extract (EO BMF), a US government work."}
   - id: us-cms-nppes-org
     name: "CMS NPPES NPI file, type 2 (organisation) providers"
     country: "US"
@@ -1183,7 +1187,11 @@ sources:
         (unincorporated charities, trusts, CIOs). Charitable companies join Companies House by company number.
         Trustees kept as names only or dropped; no contact details.
       verified: false
-
+    # Built 2026-11-22 (owner approved the source the same day): lc_ingest.bulk CCEW, the register extract weekly.
+    pipeline: {job: ingest-gb-ccew, image: ingest-bulk, store: gb-ccew, records_as: gb-ccew,
+               label: Charity Commission for England and Wales, refresh: daily extract, read weekly,
+               dataset: "Register of Charities full extract (Charity Commission)",
+               attribution: "Contains public sector information licensed under the Open Government Licence v3.0 (Charity Commission for England and Wales)."}
   - id: lt-jar
     name: "Lithuania Register of Legal Entities (Registrų centras) open data"
     country: "LT"

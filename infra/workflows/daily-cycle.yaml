@@ -22,6 +22,8 @@ main:
         - ingest-au
         - ingest-jp
         - ingest-ca
+        - ingest-us-irs
+        - ingest-gb-ccew
       - failed: []
       - fallbacks:
           ingest-ie: ingest-ie-browser

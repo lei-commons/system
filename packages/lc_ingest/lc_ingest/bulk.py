@@ -18,11 +18,30 @@ one row per name a company has had, in ACN order; located each run through data.
 and processed once per publication. Companies only (business names, often sole traders, are a
 separate dataset); no addresses or officers. GLEIF RA000014 writes ACNs with spaces, which IDs ignore.
 
+Every profile added from 2026-11-22 names the columns it needs: a file whose header lacks one stops the run
+with an error naming the missing columns and the columns the file has (names only, never values), so a first
+run against a file we haven't seen yet diagnoses itself in the status report.
+
 Canada (Corporations Canada, open.canada.ca, OGL-Canada 2.0): four daily CSVs (active and inactive,
 business and other federal corporations), all processed each week, one after another. The
 registered office's street lines are kept when given (owner decision 2026-11-16). The files' corporation
 numbers include the check digit, as GLEIF RA000072's do ("454461-7" is 4544617), but never a leading zero,
 which GLEIF sometimes keeps ("046311-6" is 463116): config/sources.yaml gleif_identity drops it (2026-11-20).
+
+United States IRS (Exempt Organizations Business Master File extract, public domain): four regional CSVs,
+every tax-exempt organisation (about 1.9 million), processed weekly. Organisations only; the "in care of"
+column, which usually names a person, is never read. No GLEIF code for EINs is used: IRS records mint under
+US-IRS and don't merge with LEI records (an organisation's LEI sits under its state of incorporation).
+
+England and Wales charities (Charity Commission register extract, OGL v3): one tab-separated file in a ZIP,
+daily. Main charities only (linked charities share the number). A charity that is also a company is already
+in the directory through Companies House, so it is skipped here. No contact address, phone or email is read:
+for a small charity they are often a trustee's own. Minted under GB-CCEW.
+
+Estonia (e-Business Register open data): the register's basic data, one semicolon-separated CSV in a ZIP,
+daily. Sole proprietors (FIE, "füüsilisest isikust ettevõtja") are people and are dropped. GLEIF RA000181 is the
+same register with the same 8-digit codes. Not in PROFILES: the portal asks for its terms of use to be accepted
+before downloading, which agents never do (constitution Article 2), so it waits for the owner's decision.
 """
 
 from __future__ import annotations
@@ -48,8 +67,20 @@ def _date(value) -> str | None:
     return value or None
 
 
-def zipped_csv(member_suffix=".csv", encoding="utf-8-sig", key=None):
-    """A reader for a ZIP holding one CSV: rows as dicts. With ``key``, later rows repeating a key are skipped."""
+def require_columns(reader: csv.DictReader, columns, what: str) -> csv.DictReader:
+    """Check the header names ``columns``. The error lists only column names, never a value: a first run against
+    a file whose layout we've only read about tells us, in the status report, what the file really holds."""
+    have = [_clean(c).lstrip("\ufeff") for c in (reader.fieldnames or [])]
+    missing = [c for c in columns if c not in have]
+    if missing:
+        raise ValueError(f"{what}: missing columns {missing}; the file has {have[:40]}")
+    reader.fieldnames = have
+    return reader
+
+
+def zipped_csv(member_suffix=".csv", encoding="utf-8-sig", key=None, delimiter=",", columns=()):
+    """A reader for a ZIP holding one CSV: rows as dicts. With ``key``, later rows repeating a key are skipped.
+    With ``columns``, the header must name each of them (require_columns)."""
     def read(binary_file):
         with zipfile.ZipFile(binary_file) as z:
             names = [n for n in z.namelist() if n.lower().endswith(member_suffix)]
@@ -57,7 +88,10 @@ def zipped_csv(member_suffix=".csv", encoding="utf-8-sig", key=None):
                 raise ValueError(f"expected one {member_suffix} file in the archive, found {names}")
             seen = set()
             with z.open(names[0]) as raw:
-                for row in csv.DictReader(io.TextIOWrapper(raw, encoding=encoding, newline="")):
+                rows = csv.DictReader(io.TextIOWrapper(raw, encoding=encoding, newline=""), delimiter=delimiter)
+                if columns:
+                    require_columns(rows, columns, names[0])
+                for row in rows:
                     if key:
                         k = _clean(row.get(key))
                         if k in seen:
@@ -333,10 +367,13 @@ CA_PARTS = tuple((name, CA_FILES + f"corporations-{name}-en.csv") for name in
 CA_PROVINCES = {"AB", "BC", "MB", "NB", "NL", "NS", "NT", "NU", "ON", "PE", "QC", "SK", "YT"}
 
 
-def plain_csv(encoding="utf-8-sig"):
-    """A reader for an uncompressed CSV file: rows as dicts."""
+def plain_csv(encoding="utf-8-sig", errors="strict", columns=()):
+    """A reader for an uncompressed CSV file: rows as dicts. With ``columns``, the header must name each of them."""
     def read(binary_file):
-        yield from csv.DictReader(io.TextIOWrapper(binary_file, encoding=encoding, newline=""))
+        rows = csv.DictReader(io.TextIOWrapper(binary_file, encoding=encoding, errors=errors, newline=""))
+        if columns:
+            require_columns(rows, columns, "the CSV file")
+        yield from rows
     return read
 
 
@@ -371,4 +408,138 @@ CANADA = Profile(
     ra="RA000072", read=plain_csv(), mapper=ca_record, parts=CA_PARTS)
 
 
-PROFILES = {p.source: p for p in (IRELAND, FINLAND, AUSTRALIA, CANADA)}
+# ---- United States: IRS exempt organisations ----
+
+IRS_FILES = "https://www.irs.gov/pub/irs-soi/"
+IRS_PARTS = tuple((f"region-{n}", f"{IRS_FILES}eo{n}.csv") for n in (1, 2, 3, 4))
+IRS_COLUMNS = ("EIN", "NAME", "STREET", "CITY", "STATE", "ZIP", "SUBSECTION", "ORGANIZATION", "STATUS")
+IRS_ORGANIZATION = {"1": "Corporation", "2": "Trust", "3": "Co-operative", "4": "Partnership", "5": "Association"}
+IRS_STATUS = {"01": "Unconditional exemption", "02": "Conditional exemption", "12": "Trust described in 4947(a)(2)",
+              "25": "Terminating private foundation status"}
+
+
+def _irs_form(row: dict) -> str | None:
+    kind = IRS_ORGANIZATION.get(_clean(row.get("ORGANIZATION")).lstrip("0"), "")
+    subsection = _clean(row.get("SUBSECTION"))
+    if subsection == "92":
+        law = "4947(a)(1) charitable trust"
+    elif subsection.isdigit() and int(subsection) > 0:
+        law = f"exempt under 501(c)({int(subsection)})"
+    else:
+        law = ""
+    return ", ".join(p for p in (kind, law) if p) or None
+
+
+def irs_record(row: dict) -> dict:
+    from .registers import US_CODES
+
+    ein, name = _clean(row.get("EIN")), _clean(row.get("NAME"))
+    if not (ein.isdigit() and len(ein) == 9) or not name:
+        raise Skip("no number or name")
+    state = _clean(row.get("STATE")).upper()
+    domestic = state in US_CODES
+    zip_code = _clean(row.get("ZIP"))
+    status = _clean(row.get("STATUS"))
+    return {
+        "directoryId": mint("US", "US-IRS", ein),
+        "legalName": name,
+        "legalForm": _irs_form(row),
+        "registrationAuthority": "US-IRS",
+        "registrationNumber": ein,
+        "legalStatus": IRS_STATUS.get(status, status) or None,
+        "legalAddress": {k: v for k, v in {
+            "addressLines": [_clean(row.get("STREET"))] if domestic and _clean(row.get("STREET")) else [],
+            "city": _clean(row.get("CITY")).upper() if domestic else "",
+            "region": state if domestic else "",
+            "postalCode": zip_code[:5] if domestic and zip_code[:5].isdigit() else "",
+            "country": "US" if domestic else ""}.items() if v},
+        "recordMode": "mirror",
+    }
+
+
+IRS = Profile(
+    source="us-irs-eo-bmf", job="ingest-us-irs", store="us-irs", filename="us-irs-eo-bmf", extension=".csv",
+    file_url="", ra="US-IRS", read=plain_csv(errors="replace", columns=IRS_COLUMNS), mapper=irs_record,
+    parts=IRS_PARTS)
+
+
+# ---- England and Wales: Charity Commission ----
+
+CCEW_COLUMNS = ("registered_charity_number", "linked_charity_number", "charity_name", "charity_type",
+                "charity_registration_status", "date_of_registration", "charity_company_registration_number")
+
+
+def ccew_record(row: dict) -> dict:
+    number, name = _clean(row.get("registered_charity_number")), _clean(row.get("charity_name"))
+    if not number.isdigit() or not name:
+        raise Skip("no number or name")
+    if _clean(row.get("linked_charity_number")) not in ("", "0"):
+        raise Skip("a linked charity: part of its main charity's record")
+    if _clean(row.get("charity_company_registration_number")):
+        raise Skip("also a company: in the directory through Companies House")
+    website = _clean(row.get("charity_contact_web"))
+    return {
+        "directoryId": mint("GB", "GB-CCEW", number),
+        "legalName": name,
+        "legalForm": _clean(row.get("charity_type")) or None,
+        "legalJurisdiction": "GB",
+        "registrationAuthority": "GB-CCEW",
+        "registrationNumber": number,
+        "legalStatus": _clean(row.get("charity_registration_status")) or None,
+        "incorporationDate": _date(row.get("date_of_registration")),
+        "legalAddress": {"country": "GB"},
+        "website": website if website.startswith(("http://", "https://", "www.")) else None,
+        "recordMode": "mirror",
+    }
+
+
+CCEW = Profile(
+    source="gb-ccew", job="ingest-gb-ccew", store="gb-ccew", filename="gb-ccew-charities", extension=".zip",
+    file_url="https://ccewuksprdoneregsadata1.blob.core.windows.net/data/txt/publicextract.charity.zip",
+    ra="GB-CCEW", read=zipped_csv(member_suffix=".txt", delimiter="\t", columns=CCEW_COLUMNS), mapper=ccew_record)
+
+
+# ---- Estonia: e-Business Register ----
+
+EE_COLUMNS = ("nimi", "ariregistri_kood", "ettevotja_oiguslik_vorm", "ettevotja_staatus_tekstina",
+              "ettevotja_esmakande_kpv")
+
+
+def _ee_date(value) -> str | None:
+    value = _clean(value)
+    if len(value) == 10 and value[2] == "." and value[5] == ".":
+        return f"{value[6:]}-{value[3:5]}-{value[:2]}"
+    return None
+
+
+def ee_record(row: dict) -> dict:
+    code, name = _clean(row.get("ariregistri_kood")), _clean(row.get("nimi"))
+    if not code.isdigit() or not name:
+        raise Skip("no number or name")
+    form = _clean(row.get("ettevotja_oiguslik_vorm"))
+    if "isikust ettevõtja" in form.lower() or form.upper() == "FIE":
+        raise Skip("natural person")
+    address = _clean(row.get("ads_normaliseeritud_taisaadress")) or _clean(row.get("ettevotja_aadress"))
+    return {
+        "directoryId": mint("EE", "RA000181", code),
+        "legalName": name,
+        "legalForm": form or None,
+        "legalJurisdiction": "EE",
+        "registrationAuthority": "EE-RIK",
+        "registrationNumber": code,
+        "legalStatus": _clean(row.get("ettevotja_staatus_tekstina")) or None,
+        "incorporationDate": _ee_date(row.get("ettevotja_esmakande_kpv")),
+        "legalAddress": {k: v for k, v in {"addressLines": [address] if address else [],
+                                           "postalCode": _clean(row.get("indeks_ettevotja_aadressis")),
+                                           "country": "EE"}.items() if v},
+        "recordMode": "mirror",
+    }
+
+
+ESTONIA = Profile(
+    source="ee-rik", job="ingest-ee", store="ee", filename="ee-rik-basic-data", extension=".csv.zip",
+    file_url="https://avaandmed.ariregister.rik.ee/sites/default/files/avaandmed/ettevotja_rekvisiidid__lihtandmed.csv.zip",
+    ra="RA000181", read=zipped_csv(delimiter=";", columns=EE_COLUMNS), mapper=ee_record)
+
+
+PROFILES = {p.source: p for p in (IRELAND, FINLAND, AUSTRALIA, CANADA, IRS, CCEW)}
