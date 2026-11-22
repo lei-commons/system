@@ -26,7 +26,8 @@ from lc_core.fetch import Gateway
 from lc_core.lease import Busy, lease
 from lc_ingest import health
 from lc_ingest.runner import run_ingest
-from lc_ingest.bulk import PROFILES, Profile
+from lc_ingest.bulk import Profile
+from lc_ingest.profiles import PROFILES
 from lc_ingest.store import GcsStore
 
 

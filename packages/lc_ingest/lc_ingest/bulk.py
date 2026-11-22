@@ -40,14 +40,19 @@ for a small charity they are often a trustee's own. Minted under GB-CCEW.
 
 Batch 2 (owner approved 2026-11-22), all on trial first (docs/source-trials.md):
 - Australia ABN (ABN Lookup bulk extract, data.gov.au, CC BY 3.0 AU): two weekly ZIPs of XML, every ABN.
-  Individuals (sole traders) and general or family partnerships, whose names are usually people's, are
-  dropped; so is any ABN with an ASIC number, because that company or body is already here through the ASIC
+  Individuals (sole traders), general or family partnerships and deceased estates, whose names are people's,
+  are dropped (estates since the first trial, which found 17,682); so is any ABN with an ASIC number, because that company or body is already here through the ASIC
   dataset. What's left is trusts, super funds, associations, government bodies, co-operatives and the like.
 - France RNA (Répertoire national des associations, waldec, data.gouv.fr, Licence Ouverte 2.0): one ZIP of
   per-département CSVs. The manager's address (adrg_*, often a volunteer's home) and the seat's street are never
   read: city and postcode only.
-- Argentina RNS (Registro Nacional de Sociedades, datos.jus.gob.ar, CC BY 4.0): every company with its CUIT; a
-  CUIT of a natural person (prefixes 20, 23, 24, 27) is dropped.
+- Argentina RNS (Registro Nacional de Sociedades, datos.jus.gob.ar, CC BY 4.0): two files, the newest yearly
+  companies file and the newest non-profits file (civil associations, foundations), one row per CUIT; a CUIT of a
+  natural person (prefixes 20, 23, 24, 27) is dropped. The first trial read only the non-profits file, the newest
+  resource, and found 92,523 repeated CUITs: hence the two named parts and the de-duplication.
+
+Every profile from batch 1 on sets guard_names: a record whose name holds an email address or a phone number is
+dropped, because the number or address may be a person's (the first trials found 39 in France's RNA).
 - Taiwan tax registrations (全國營業(稅籍)登記, Ministry of Finance, Open Government Data License 1.0): every
   operating business by unified business number; sole proprietorships (獨資) and partnerships (合夥) are dropped.
   Minted under TW-UBN, the number the company register (GCIS) uses too.
@@ -71,6 +76,7 @@ from datetime import date
 from lc_core.directory_id import mint
 
 from .gleif import Skip
+from .quality import EMAIL, PHONE
 
 
 def _clean(value) -> str:
@@ -171,6 +177,7 @@ class Profile:
     locate: object = None  # gateway -> (key, url), for registers whose file moves with each publication
     parts: tuple = ()      # (name, url) for registers published as several files, all processed each run; the url
                            # may be a function of the gateway, for files that move (asked only after the gate)
+    guard_names: bool = False  # drop a record whose name holds an email address or phone number (it may be a person's)
 
     def url(self) -> str:
         return self.file_url
@@ -182,6 +189,9 @@ class Profile:
 
     def record(self, row: dict) -> dict:
         record = self.mapper(row)
+        if self.guard_names and any(EMAIL.search(n) or PHONE.search(n)
+                                    for n in [record.get("legalName") or ""] + list(record.get("otherNames") or [])):
+            raise Skip("name holds an email address or phone number")
         return {k: v for k, v in record.items() if v not in (None, "", [], {})}
 
 
@@ -476,7 +486,7 @@ def irs_record(row: dict) -> dict:
 
 IRS = Profile(
     source="us-irs-eo-bmf", job="ingest-us-irs", store="us-irs", filename="us-irs-eo-bmf", extension=".csv",
-    file_url="", ra="US-IRS", read=plain_csv(errors="replace", columns=IRS_COLUMNS), mapper=irs_record,
+    file_url="", guard_names=True, ra="US-IRS", read=plain_csv(errors="replace", columns=IRS_COLUMNS), mapper=irs_record,
     parts=IRS_PARTS)
 
 
@@ -513,7 +523,7 @@ def ccew_record(row: dict) -> dict:
 CCEW = Profile(
     source="gb-ccew", job="ingest-gb-ccew", store="gb-ccew", filename="gb-ccew-charities", extension=".zip",
     file_url="https://ccewuksprdoneregsadata1.blob.core.windows.net/data/txt/publicextract.charity.zip",
-    ra="GB-CCEW", read=zipped_csv(member_suffix=".txt", delimiter="\t", columns=CCEW_COLUMNS), mapper=ccew_record)
+    guard_names=True, ra="GB-CCEW", read=zipped_csv(member_suffix=".txt", delimiter="\t", columns=CCEW_COLUMNS), mapper=ccew_record)
 
 
 # ---- Estonia: e-Business Register ----
@@ -593,7 +603,7 @@ def ckan_resource(gateway, package_url: str, choose, host: str) -> dict:
 # ---- Australia: ABN bulk extract ----
 
 ABN_PACKAGE = "https://data.gov.au/data/api/3/action/package_show?id=abn-bulk-extract"
-ABN_PEOPLE = {"IND", "PTR", "FPT"}  # individual or sole trader, other partnership, family partnership
+ABN_PEOPLE = {"IND", "PTR", "FPT", "DES"}  # individual or sole trader, other or family partnership, deceased estate
 ABN_STATUS = {"ACT": "Active", "CAN": "Cancelled"}
 
 
@@ -643,7 +653,7 @@ def abn_xml(binary_file):
 def abn_record(row: dict) -> dict:
     abn, kind = _clean(row.get("abn")).replace(" ", ""), _clean(row.get("type")).upper()
     if kind in ABN_PEOPLE:
-        raise Skip("natural person or partnership")
+        raise Skip("natural person, partnership or deceased estate")
     if _clean(row.get("asic")):
         raise Skip("has an ASIC number: in the directory through the ASIC dataset")
     name = _clean(row.get("name"))
@@ -668,7 +678,7 @@ def abn_record(row: dict) -> dict:
 
 AUSTRALIA_ABN = Profile(
     source="au-abr-abn", job="ingest-au-abn", store="au-abn", filename="au-abn-extract", extension=".zip",
-    file_url="", ra="AU-ABN", read=abn_xml, mapper=abn_record,
+    file_url="", guard_names=True, ra="AU-ABN", read=abn_xml, mapper=abn_record,
     parts=(("split-1-10", _abn_url("public_split_1_10")), ("split-11-20", _abn_url("public_split_11_20"))))
 
 
@@ -723,7 +733,7 @@ def rna_record(row: dict) -> dict:
 
 FRANCE_RNA = Profile(
     source="fr-rna", job="ingest-fr-rna", store="fr-rna", filename="fr-rna-waldec", extension=".zip", file_url="",
-    ra="FR-RNA", read=zipped_csvs(delimiter=";", columns=RNA_COLUMNS, errors="replace"), mapper=rna_record,
+    guard_names=True, ra="FR-RNA", read=zipped_csvs(delimiter=";", columns=RNA_COLUMNS, errors="replace"), mapper=rna_record,
     locate=rna_locate)
 
 
@@ -734,24 +744,57 @@ AR_COLUMNS = ("cuit", "razon_social", "tipo_societario", "fecha_hora_contrato_so
 AR_PEOPLE = ("20", "23", "24", "27")  # CUIT prefixes of natural persons
 
 
-def ar_locate(gateway):
-    """The newest full CSV (not the 1,000-row sample), by its last change: (its key, its URL)."""
-    def choose(resources):
-        full = [r for r in resources if (r.get("format") or "").upper() in ("CSV", "ZIP")
-                and "muestr" not in (r.get("name") or "").lower()]
-        return max(full, key=lambda r: r.get("last_modified") or r.get("created") or "", default=None)
-    picked = ckan_resource(gateway, AR_PACKAGE, choose, "datos.jus.gob.ar")
-    stamp = re.sub(r"[^0-9]", "", picked.get("last_modified") or picked.get("created") or "")[:8] or "latest"
-    return f"{stamp} {picked['id'][:8]}", picked["url"]
+AR_YEAR = re.compile(r"registro nacional de sociedades\s*-\s*(\d{4})")
+
+
+def _ar_companies(resources):
+    """The newest yearly companies file ("Registro Nacional de Sociedades - 2026"): not the sample, the non-profits
+    or a two-month extract."""
+    years = [(int(m.group(1)), r) for r in resources
+             if (m := AR_YEAR.fullmatch(_clean(r.get("name")).lower())) and (r.get("format") or "").upper() in ("CSV", "ZIP")]
+    return max(years, key=lambda pair: pair[0])[1] if years else None
+
+
+def _ar_nonprofits(resources):
+    """The newest single file of non-profit entities (civil associations, foundations)."""
+    files = [r for r in resources if "sin fines de lucro" in _clean(r.get("name")).lower()
+             and (r.get("format") or "").upper() == "CSV"]
+    return max(files, key=lambda r: r.get("last_modified") or r.get("created") or "", default=None)
+
+
+def _ar_url(choose):
+    def url(gateway):
+        return ckan_resource(gateway, AR_PACKAGE, choose, "datos.jus.gob.ar")["url"]
+    return url
 
 
 def ar_csv(binary_file):
-    """The register as a CSV, plain or zipped (both are published)."""
+    """The register as a CSV, plain or zipped, one row per CUIT. A ZIP's members are read newest first (by name) and a
+    CUIT already seen is skipped, so the newest row wins whether the members are snapshots or updates. The
+    non-profits file repeats CUITs too (the first trial found 92,523 repeats)."""
     head = binary_file.read(4)
     binary_file.seek(0)
-    reader = zipped_csvs(columns=AR_COLUMNS, errors="replace") if head.startswith(b"PK") \
-        else plain_csv(errors="replace", columns=AR_COLUMNS)
-    yield from reader(binary_file)
+    seen = set()
+
+    def once(rows):
+        for row in rows:
+            cuit = re.sub(r"\D", "", _clean(row.get("cuit")))
+            if cuit and cuit in seen:
+                continue
+            seen.add(cuit)
+            yield row
+
+    if not head.startswith(b"PK"):
+        yield from once(plain_csv(errors="replace", columns=AR_COLUMNS)(binary_file))
+        return
+    with zipfile.ZipFile(binary_file) as z:
+        names = sorted((n for n in z.namelist() if n.lower().endswith(".csv")), reverse=True)
+        if not names:
+            raise ValueError(f"no .csv file in the archive (it holds {z.namelist()[:10]})")
+        for name in names:
+            with z.open(name) as raw:
+                rows = csv.DictReader(io.TextIOWrapper(raw, encoding="utf-8-sig", errors="replace", newline=""))
+                yield from once(require_columns(rows, AR_COLUMNS, name))
 
 
 def ar_record(row: dict) -> dict:
@@ -779,8 +822,9 @@ def ar_record(row: dict) -> dict:
 
 
 ARGENTINA = Profile(
-    source="ar-rns", job="ingest-ar", store="ar", filename="ar-rns", extension=".bin", file_url="", ra="AR-CUIT",
-    read=ar_csv, mapper=ar_record, locate=ar_locate)
+    source="ar-rns", job="ingest-ar", store="ar", filename="ar-rns", extension=".bin", file_url="", guard_names=True, ra="AR-CUIT",
+    read=ar_csv, mapper=ar_record,
+    parts=(("companies", _ar_url(_ar_companies)), ("non-profits", _ar_url(_ar_nonprofits))))
 
 
 # ---- Taiwan: Ministry of Finance business (tax) registrations ----
@@ -824,7 +868,7 @@ def tw_record(row: dict) -> dict:
 
 TAIWAN_TAX = Profile(
     source="tw-mof-tax", job="ingest-tw-tax", store="tw-tax", filename="tw-mof-bgmopen1", extension=".zip",
-    file_url="https://eip.fia.gov.tw/data/BGMOPEN1.zip", ra="TW-UBN",
+    file_url="https://eip.fia.gov.tw/data/BGMOPEN1.zip", guard_names=True, ra="TW-UBN",
     read=zipped_csv(columns=TW_COLUMNS, errors="replace"), mapper=tw_record)
 
 

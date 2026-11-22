@@ -185,9 +185,15 @@ main:
         in:
         - ingest-au-abn
         - ingest-us-irs
+        - ingest-us-nppes
         - ingest-fr-rna
         - ingest-ar
+        - ingest-cy
         - ingest-gb-ccew
+        - ingest-si
+        - ingest-ca-cra
+        - ingest-nl-anbi
+        - ingest-gb-oscr
         steps:
         - trial_run:
             try:
