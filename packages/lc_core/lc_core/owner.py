@@ -1,4 +1,4 @@
-"""Carrying out the owner's actions: shared by the site (inline on its pages) and the owner console.
+"""Carrying out the owner's actions, for the site's admin area.
 
 Each action needs, at the moment it is taken: the owner's IAP login (checked by
 the caller), a reason, and a fresh authenticator code (lc_core.totp; a code
@@ -193,7 +193,7 @@ def _perform_edit(*, backend, verifier, secret, registry, action, kind, name, re
     except source_edits.Invalid as exc:
         return Outcome(400, f"Nothing saved: {exc}.")
     if not secret:
-        return Outcome(403, "The second factor isn't set up yet: enrol in the owner console first.")
+        return Outcome(403, "The second factor isn't set up yet: set it up on the admin page's Second factor tab first.")
     if not verifier.verify(secret, (code or "").strip()):
         _refused(backend, action, name, email, now, trigger, log)
         if verifier.locked():
@@ -252,7 +252,7 @@ def perform(*, backend, verifier, secret: str, sources: list, registry: list, ac
     if not reason:
         return Outcome(400, "Say why, for the decision log.")
     if not secret:
-        return Outcome(403, "The second factor isn't set up yet: enrol in the owner console first.")
+        return Outcome(403, "The second factor isn't set up yet: set it up on the admin page's Second factor tab first.")
     try:
         verified = verifier.verify(secret, (code or "").strip())
     except Exception as exc:  # e.g. the shared record of used codes can't be written: fail closed, and say why

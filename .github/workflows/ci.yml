@@ -87,8 +87,6 @@ jobs:
       - run: pytest -q agents/harness
       - name: Sandbox holds against a real escape attempt
         run: bash agents/harness/test-sandbox.sh
-      - run: pip install -e services/console
-      - run: pytest -q services/console
       - run: pip install -e services/budget_guard
       - run: pytest -q services/budget_guard
       - name: Budget guard image builds
@@ -121,8 +119,6 @@ jobs:
           docker build -f services/site/Dockerfile -t lei-commons-site .
           # The installed package, not the source tree: tests run from source and would not notice missing files.
           docker run --rm lei-commons-site python -c "from lc_site.server import STATIC, static_files; files = static_files(); assert (STATIC / 'index.html').is_file(); assert '/static/app.js' in files and '/static/views/graph.js' in files and '/static/vendor/cytoscape-3.34.4.esm.min.js' in files, sorted(files); print(len(files), 'app files installed')"
-      - name: Console image builds
-        run: docker build -f services/console/Dockerfile -t owner-console .
       - name: Gateway image builds and starts
         run: |
           docker build -f services/conduct_proxy/Dockerfile -t conduct-gateway .

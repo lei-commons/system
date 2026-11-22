@@ -1,10 +1,9 @@
 """RFC 6238 one-time codes for owner actions, with replay protection shared by every service.
 
-The owner's actions can be taken on the site (inline, on the page) or in the
-owner console. Both check the same second factor. A code is accepted once,
-system-wide: the last accepted step is kept in Cloud Storage and moved forward
-only with a generation check, so the site and the console can't each accept
-the same code. Wrong codes count towards a lockout, also kept there, so every
+The owner's actions are taken on the site's admin area, which checks the second
+factor. A code is accepted once, system-wide: the last accepted step is kept in
+Cloud Storage and moved forward only with a generation check, so two instances
+can't each accept the same code. Wrong codes count towards a lockout, also kept there, so every
 service shares one count and a restart doesn't reset it.
 """
 

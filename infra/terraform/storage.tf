@@ -104,8 +104,8 @@ resource "google_storage_bucket" "frames" {
   depends_on = [google_project_service.apis]
 }
 
-# Owner control state (constitution Article 1). Only the owner and the console
-# service write here; every agent can read it.
+# Owner control state (constitution Article 1). Only the owner's actions (the site's admin area) and the
+# budget guard write here; every agent can read it.
 resource "google_storage_bucket" "control" {
   name                        = "${local.bucket_prefix}-control"
   location                    = var.region

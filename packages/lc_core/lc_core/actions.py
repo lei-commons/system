@@ -1,6 +1,6 @@
-"""The owner's actions: what the site's pages offer, inline, and what the site and the owner console perform.
+"""The owner's actions: what the site's admin pages offer and what the site performs.
 
-One catalogue, so the pages, the site and the console can't disagree (lc_core.owner carries them out). Jobs come from the
+One catalogue, so the pages and the site can't disagree (lc_core.owner carries them out). Jobs come from the
 sources registry, so a new source gets its actions with no other change.
 
 The state rules: pause and stop always work, even on a missing or corrupt state; everything else refuses to

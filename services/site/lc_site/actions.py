@@ -6,8 +6,8 @@ attributes) or ``hint`` (a suggestion for Claude) for changes to the registry. A
 - the browser marks it same-origin (Sec-Fetch-Site), with a JSON body, so no
   other site and no plain HTML form can send it;
 - the reason is given (optional for registry changes) and the authenticator code is
-  fresh: a code works once, across the site and the owner console (lc_core.totp).
-The work itself is lc_core.owner.perform, the same code the console runs.
+  fresh: a code works once (lc_core.totp).
+The work itself is lc_core.owner.perform.
 """
 
 from __future__ import annotations

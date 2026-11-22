@@ -5,7 +5,8 @@ authentication before the directory opens to the public.
 
 ## Where
 
-`https://<domain>/admin/` (config/site.yaml `domain` and `admin`). It holds:
+`https://<domain>/admin/` (config/site.yaml `domain` and `admin`). It is the only place for owner actions: the
+separate owner console (`owner-console`, its own run.app address) was retired on 2026-11-22. It holds:
 
 - **System**: the cycle, jobs, control state, and every owner action (pause, stop, resume, manual mode,
   run a job, pause or resume one job, the monthly budget), plus two tools: **probe a URL** (the source's first
@@ -37,7 +38,7 @@ each morning with the jobs' decisions and anchored in Rekor with the snapshot:
 | What | Recorded by | Actor |
 | --- | --- | --- |
 | The jobs' decisions (downloads, loads, snapshots, DeDi) | each job (`lc_core.decisions.Recorder`) | `job:<name>` |
-| Every admin action and refused code: state, budget, runs, tools, sources, second factor, approvals | the site and the console | `owner` |
+| Every admin action and refused code: state, budget, runs, tools, sources, second factor, approvals | the site's admin area | `owner` |
 | Every merge into `system`'s main | `.github/workflows/changes.yml` (`scripts/record_change.py`) | `github:system` |
 | Every deploy, when it finishes (done, failed or stopped) | `.github/workflows/changes.yml` | `github:deploy-<name>` |
 | Every Terraform apply (counts and resource types) | `bootstrap/bootstrap.sh` | `owner` |

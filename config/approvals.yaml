@@ -27,9 +27,8 @@ sensitive_paths:
   - "constitution.md"
   - "scripts/check_system_state.py"
   - "agents/**"
-  # The egress gateway (what the system may reach) and the owner console.
+  # The egress gateway (what the system may reach).
   - "services/conduct_proxy/**"
-  - "services/console/**"
   # Authentication, the second factor, owner actions and control state.
   - "packages/lc_core/lc_core/iap.py"
   - "packages/lc_core/lc_core/totp.py"

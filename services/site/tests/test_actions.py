@@ -134,7 +134,7 @@ def test_not_enrolled_or_secret_unavailable(site):
     post, code, clock, backend, changed, secret = site
     secret["value"] = "pending:ABC"
     status, data = post({"action": "pause", "reason": "x", "code": code()})
-    assert status == 403 and "enrol" in data["message"]
+    assert status == 403 and "Second factor tab" in data["message"]
     secret["value"] = None
     assert post({"action": "pause", "reason": "x", "code": code()})[0] == 403
     assert backend.events == []
