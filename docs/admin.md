@@ -14,6 +14,7 @@ separate owner console (`owner-console`, its own run.app address) was retired on
   synthetic copy of the database, timed and dropped, as the load-db job). They replaced the gateway-probe and
   load-test workflows; their results show in the status report (`status.yml`);
 - **Data sources**: approve, deny or keep pending; add, edit or remove a source; leave Claude a suggestion;
+  re-approve a trial marked invalid after failing on several days, for a new trial (docs/source-trials.md);
 - **Approvals**: pull requests that change sensitive paths (`config/approvals.yaml`: how the system is built,
   deployed and given access, and how the owner signs in) wait here. The owner approves a pull request's exact
   head commit with a reason and a fresh code; the site then sets its `owner-approval` status to success as the

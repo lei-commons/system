@@ -46,6 +46,18 @@ function sampleTable(sample) {
     ...sample.map((r) => h("tr", {}, ...cols.map(([k]) => h("td", k === "registrationNumber" ? { class: "mono" } : {}, cell(r, k)))))));
 }
 
+// Marked invalid after failing on several separate days (lc_core.validity): it stops until re-approved on Data sources.
+function validityLine(v) {
+  if (!v || v.state === "ok") return null;
+  if (v.state === "invalid") {
+    return h("p", { class: "held" }, h("strong", {}, `Invalid since ${v.at}. `), (v.reason || "") + (/[.!?]$/.test(v.reason || ".") ? "" : "."),
+      " It no longer runs; re-approve it on the ", h("a", { href: `#/sources/invalid` }, "Data sources"), " tab to try again.");
+  }
+  if (v.state === "retrying") return h("p", { class: "muted" }, `Re-approved ${v.at}: it runs again from the next cycle.`);
+  return h("p", { class: "held" }, `Failed on ${v.failedDays.length} of ${v.threshold} days (${v.failedDays.join(", ")}); `
+    + `marked invalid on day ${v.threshold}.`);
+}
+
 function trialCard(t) {
   const q = t.report || {};
   const failure = t.health && t.health.lastFailure;
@@ -59,6 +71,7 @@ function trialCard(t) {
       : h("p", { class: "muted" }, t.reportError ? `The report can't be read right now (${t.reportError}).`
         : "No complete run yet: the job runs once on deploy, then in the cycle's last step whenever there is a new publication or new code to measure."),
     failure ? h("p", { class: "held" }, `Last failure ${failure.at}: ${failure.error}: ${failure.message}`) : null,
+    validityLine(t.validity),
     h("div", { class: "kpis" },
       tile(fmt(q.records), "records mapped (latest file)", "t1"),
       tile(fmt(skipped), "rows skipped", skipped ? "t4" : "t6"),

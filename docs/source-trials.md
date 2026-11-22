@@ -63,6 +63,34 @@ Owner decisions 2026-11-22:
   with the missing and present column names, never values. A layout read about in documentation, but never
   seen (the session never downloads), is confirmed or corrected on the first run.
 
+## A trial that keeps failing is marked invalid
+
+Owner decision 2026-11-22: "After few trials/tries across few days (say 3 days), if it is established that a
+particular data source is invalid, then it must be marked so and not to be processed anymore. In the Data sources
+tab, it can be shown as "invalid" with reason given against that data source. ... Allow admin to explicitly
+re-approve such invalid ones. If so, it should be tried again over few days (say 3 days) and then if it is still
+erroring out, mark again as "Invalid" with date and reason against that data source." (`lc_core.validity`)
+
+- **Counting.** The trial job keeps `trials/<source>/validity.json`. A run that fails (an error, or one that ends
+  denied or held without measuring) adds its UTC day to the count; retries on the same day count once. A run that
+  measures, or finds nothing new to measure, empties the count. Runs that stop because the system is paused, the
+  job is busy, or the source isn't approved say nothing about the source and count nothing.
+- **Marking.** On the day the count reaches `trials.invalid_after_failed_days` in `config/sources.yaml` (3), the
+  source is marked invalid with the date and the reason: the days, and the last error with its message. The
+  public log gets `trial-invalidated` with the count and the error's type only.
+- **Stopping.** From then on the job stops as soon as it starts (`trial-invalid`): it fetches nothing and measures
+  nothing. It still rewrites `validity.json`, so the trial lifecycle rule never takes the mark. The Data sources
+  tab shows the source as **Invalid**, with the date and reason, and the Trials tab says the same.
+- **Re-approving.** The owner can re-approve it on the Data sources tab ("Re-approve for a new trial", a reason and
+  a fresh authenticator code). That writes an approval newer than the mark, and the server refuses it unless the
+  source really is marked invalid. At its next run the job moves the mark into the history (`trial-retried`) and
+  starts counting from zero, so the source gets the full number of days again. If it still fails, it is marked
+  invalid again, with the new date and reason; the tab lists the earlier marks.
+- **Writes.** The job writes the mark in the data bucket. Only the owner's actions write approvals, in the control
+  bucket, so a job can never approve itself.
+- **Scope.** Only sources on trial are marked. A production source that fails keeps its records and is reported by
+  `source-failed` and its health, and the owner decides what to do with it.
+
 ## Promotion: once
 
 A source moves to production through one pull request that changes its `stage` to `production`. Owner decision

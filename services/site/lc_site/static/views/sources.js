@@ -11,9 +11,9 @@
 import { ADMIN_API, actionBar, api, codeForm, errorBox, flag, fmt, h } from "../lib.js";
 
 const STATUS = { approved: ["good", "✓", "Approved"], denied: ["bad", "✕", "Denied"], pending: ["warn", "◷", "Pending"],
-  unknown: ["idle", "?", "Unknown"] };
+  invalid: ["bad", "⊘", "Invalid"], unknown: ["idle", "?", "Unknown"] };
 const RISK = { low: "good", medium: "warn", high: "bad", unknown: "idle" };
-const FILTERS = [["all", "All"], ["approved", "Approved"], ["pending", "Pending"], ["denied", "Denied"], ["built", "In use"],
+const FILTERS = [["all", "All"], ["approved", "Approved"], ["pending", "Pending"], ["denied", "Denied"], ["invalid", "Invalid"], ["built", "In use"],
   ["unbuilt", "Not built yet"], ["yours", "Added or edited by you"]];
 
 const when = (t) => (t ? (String(t).length <= 10 ? t : new Date(t).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })) : "–");
@@ -38,7 +38,34 @@ function link(href, text) {
     : h("span", { class: "muted" }, "–");
 }
 
-const SHORT = { "source-approve": "Approve", "source-deny": "Deny", "source-pending": "Keep pending" };
+const SHORT = { "source-approve": "Approve", "source-deny": "Deny", "source-pending": "Keep pending",
+  "source-retry": "Re-approve for a new trial" };
+
+// A source on trial is marked invalid after failing on several separate days (lc_core.validity); its job stops
+// until it is re-approved, and then gets as many days again.
+const sentence = (text) => (text ? (/[.!?]$/.test(text) ? text : text + ".") : "");
+const isInvalid = (s) => (s.validity || {}).state === "invalid";
+
+function validityBox(s) {
+  const v = s.validity;
+  if (!v) return null;
+  const earlier = v.history && v.history.length ? h("details", { class: "history" }, h("summary", {}, `Earlier invalid marks (${v.history.length})`),
+    h("ul", {}, ...v.history.map((x) => h("li", {}, `Invalid on ${when(x.at)}: ${x.reason || "no reason recorded"}`
+      + (x.reapprovedAt ? ` · re-approved by ${who(x.reapprovedBy)} on ${when(x.reapprovedAt)}` : ""))))) : null;
+  if (v.state === "invalid") {
+    return h("div", {}, h("p", { class: "held" }, h("strong", {}, `Invalid since ${when(v.at)}. `), sentence(v.reason),
+      " Its trial no longer runs. Re-approve it to try again for ", String(v.threshold), " days."), earlier);
+  }
+  if (v.state === "retrying") {
+    return h("div", {}, h("p", { class: "muted" }, `Re-approved on ${when(v.at)}: its trial runs again from the next cycle.`), earlier);
+  }
+  const since = v.retrialSince ? `Re-approved on ${when(v.retrialSince)}. ` : "";
+  if (v.state === "failing") {
+    return h("div", {}, h("p", { class: "held" }, `${since}Trial failing on ${v.failedDays.length} of ${v.threshold} days `
+      + `(${v.failedDays.join(", ")}): it is marked invalid on day ${v.threshold}. Last: ${v.reason || "?"}`), earlier);
+  }
+  return since || earlier ? h("div", {}, since ? h("p", { class: "muted" }, since + "No failures since.") : null, earlier) : null;
+}
 
 // ---- the edit form (also used, empty, to add a source) ----
 
@@ -184,13 +211,13 @@ function row(s, d, reload) {
   const o = s.owner || {};
   const held = s.records && ap.status !== "approved";
   const extra = s.editable ? [editButton(s, d, reload), hintButton(s, d, reload), removeButton(s, reload)].filter(Boolean) : [];
-  return h("section", { class: `card card-pad source-row ${ap.status || ""}`, id: `source-${s.id}` },
+  return h("section", { class: `card card-pad source-row ${ap.status || ""}${isInvalid(s) ? " invalid" : ""}`, id: `source-${s.id}` },
     h("div", { class: "source-row-head" },
       h("span", { class: "flag big" }, s.country && s.country !== "*" ? flag(s.country) : "🌐"),
       h("div", { style: { flex: 1, minWidth: 0 } },
         h("div", { class: "source-name" }, s.name, " ", h("span", { class: "muted mono", style: { fontSize: "12px" } }, s.id)),
         h("div", { class: "muted" }, [s.country === "*" ? "global" : s.country, s.access, s.method, s.cadence].filter(Boolean).join(" · "))),
-      statusPill(ap.status)),
+      isInvalid(s) ? statusPill("invalid") : statusPill(ap.status)),
     h("div", { class: "toolbar", style: { margin: "4px 0 0" } },
       h("span", { class: `pill ${RISK[a.risk] || "idle"}` }, `risk: ${a.risk || "unknown"}`),
       s.built ? h("span", { class: "chip" }, `in use · ${s.records ? fmt(s.records) + " records" : "no records yet"}`)
@@ -207,6 +234,7 @@ function row(s, d, reload) {
       h("span", { class: "muted" }, " Not legal advice.")),
     o.hint ? h("div", { class: "hint-box" }, h("strong", {}, "Your suggestion for Claude"),
       h("span", { class: "muted" }, ` · ${when(o.hint_at)}`), h("div", { class: "hint-text" }, o.hint)) : null,
+    validityBox(s),
     held ? h("p", { class: "held" }, "Records are kept in the private store and ledger, but left out of the snapshot, database and site while this source isn't approved.") : null,
     h("div", { class: "decision muted" }, ap.decided ? `Last decision: ${ap.status} by ${ap.by} on ${when(ap.at)}${ap.reason ? " · “" + ap.reason + "”" : ""}`
       : `Starting status: ${ap.status}${ap.reason ? " · " + ap.reason : ""}`,
@@ -236,7 +264,8 @@ export async function render(root, arg, params) {
   const matches = (s) => words.every((w) => [s.name, s.id, s.country, s.licence, (s.assessment || {}).risk]
     .some((v) => String(v || "").toLowerCase().includes(w)));
   const shown = d.sources.filter((s) => (filter === "all" || (filter === "built" ? s.built : filter === "unbuilt" ? !s.built
-    : filter === "yours" ? !!(s.owner && (s.owner.edited_at || s.owner.hint)) : s.approval.status === filter)) && matches(s));
+    : filter === "yours" ? !!(s.owner && (s.owner.edited_at || s.owner.hint)) : filter === "invalid" ? isInvalid(s)
+    : s.approval.status === filter)) && matches(s));
   const review = d.review ?? d.sources.filter((s) => s.approval.status === "pending"
     || (s.approval.status === "approved" && !(s.assessment || {}).verified)).length;
   const add = d.editable ? addPanel(d, reload) : null;
@@ -248,6 +277,7 @@ export async function render(root, arg, params) {
     add ? add.panel : null,
     h("div", { class: "kpis" }, tile(d.total, "data sources in the registry"), tile(d.approved, "approved: fetched and published", "ok"),
       tile(d.pending, "pending: not used until you decide", "warnish"), tile(d.denied, "denied: never fetched", "badish"),
+      tile(d.invalid || 0, "invalid: trial failed for days, stopped", d.invalid ? "badish" : ""),
       tile(review, "need your review (pending, or terms not yet verified)")),
     d.decisionsError ? h("p", { class: "held" }, `Your decisions can't be read right now (${d.decisionsError}), so nothing is treated as approved and the jobs stop.`) : null,
     d.editsError ? h("p", { class: "held" }, `Your edits to sources can't be read right now (${d.editsError}), so the list shows the registry as built, and editing is off until they can be read.`) : null,

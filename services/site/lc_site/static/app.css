@@ -269,6 +269,7 @@ dl.mini dd { margin: 2px 0 0; word-break: break-word; }
 .source-row.approved { border-left-color: var(--good); }
 .source-row.pending { border-left-color: var(--warning); }
 .source-row.denied { border-left-color: var(--critical); }
+.source-row.approved.invalid { border-left-color: var(--critical); }
 .source-row-head { display: flex; gap: 12px; align-items: center; }
 dl.mini.wide { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
 .assessment { margin: 10px 0 0; line-height: 1.55; }

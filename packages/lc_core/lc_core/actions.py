@@ -21,6 +21,9 @@ GATES = {"build-snapshot": "job:publish", "load-db": "job:load-db"}
 # Data source approvals: the action names and the status each sets (see lc_core.approvals).
 SOURCE_ACTIONS = {"source-approve": "approved", "source-deny": "denied", "source-pending": "pending"}
 SOURCE_LABELS = {"source-approve": "Approve", "source-deny": "Deny", "source-pending": "Keep pending"}
+# A source on trial marked invalid after failing on several days (lc_core.validity; owner decision 2026-11-22):
+# the owner re-approves it, which writes an approval newer than the mark, so it is tried again for as many days.
+RETRY_ACTION = "source-retry"
 # Changes to the registry itself (lc_core.source_edits): add, edit or remove a source, or leave Claude a suggestion.
 EDIT_ACTIONS = ("source-add", "source-edit", "source-remove", "source-hint")
 # Tools: one-off runs with their command overridden (they replaced the gateway-probe and load-test workflows when
@@ -110,10 +113,16 @@ def catalogue(sources: list, state: dict | None) -> list:
     return out
 
 
-def source_catalogue(registry: list, statuses: dict) -> list:
-    """Approve, deny or keep pending, for every source in the registry: the choices other than its status now."""
+def source_catalogue(registry: list, statuses: dict, invalid=()) -> list:
+    """Approve, deny or keep pending, for every source in the registry: the choices other than its status now.
+    ``invalid``: the ids of sources on trial marked invalid (lc_core.validity), which may be re-approved."""
     out = []
     for source in registry:
+        if source["id"] in invalid:
+            out.append({"id": f"{RETRY_ACTION}:{source['id']}", "group": "Data sources",
+                        "label": f"Re-approve {source.get('name') or source['id']} for a new trial", "tone": "primary",
+                        "help": "Marked invalid after failing on several days. Re-approved, its trial runs again from the "
+                                "next cycle, for as many days, and is marked invalid again if it still fails."})
         current = (statuses.get(source["id"]) or {}).get("status", "pending")
         for kind, status in SOURCE_ACTIONS.items():
             if status != current:
@@ -135,6 +144,8 @@ def known(sources: list, action: str, registry: list = ()) -> bool:
         return True
     if kind in SOURCE_ACTIONS or (kind in EDIT_ACTIONS and kind != "source-add"):
         return name in {s["id"] for s in registry}
+    if kind == RETRY_ACTION:  # only a source on trial can be marked invalid
+        return name in {s["id"] for s in registry if (s.get("pipeline") or {}).get("stage") == "trial"}
     if kind == "run":
         return name in jobs(sources)
     if kind in ("pause-component", "resume-component"):

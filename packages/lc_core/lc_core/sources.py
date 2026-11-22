@@ -84,6 +84,18 @@ def stage(source_id: str, path=None) -> str | None:
     return next((p["stage"] for p in pipelines(path) if p["id"] == source_id), None)
 
 
+def invalid_after_failed_days(path=None) -> int:
+    """How many separate failed days mark a source on trial invalid (``trials.invalid_after_failed_days``;
+    lc_core.validity). At least 1; 3 if unset."""
+    from .validity import DEFAULT_FAILED_DAYS
+
+    data = yaml.safe_load(Path(_path(path)).read_text(encoding="utf-8")) or {}
+    value = (data.get("trials") or {}).get("invalid_after_failed_days", DEFAULT_FAILED_DAYS)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError("trials.invalid_after_failed_days must be a whole number of days, at least 1")
+    return value
+
+
 def jobs(path=None) -> list:
     """The ingestion jobs of the daily cycle, in file order (build-snapshot and load-db follow them)."""
     return [p["job"] for p in pipelines(path)]
