@@ -244,3 +244,44 @@ def test_run_with_overrides_sends_cloud_runs_override_body():
         "taskCount": 1, "timeout": "18000s"}}
     backend.run_job("ingest-gb")
     assert backend._http.body == {}  # a plain run sends no overrides
+
+
+# ---- re-approving a source on trial marked invalid (lc_core.validity; owner decision 2026-11-22) ----
+
+TRIAL_REGISTRY = REGISTRY + [{"id": "xx-trial", "name": "A trial", "pipeline": {"job": "ingest-xx", "stage": "trial"}}]
+MARK = {"invalid": {"at": "2026-11-12T03:00:00Z", "reason": "Failed on 3 separate days"}}
+
+
+def _retry(backend, validity, reason="the source fixed its file"):
+    backend.read_validity = lambda source: validity
+    clock = Clock()
+    return perform(backend=backend, verifier=Verifier(MemorySteps(), clock=clock), secret=SECRET, sources=SOURCES,
+                   registry=TRIAL_REGISTRY, action="source-retry:xx-trial", reason=reason,
+                   code=code_at(SECRET, int(clock.t) // 30), email="o@x.test", now="2026-11-13T09:00:00Z", trigger="site")
+
+
+def test_re_approving_an_invalid_trial_writes_a_newer_approval():
+    backend = Backend()
+    out = _retry(backend, MARK)
+    assert out.ok and "runs again" in out.message
+    decision = backend.approvals["xx-trial"]
+    assert decision["status"] == "approved" and decision["at"] == "2026-11-13T09:00:00Z"
+    assert decision["reason"].startswith("re-approved for a new trial")
+    assert backend.events[-1]["action"] == "source-retry:xx-trial" and backend.events[-1]["decision"] == "done"
+
+
+def test_re_approval_is_refused_when_the_trial_is_not_invalid():
+    backend = Backend()
+    assert _retry(backend, {}).status == 409 and backend.approvals == {}
+    backend.approvals = {"xx-trial": {"status": "approved", "at": "2026-11-12T08:00:00Z"}}  # already re-approved
+    assert _retry(backend, MARK).status == 409
+
+
+def test_only_a_source_on_trial_can_be_re_approved():
+    from lc_core.actions import known, source_catalogue
+
+    assert known(SOURCES, "source-retry:xx-trial", TRIAL_REGISTRY)
+    assert not known(SOURCES, "source-retry:gleif", TRIAL_REGISTRY)
+    offered = [a["id"] for a in source_catalogue(TRIAL_REGISTRY, {}, {"xx-trial"})]
+    assert "source-retry:xx-trial" in offered and "source-retry:gleif" not in offered
+    assert "source-retry:xx-trial" not in [a["id"] for a in source_catalogue(TRIAL_REGISTRY, {})]

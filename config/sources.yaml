@@ -72,6 +72,13 @@ volume_guard:
       approved_by: owner
       approved_on: "2026-11-20"
 
+# trials: a source on trial that fails on this many separate days, with no successful run between, is marked
+#   invalid with the date and the reason, and its job stops. The owner can re-approve it on the admin Data sources
+#   tab; it then gets the same number of days again. Owner decision 2026-11-22 (lc_core.validity,
+#   docs/source-trials.md).
+trials:
+  invalid_after_failed_days: 3
+
 gleif_identity:
   RA000585: {registry: GB-COH, country: GB, note: "Companies House, England and Wales"}
   RA000586: {registry: GB-COH, country: GB, note: "Companies House, Northern Ireland"}

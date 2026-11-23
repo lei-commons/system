@@ -20,9 +20,10 @@ import json
 from dataclasses import dataclass, field
 
 from . import source_edits
-from .actions import (EDIT_ACTIONS, SOURCE_ACTIONS, Refused, apply, catalogue, known, load_test_settings, probe_url,
+from .actions import (EDIT_ACTIONS, RETRY_ACTION, SOURCE_ACTIONS, Refused, apply, catalogue, known, load_test_settings, probe_url,
                       source_catalogue)
 from .approvals import decide, effective
+from .validity import state as validity_state
 
 MAX_REASON = 300
 PROBE_JOB = "ingest-gleif"  # the probe runs in this job's sealed network, identity and gateway
@@ -95,6 +96,18 @@ class GoogleBackend:
 
     def write_approvals(self, decisions, generation):
         self._write("source-approvals.json", decisions, generation)
+
+    def read_validity(self, source: str):
+        """A source on trial's validity mark (trials/<source>/validity.json in the data bucket; lc_core.validity)."""
+        from google.api_core.exceptions import NotFound
+
+        from .validity import validity_name
+
+        try:
+            data = self._storage.bucket(f"{self.project}-data").blob(validity_name(source)).download_as_bytes()
+        except NotFound:
+            return {}
+        return json.loads(data)
 
     def read_edits(self):
         """(edits, generation); edits is None if the file can't be parsed."""
@@ -236,7 +249,7 @@ def perform(*, backend, verifier, secret: str, sources: list, registry: list, ac
     reason = " ".join((reason or "").split())[:MAX_REASON]
     kind, _, name = action.partition(":")
     base = registry
-    if kind in SOURCE_ACTIONS or kind in EDIT_ACTIONS:
+    if kind in SOURCE_ACTIONS or kind in EDIT_ACTIONS or kind == RETRY_ACTION:
         registry = current_registry(backend, registry)
     if not known(sources, action, registry):
         return Outcome(404, "That isn't an action this system offers.")
@@ -251,6 +264,14 @@ def perform(*, backend, verifier, secret: str, sources: list, registry: list, ac
                                 "so nothing was done.")
     if not reason:
         return Outcome(400, "Say why, for the decision log.")
+    if kind == RETRY_ACTION:
+        try:
+            decisions, _ = backend.read_approvals()
+            marked = validity_state(backend.read_validity(name), decisions.get(name))["state"] == "invalid"
+        except Exception as exc:  # can't tell: do nothing
+            return Outcome(503, f"Its trial's state couldn't be read ({type(exc).__name__}), so nothing was done.")
+        if not marked:
+            return Outcome(409, "That source isn't marked invalid, so there's nothing to re-approve.")
     if not secret:
         return Outcome(403, "The second factor isn't set up yet: set it up on the admin page's Second factor tab first.")
     try:
@@ -276,6 +297,14 @@ def perform(*, backend, verifier, secret: str, sources: list, registry: list, ac
             event.update(subject=f"source {name}")
             title = next((r.get("name") for r in registry if r["id"] == name), None) or name
             message = f"{title} is now {status}."
+        elif kind == RETRY_ACTION:
+            decisions, generation = backend.read_approvals()
+            backend.write_approvals(decide(decisions, name, "approved", actor, now, f"re-approved for a new trial: {reason}"),
+                                    generation)
+            event.update(subject=f"source {name}")
+            title = next((r.get("name") for r in registry if r["id"] == name), None) or name
+            message = (f"{title} is re-approved: its trial runs again from the next cycle, and is marked invalid again "
+                       "if it still fails.")
         elif kind == "run":
             execution = backend.run_job(name)
             event.update(subject=name, run_id=execution)

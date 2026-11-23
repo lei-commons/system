@@ -20,7 +20,7 @@ from datetime import date
 
 from lc_core.allowlist import AllowList
 from lc_core.approvals import require_approved
-from lc_core.control import require_running
+from lc_core.control import SystemHalted, require_running
 from lc_core.decisions import Recorder, failure, log_bucket_name
 from lc_core.fetch import Gateway
 from lc_core.lease import Busy, lease
@@ -118,6 +118,59 @@ def run(profile: Profile, gateway, store, today=None, gate=None, allowlist=None,
     return outcome
 
 
+FAILED_OUTCOMES = ("denied", "held")  # a trial run that ended without measuring; an exception counts too
+
+
+def _now() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def trial_gate(source: str, store, decisions=None, log=log) -> bool:
+    """Before a trial run: may it run? A source marked invalid stops here until the owner re-approves it
+    (lc_core.validity). The mark is written back on every run, so the trial lifecycle rule never takes it."""
+    from lc_core.approvals import load_decisions
+    from lc_core.validity import VALIDITY, gate
+
+    decisions = load_decisions() if decisions is None else decisions
+    may, validity, event = gate(store.read_json(VALIDITY), decisions.get(source), source)
+    if event:
+        log(event)
+    store.write_json(VALIDITY, validity)
+    return may
+
+
+def trial_note(source: str, store, *, failed: bool, failure: dict = None, now: str = None, threshold: int = None,
+               log=log) -> None:
+    """After a trial run: count a failed day, or clear the count; mark the source invalid on the day the count
+    reaches the threshold. Never raises: this must not hide the run's own result."""
+    from lc_core.sources import invalid_after_failed_days
+    from lc_core.validity import VALIDITY, note
+
+    try:
+        threshold = threshold or invalid_after_failed_days()
+        validity, event = note(store.read_json(VALIDITY), failed=failed, failure=failure, now=now or _now(),
+                               source=source, threshold=threshold)
+        store.write_json(VALIDITY, validity)
+        if event:
+            log(event)
+    except Exception as exc:  # noqa: BLE001
+        log({"event": "validity-unwritten", "source": source, "error": type(exc).__name__})
+
+
+def trial_outcome(source: str, store, outcome: str, ended: dict, log=log, **kw) -> None:
+    """Count a trial run that ended without measuring (denied, held); clear the count after one that measured.
+    Halted and busy runs say nothing about the source, nor does a denial because the system isn't running."""
+    if outcome in ("done", "already-done"):
+        trial_note(source, store, failed=False, log=log, **kw)
+    elif outcome in FAILED_OUTCOMES and ended.get("rule") != "system-not-running":
+        rule = ended.get("rule")
+        trial_note(source, store, failed=True, log=log, **kw,
+                   failure={"error": f"{outcome} ({rule})" if rule else outcome,
+                            "message": ended.get("reason") or f"the run ended {outcome}"})
+
+
 def cleanup(source: str, bucket, log=log) -> int:
     """LC_CLEANUP=1: a trial that left the registry. Delete its reports, every version, and stop. The deploy
     workflow runs this once, then deletes the job (docs/source-trials.md)."""
@@ -146,13 +199,24 @@ def main() -> int:
     # A trial keeps only its reports, apart from every store; production writes the source's store.
     store = GcsStore(bucket, f"{TRIALS}/{profile.source}" if on_trial else profile.store)
     try:
+        if on_trial and not trial_gate(profile.source, store, log=record):
+            return 0  # marked invalid: not processed until the owner re-approves it (lc_core.validity)
         if not on_trial:  # promoted (or never on trial): whatever a trial left is deleted, within a day of promotion
             deleted = trials.remove(client.bucket(bucket), profile.source)
             if deleted:
                 record({"event": "trial-cleaned", "source": profile.source, "objects": deleted, "why": "promoted"})
+        ended = {}  # the event a run that didn't measure ended with (its rule and reason), for the invalid mark
+
+        def logged(event):
+            if event.get("event") in FAILED_OUTCOMES:
+                ended.update(event)
+            record(event)
+
         with lease(client.bucket(bucket), profile.job):
-            outcome = run(profile, gateway, store, allowlist=allowlist, log=record)
+            outcome = run(profile, gateway, store, allowlist=allowlist, log=logged)
         health.note(store, outcome=outcome, log=record)  # a browser fallback reads it (ingest_browser)
+        if on_trial:
+            trial_outcome(profile.source, store, outcome, ended, log=record)
         if on_trial and outcome in ("done", "already-done"):
             # A live trial's reports are rewritten every run, so the safety-net lifecycle rule never takes them.
             record({"event": "trial-refreshed", "source": profile.source,
@@ -164,6 +228,8 @@ def main() -> int:
         failed = failure(exc)
         record(failed)
         health.note(store, failure=failed, log=record)
+        if on_trial and not isinstance(exc, SystemHalted):  # a system problem (e.g. approvals unreadable), not the source's
+            trial_note(profile.source, store, failed=True, failure=failed, log=record)
         raise
     finally:
         record.write(client.bucket(log_bucket_name(bucket)))

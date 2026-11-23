@@ -112,6 +112,7 @@ class SystemView:
         so nothing of it can reach the snapshot; this is where the owner reads it before promoting it."""
         r = self._reader
         out = []
+        decisions, _ = _try(lambda: r.bucket_json("control", "source-approvals.json") or {}, {})
         for p in self._sources:
             if p.get("stage") != "trial":
                 continue
@@ -119,11 +120,27 @@ class SystemView:
             report, report_error = _try(lambda b=base: r.bucket_json("data", f"{b}/trial-report.json"))
             manifest, _ = _try(lambda b=base: r.bucket_json("data", f"{b}/manifest.json"))
             health, _ = _try(lambda b=base: r.bucket_json("data", f"{b}/health.json"))
+            validity = self._validity(p["id"], decisions)
             out.append({"id": p["id"], "label": p["label"], "name": p.get("name"), "country": p.get("country"),
                         "job": p["job"], "store": p["store"], "licence": p.get("licence"),
                         "measured": len((manifest or {}).get("processed") or []), "lastKey": (manifest or {}).get("lastKey"),
-                        "health": health or None, "report": report or None, "reportError": report_error})
+                        "health": health or None, "report": report or None, "reportError": report_error,
+                        "validity": validity})
         return {"trials": out, "promotion": "docs/source-trials.md"}
+
+    def _threshold(self) -> int:
+        from lc_core.sources import invalid_after_failed_days
+
+        value, _ = _try(lambda: invalid_after_failed_days(os.environ.get("LC_SOURCES_CONFIG") or _default_sources_path()))
+        return value or 3
+
+    def _validity(self, source: str, decisions: dict) -> dict:
+        """A source on trial's validity (lc_core.validity): invalid, retrying, failing or ok, with date and reason."""
+        from lc_core.validity import VALIDITY, state
+
+        validity, error = _try(lambda: self._reader.bucket_json("data", f"trials/{source}/{VALIDITY}"))
+        out = state(validity or {}, (decisions or {}).get(source), self._threshold())
+        return {**out, "error": error} if error else out
 
     def sources_page(self) -> dict:
         """The Data sources page: every source in the registry with the owner's edits, its terms, decisions and actions."""
@@ -140,8 +157,11 @@ class SystemView:
         statuses = effective_approvals(entries, decisions if not decisions_error else {})
         if decisions_error:  # can't read the owner's decisions: show nothing as approved, as the jobs do
             statuses = {k: {**v, "status": "unknown"} for k, v in statuses.items()}
+        validity = {s["id"]: self._validity(s["id"], decisions if not decisions_error else {})
+                    for s in entries if (s.get("pipeline") or {}).get("stage") == "trial"}
+        invalid = {k for k, v in validity.items() if v["state"] == "invalid"}
         actions = {}
-        for a in source_catalogue(entries, statuses) if not decisions_error else []:
+        for a in source_catalogue(entries, statuses, invalid) if not decisions_error else []:
             actions.setdefault(a["id"].split(":", 1)[1], []).append(a)
         editable = not edits_error
         rows = []
@@ -161,9 +181,11 @@ class SystemView:
                         | {"built": bool(pipeline), "label": pipeline.get("label"), "job": pipeline.get("job"), "records": records,
                            "pipeline": {k: pipeline.get(k) for k in ("job", "store", "records_as")} if pipeline else None,
                            "approval": statuses[s["id"]], "history": list(reversed(history))[:10],
+                           "stage": pipeline.get("stage"), "validity": validity.get(s["id"]),
                            "actions": actions.get(s["id"], []), "owner": s.get("owner") or {},
                            "editable": editable, "removable": editable and not remove_blocked, "removeBlocked": remove_blocked})
         counts = {k: sum(1 for x in rows if x["approval"]["status"] == k) for k in ("approved", "denied", "pending")}
+        counts["invalid"] = len(invalid)
         review = sum(1 for x in rows if x["approval"]["status"] == "pending"
                      or (x["approval"]["status"] == "approved" and not (x["assessment"] or {}).get("verified")))
         changes = [{k: e.get(k) for k in ("at", "by", "source", "change")} | {"fields": sorted((e.get("after") or {}))}
