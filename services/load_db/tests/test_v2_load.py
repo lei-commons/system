@@ -19,6 +19,7 @@ DSN = os.environ.get("LC_TEST_PG")
 pytestmark = pytest.mark.skipif(not DSN, reason="needs LC_TEST_PG (CI provides a Postgres service)")
 
 from lc_core.publishing import load as load_settings  # noqa: E402
+from lc_directory.load import LOAD_VERSION  # noqa: E402
 from lc_publish.job import publish  # noqa: E402
 from lc_publish.snapshot import CHANGE_SCHEMA, sha256_file  # noqa: E402
 from lc_publish.testing import FakeBucket, World  # noqa: E402
@@ -133,7 +134,7 @@ def test_the_status_category_day_is_a_new_chain_and_a_full_reload(tmp_path):
     loaded = [e for e in events if e["event"] == "loaded"][0]
     assert outcome == "loaded" and loaded["mode"] == "full" and "another load version" in loaded["why"], events
     meta = check(world, m)
-    assert meta[5] == 6
+    assert meta[5] == LOAD_VERSION
     with psycopg.connect(DSN) as conn:
         rows = conn.execute("SELECT legal_status, status_category, filter_terms FROM live.entities").fetchall()
     assert rows and all(category and f"s={category}" in terms for _, category, terms in rows)
@@ -289,7 +290,7 @@ def test_old_format_snapshots_still_load(tmp_path):
     outcome, events = env.load()
     entities, _, meta = db_rows()
     assert outcome == "loaded" and entities == [("LECOZZ000000000000AA", "X LTD", None, "GB", "gb-coh", None)]
-    assert meta[6] == "full" and meta[5] == 6
+    assert meta[6] == "full" and meta[5] == LOAD_VERSION
 
 
 def test_the_database_credits_every_record_through_its_sources(tmp_path):
