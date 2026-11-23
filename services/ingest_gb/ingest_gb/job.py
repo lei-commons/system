@@ -92,9 +92,12 @@ def reconcile(store, log=log) -> str:
     if not dates:
         return "nothing"
     date = dates[-1]
-    if store.has_marker(f"reconciled-{date}"):
-        return "already-done"
     keys = [part_key(date, part) for part in range(1, PARTS + 1)]
+    if store.has_marker(f"reconciled-{date}"):
+        deleted = sum(store.delete_seen(k) for k in keys) if hasattr(store, "delete_seen") else 0
+        if deleted:  # lists left by a month reconciled before they were deleted at once
+            log({"event": "seen-deleted", "source": "gb", "publish": date, "objects": deleted})
+        return "already-done"
     if not all(k in manifest["processed"] for k in keys):
         return "waiting"
     seen = set()
@@ -143,6 +146,9 @@ def reconcile(store, log=log) -> str:
     manifest["processed"] = (manifest["processed"] + [f"{date} reconcile"])[-100:]
     store.write_manifest(manifest)
     store.write_marker(f"reconciled-{date}", {"absent": absent, "total": total, "changes": changes})
+    deleted = sum(store.delete_seen(k) for k in keys) if hasattr(store, "delete_seen") else 0
+    if deleted:  # the lists only serve this check (owner, 2026-11-23: processed working data goes within 24 hours)
+        log({"event": "seen-deleted", "source": "gb", "publish": date, "objects": deleted})
     log({"event": "reconciled", "source": "gb", "publish": date, "absent": absent, "total": total, "changes": changes})
     return "reconciled"
 

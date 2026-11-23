@@ -96,6 +96,22 @@ class GcsStore:
             return None
         return set(gzip.decompress(blob.download_as_bytes()).decode("utf-8").split())
 
+    def delete_seen(self, name: str) -> int:
+        """Delete one publication's list of IDs (every version), once it has served its purpose."""
+        return self._delete(f"seen/{name}.txt.gz")
+
+    def purge_sources(self) -> int:
+        """Delete every downloaded source file a run ever kept here (``sources/``, every version). Runs no longer
+        keep them (owner, 2026-11-23: processed downloads are deleted within 24 hours; no people's data stored)."""
+        return self._delete("sources/")
+
+    def _delete(self, sub: str) -> int:
+        deleted = 0
+        for blob in self._bucket.client.list_blobs(self._bucket, prefix=f"{self._prefix}/{sub}", versions=True):
+            self._bucket.delete_blob(blob.name, generation=blob.generation)
+            deleted += 1
+        return deleted
+
     def write_marker(self, name: str, body: dict) -> None:
         self._blob(f"markers/{name}.json").upload_from_string(json.dumps(body, sort_keys=True), content_type="application/json")
 

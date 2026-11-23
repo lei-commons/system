@@ -110,6 +110,11 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
         log({"event": "halted", "source": source, "reason": str(exc)})
         return "halted"
 
+    purge = getattr(store, "purge_sources", None)  # downloads kept by earlier code: deleted on the next run
+    purged = purge() if purge else 0
+    if purged:
+        log({"event": "sources-purged", "source": source, "objects": purged})
+
     settings = guard_settings or guard.load()
     manifest = store.read_manifest()
     try:

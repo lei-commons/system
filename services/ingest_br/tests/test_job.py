@@ -215,3 +215,25 @@ def test_a_month_already_loaded_says_so_and_downloads_nothing():
                allowlist=AllowList.load(), log=events.append) == "already-done"
     assert [e for e in events if e["event"] == "already-done"] == [{"event": "already-done", "source": "br", "publish": "2026-10"}]
     assert not [t for t in gw.fetched if t.endswith(".zip")]  # neither Municipios nor any establishment file
+
+
+def test_a_month_s_lookup_is_deleted_once_the_month_is_done_and_older_ones_at_every_run():
+    """Processed working data goes within 24 hours (owner, 2026-11-23): the lookup serves only its month's run."""
+    MemLookup.built, MemLookup.shards = 0, {}
+    store, gw, events, drops = MemStore(), FakeGateway(), [], []
+
+    def drop(keep):
+        drops.append(keep)
+        return 3
+
+    ticks = iter([0, 0, 999, 999, 999] + [999] * 50)
+    run(gw, store, lambda m: MemLookup(), today=date(2026, 11, 9), gate=lambda: None, allowlist=AllowList.load(),
+        log=events.append, budget=10, clock=lambda: next(ticks), drop=drop)
+    assert drops == ["2026-10"]  # mid-month: only earlier months' lookups go
+    run(gw, store, lambda m: MemLookup(), today=date(2026, 11, 9), gate=lambda: None, allowlist=AllowList.load(),
+        log=events.append, drop=drop)
+    assert drops == ["2026-10", "2026-10", None]  # the month finished: its own lookup goes too
+    run(gw, store, lambda m: MemLookup(), today=date(2026, 11, 9), gate=lambda: None, allowlist=AllowList.load(),
+        log=events.append, drop=drop)
+    assert drops[-1] is None  # a quiet night still clears anything left
+    assert {"event": "lookup-deleted", "source": "br", "publish": "2026-10", "objects": 3} in events

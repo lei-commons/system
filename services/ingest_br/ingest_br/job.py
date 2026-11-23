@@ -123,6 +123,18 @@ class Lookup:
         return read_lookup(self._bucket.blob(f"{self._prefix}/{n:03d}.tsv.gz").download_as_bytes())
 
 
+def drop_lookups(bucket, keep: str = None) -> int:
+    """Delete every month's lookup except ``keep`` (every version). A lookup only serves its month's run: once the
+    month's files are all done it is deleted (owner, 2026-11-23: processed working data goes within 24 hours)."""
+    deleted = 0
+    for blob in bucket.client.list_blobs(bucket, prefix="br-co/lookup/", versions=True):
+        if keep and blob.name.startswith(f"br-co/lookup/{keep}/"):
+            continue
+        bucket.delete_blob(blob.name, generation=blob.generation)
+        deleted += 1
+    return deleted
+
+
 def build(gateway, lookup, month, log=log, sleep=time.sleep) -> dict:
     counts = Counter()
     with tempfile.TemporaryDirectory(prefix="br-lookup-") as work:
@@ -143,7 +155,7 @@ def build(gateway, lookup, month, log=log, sleep=time.sleep) -> dict:
 
 
 def run(gateway, store, lookup_for, today=None, gate=gate, allowlist=None, log=log,
-        budget=BUDGET_SECONDS, clock=time.monotonic, sleep=time.sleep) -> str:
+        budget=BUDGET_SECONDS, clock=time.monotonic, sleep=time.sleep, drop=lambda keep: 0) -> str:
     """Return the outcome: halted, done, already-done, held or denied."""
     try:
         gate()
@@ -155,8 +167,10 @@ def run(gateway, store, lookup_for, today=None, gate=gate, allowlist=None, log=l
     processed = set(store.read_manifest().get("processed", []))
     if all(f"{month} estab{k}" in processed for k in range(FILES)):
         # Nothing to do this month: say so (the decision log and the System page see the run), and fetch nothing.
+        _dropped(drop, None, month, log)
         log({"event": "already-done", "source": "br", "publish": month})
         return "already-done"
+    _dropped(drop, month, month, log)  # earlier months' lookups
     lookup = lookup_for(month)
     if not lookup.ready():
         build(gateway, lookup, month, log=log, sleep=sleep)
@@ -184,7 +198,15 @@ def run(gateway, store, lookup_for, today=None, gate=gate, allowlist=None, log=l
                              log=log, prepare=Join(lookup.read), attempts=DOWNLOAD_ATTEMPTS, sleep=sleep)
         if outcome not in ("done", "already-done"):
             break
+    if all(f"{month} estab{k}" in store.read_manifest().get("processed", []) for k in range(FILES)):
+        _dropped(drop, None, month, log)  # the month is done: its lookup has served its purpose
     return outcome
+
+
+def _dropped(drop, keep, month, log) -> None:
+    deleted = drop(keep)
+    if deleted:
+        log({"event": "lookup-deleted", "source": "br", "publish": month, "objects": deleted})
 
 
 def main() -> int:
@@ -199,7 +221,8 @@ def main() -> int:
     store = GcsStore(bucket, "br")
     try:
         with lease(bucket, "ingest-br", ttl_seconds=4 * 3600):
-            outcome = run(gateway, store, lambda month: Lookup(bucket, month), allowlist=allowlist, log=record)
+            outcome = run(gateway, store, lambda month: Lookup(bucket, month), allowlist=allowlist, log=record,
+                          drop=lambda keep: drop_lookups(bucket, keep))
         health.note(store, outcome=outcome, log=record)
     except Busy as exc:
         record({"event": "busy", "reason": str(exc)})
