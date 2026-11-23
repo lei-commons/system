@@ -28,8 +28,7 @@ locals {
     # logging.viewer lets deploy workflows read job results; it grants no write access.
     deployer  = ["roles/run.developer", "roles/workflows.editor", "roles/artifactregistry.writer", "roles/cloudscheduler.admin", "roles/logging.viewer"]
     ingest    = []
-    # The web-claims pilot (owner decision 2026-11-23): reads archived pages, has a model read them into claims.
-    crawler   = ["roles/aiplatform.user"]
+    crawler   = ["roles/aiplatform.user"] # web-claims pilot (owner, 2026-11-23): models read archived pages into claims
     resolver  = ["roles/bigquery.jobUser"]
     maker     = ["roles/aiplatform.user"]
     checker   = ["roles/aiplatform.user"]
@@ -55,8 +54,7 @@ locals {
     }
     snapshots = {
       "roles/storage.objectUser"   = ["publisher"]
-      # The crawler picks the web-claims pilot's candidates from the published snapshot.
-      "roles/storage.objectViewer" = ["site", "loader", "crawler"]
+      "roles/storage.objectViewer" = ["site", "loader", "crawler"] # crawler: the web-claims pilot's candidates
     }
     decision_log = {
       # The deployer records each merge and deploy (.github/workflows/changes.yml): create-only, like every writer.
