@@ -6,7 +6,7 @@ name: deploy-gateway
 on:
   push:
     branches: [main]
-    paths: ["services/conduct_proxy/**", "packages/lc_core/**", "config/egress-allowlist.yaml"]
+    paths: ["services/conduct_proxy/**", "packages/lc_core/**", "config/egress-allowlist.yaml", ".github/workflows/deploy-gateway.yml"]
 
 permissions:
   contents: read
@@ -43,5 +43,20 @@ jobs:
         run: |
           gcloud run services update conduct-gateway --region "${{ vars.GCP_REGION }}" --image "$IMAGE:$GITHUB_SHA"
           gcloud run jobs update egress-check --region "${{ vars.GCP_REGION }}" --image "$IMAGE:$GITHUB_SHA"
+      # The first check right after a rollout has failed several times (2026-11-22, 2026-11-23 04:30 UTC)
+      # while later checks and the next cycles passed: the new revision needs a moment. Up to 3 tries, 90 s apart;
+      # each failed try prints the check's own lines (check name, ok, detail), so the log says which check failed.
       - name: Prove the network again
-        run: gcloud run jobs execute egress-check --region "${{ vars.GCP_REGION }}" --wait
+        run: |
+          for attempt in 1 2 3; do
+            if gcloud run jobs execute egress-check --region "${{ vars.GCP_REGION }}" --wait; then
+              echo "egress-check passed on try $attempt"
+              exit 0
+            fi
+            echo "::warning::egress-check failed on try $attempt"
+            gcloud logging read 'resource.type="cloud_run_job" AND resource.labels.job_name="egress-check" AND textPayload:"check"' \
+              --freshness=10m --limit 20 --format='value(textPayload)' || true
+            if [ "$attempt" -lt 3 ]; then sleep 90; fi
+          done
+          echo "::error::egress-check failed 3 times after the rollout"
+          exit 1
