@@ -18,6 +18,7 @@ import json
 import shutil
 from collections import Counter, defaultdict
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -55,7 +56,7 @@ def sources(path=None) -> list:
 
 SCALARS = ["directoryId", "lei", "legalName", "legalForm", "legalJurisdiction", "registrationAuthority",
            "registrationNumber", "legalStatus", "statusCategory", "incorporationDate", "dissolutionDate", "recordMode",
-           "registryUrl"]
+           "registryUrl", "website"]
 NESTED = ["otherNames", "legalAddress", "headquartersAddress", "industryCodes", "labels"]
 COLUMNS = SCALARS + NESTED + ["sources", "country"]
 RELATIONSHIP_COLUMNS = ["relationshipId", "startNode", "endNode", "startId", "endId", "relationshipType",
@@ -117,6 +118,23 @@ def country_of(record: dict) -> str:
     return country.upper() if len(country) == 2 and country.isalpha() else "XX"
 
 
+def website_url(value):
+    """The entity's own website as its source gives it, or None. Only a plain web address is published: http or
+    https (a bare www. host gets https://), a dotted host, no user info, no spaces, so a link can never carry a
+    script, a mail address or credentials."""
+    text = (value or "").strip()
+    if text.lower().startswith("www."):
+        text = "https://" + text
+    try:
+        url = urlsplit(text)
+    except ValueError:
+        return None
+    host = url.hostname or ""
+    if url.scheme.lower() not in ("http", "https") or "." not in host or "@" in url.netloc or any(c.isspace() for c in text):
+        return None
+    return text[:500]
+
+
 def entity_row(record: dict, by_id: dict = None) -> dict:
     """The published row: exactly the Parquet columns, all strings. A record's leaf is the hash of this.
 
@@ -126,6 +144,7 @@ def entity_row(record: dict, by_id: dict = None) -> dict:
     for c in SCALARS:
         value = record.get(c)
         row[c] = None if value is None else str(value)
+    row["website"] = website_url(row["website"])
     if not row["registryUrl"] and by_id and record.get("sources"):
         row["registryUrl"] = record_url(record, by_id.get(record["sources"][0]) or {})
     # legalStatus is the register's own word, untouched (Article 4.3); statusCategory is set by merge
