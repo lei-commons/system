@@ -194,6 +194,7 @@ main:
         - ingest-ca-cra
         - ingest-nl-anbi
         - ingest-gb-oscr
+        - ingest-gb-psc
         steps:
         - trial_run:
             try:

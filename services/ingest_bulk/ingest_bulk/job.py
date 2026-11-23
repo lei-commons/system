@@ -88,6 +88,10 @@ def quality_for(profile: Profile, stage: str, today: date):
     """For a source on trial: a fresh quality measure per attempt (lc_ingest.quality). Production: none."""
     if stage != "trial":
         return None
+    if profile.kind == "relationship":  # links between records: their own measure (lc_ingest.psc)
+        from lc_ingest.psc import RelationshipQuality
+
+        return lambda: RelationshipQuality(profile.source, today=today)
     from lc_core.status import load as load_statuses
     from lc_ingest.quality import Quality
 
@@ -112,7 +116,8 @@ def run(profile: Profile, gateway, store, today=None, gate=None, allowlist=None,
     for part in profile.parts or (None,):
         outcome = run_ingest(gateway=gateway, store=store, gate=gate or gate_for(profile), find=find_for(profile, today, part, code),
                              read=profile.read, mapper=profile.record, source=profile.source,
-                             maker=f"ingestion@{profile.store}", allowlist=allowlist, log=log, quality=quality)
+                             maker=f"ingestion@{profile.store}", allowlist=allowlist, log=log, quality=quality,
+                             kind=profile.kind)
         if outcome not in ("done", "already-done"):
             break
     return outcome

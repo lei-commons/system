@@ -1464,6 +1464,34 @@ sources:
                dataset: "Scottish Charity Register download (OSCR)",
                attribution: "Contains information from the Scottish Charity Register supplied by the Office of the Scottish Charity Regulator and licensed under the Open Government Licence v3.0."}
 
+  - id: gb-coh-psc
+    name: "UK corporate owners (Companies House PSC register, entity rows only)"
+    country: "GB"
+    access: open
+    method: bulk
+    licence: OGL-UK-3.0 (unconfirmed)
+    cadence: daily
+    status: active
+    url: https://download.companieshouse.gov.uk/en_pscdata.html
+    terms_url: https://www.gov.uk/guidance/companies-house-data-products
+    assessment:
+      risk: medium
+      commercial: allowed (the free Companies House data products)
+      attribution: expected if OGL applies, as for gb-coh
+      summary: >-
+        Daily JSON-lines snapshot of the register of people with significant control, in one large ZIP and in
+        numbered parts. Only rows whose controller is an entity (corporate entity, legal person, overseas entity)
+        are read; rows about individuals, super-secure persons, statements and exemptions are skipped unread, so
+        no personal data is mapped. Each kept row is a link: company -> controlling entity, with the band of
+        shares or votes and the notified and ceased dates; no names are kept.
+      verified: false
+    # Web-asserted facts pilot, step 2 (owner approved the source 2026-11-23 in the design review): lc_ingest.psc UK_PSC.
+    # Relationships, measured by lc_ingest.psc.RelationshipQuality; a trial measures part 1 of the snapshot.
+    pipeline: {stage: trial, job: ingest-gb-psc, image: ingest-bulk, store: gb-coh-psc, records_as: gb-coh-psc,
+               label: Companies House PSC (corporate owners), refresh: daily snapshot, read weekly,
+               dataset: "Companies House PSC snapshot (corporate entity rows)",
+               attribution: "Contains public sector information licensed under the Open Government Licence v3.0."}
+
   - id: gb-ccni
     name: "Register of Charities, Northern Ireland (Charity Commission for Northern Ireland)"
     country: "GB"

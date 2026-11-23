@@ -130,6 +130,10 @@ sources:
     active: [Active, Not Submitted, Not Monitored]
     inactive: [Removed]
 
+  gb-coh-psc:                  # relationships (lc_ingest.psc): whether the control is current
+    active: [ACTIVE]
+    inactive: [INACTIVE]
+
   ca-cra-charities:            # the list holds registered charities
     active: [Registered]
 

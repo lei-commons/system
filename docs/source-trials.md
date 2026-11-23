@@ -63,6 +63,19 @@ Owner decisions 2026-11-22:
   with the missing and present column names, never values. A layout read about in documentation, but never
   seen (the session never downloads), is confirmed or corrected on the first run.
 
+## Relationship sources
+
+A source can yield links between records instead of records (`kind: relationship` on its profile; the fields
+`config/fields.yaml` allows for relationships). Its trial measures the links with
+`lc_ingest.psc.RelationshipQuality`: how many, active or ceased, whether the controller is a record we hold
+(registered at Companies House) or on another register (and which country), the band of shares or votes, and
+anomalies (a company controlling itself, the same active link twice, dates in the future or out of order). The
+Trials tab shows them under its usual headings. These records carry identifiers only, never names.
+
+The first is the UK corporate owners (`gb-coh-psc`, owner decision 2026-11-23): the entity rows of the Companies
+House register of people with significant control. Rows about individuals, statements and exemptions are skipped
+unread. A trial measures part 1 of the daily snapshot, a sample of the whole.
+
 ## A trial that keeps failing is marked invalid
 
 Owner decision 2026-11-22: "After few trials/tries across few days (say 3 days), if it is established that a

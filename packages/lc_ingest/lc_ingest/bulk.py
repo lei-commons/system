@@ -178,6 +178,7 @@ class Profile:
     parts: tuple = ()      # (name, url) for registers published as several files, all processed each run; the url
                            # may be a function of the gateway, for files that move (asked only after the gate)
     guard_names: bool = False  # drop a record whose name holds an email address or phone number (it may be a person's)
+    kind: str = "entity"     # or "relationship": what the mapper yields (config/fields.yaml allow-lists it)
 
     def url(self) -> str:
         return self.file_url
