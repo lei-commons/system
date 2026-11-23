@@ -174,3 +174,23 @@ def test_paused_fetches_nothing():
 def test_changed_page_layout_fails_loudly():
     with pytest.raises(FetchError):
         go(FakeGateway([], page=b"<html>moved</html>"), MemStore())
+
+
+def test_a_reconciled_month_s_id_lists_are_deleted():
+    """The lists of IDs only serve the month's reconcile; then they go (owner, 2026-11-23: processed working data
+    is deleted within 24 hours). A month reconciled before this rule loses them on the next run."""
+    class Deleting(MemStore):
+        def delete_seen(self, name):
+            return 1 if self.seen.pop(name, None) is not None else 0
+
+    store, events = Deleting(), []
+    month(store, "2026-11-01", {1: ["01000001", "01000002"], 2: ["01000003"]})
+    assert store.seen and reconcile(store, log=events.append) == "reconciled"
+    assert store.seen == {} and any(e["event"] == "seen-deleted" and e["objects"] > 0 for e in events)
+
+    old = Deleting()
+    month(old, "2026-11-01", {1: ["01000001"]})
+    old.markers["reconciled-2026-11-01"] = {}
+    events.clear()
+    assert reconcile(old, log=events.append) == "already-done" and old.seen == {}
+    assert [e["event"] for e in events] == ["seen-deleted"]
