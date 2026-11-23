@@ -113,7 +113,7 @@ def test_a_run_downloads_with_the_browser_and_stores_the_records():
                   download=download)
     assert out == "done" and calls == [(nta.HOST,)]
     assert sum(len(s) for s in store.shards.values()) == 3 and store.manifest["processed"] == ["2026-10-30 zenkoku-unicode"]
-    assert store.kept == ["jp-nta-2026-10-30.zip"]
+    assert store.kept == []
 
 
 def test_an_already_processed_month_never_starts_a_browser():
@@ -239,8 +239,9 @@ def test_the_days_after_the_full_file_are_applied_oldest_first_and_each_once():
     assert store.manifest["processed"][1:] == ["2026-10-28 diff-unicode on 2026-10-30",
                                               "2026-11-02 diff-unicode on 2026-10-30",
                                               "2026-11-04 diff-unicode on 2026-10-30"]
-    assert store.kept[1:] == ["jp-nta-diff-2026-10-28-on-2026-10-30.zip", "jp-nta-diff-2026-11-02-on-2026-10-30.zip",
-                              "jp-nta-diff-2026-11-04-on-2026-10-30.zip"]
+    assert store.kept == []  # no file is ever kept; each one read is recorded by its hash, in the order applied
+    assert list(store.manifest["files"])[-3:] == ["2026-10-28 diff-unicode on 2026-10-30", "2026-11-02 diff-unicode on 2026-10-30",
+                                                  "2026-11-04 diff-unicode on 2026-10-30"]
     assert events[-1] == {"event": "diffs", "source": "jp-nta", "base": "2026-10-30", "applied": 3, "pending": 0,
                           "outcome": "done"}
     # the next run finds nothing new and starts no browser

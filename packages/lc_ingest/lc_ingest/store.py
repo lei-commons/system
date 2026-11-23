@@ -101,6 +101,3 @@ class GcsStore:
 
     def has_marker(self, name: str) -> bool:
         return self._blob(f"markers/{name}.json").exists()
-
-    def keep_source(self, name: str, path: str) -> None:
-        self._blob(f"sources/{name}").upload_from_filename(path)
