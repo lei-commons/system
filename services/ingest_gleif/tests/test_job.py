@@ -106,7 +106,7 @@ def test_first_run_loads_the_full_file():
     out, _ = go(gw, store)
     assert out == "done" and gw.fetched == ["https://goldencopy.gleif.org/full.zip"]
     assert store.manifest["records"] == 2 and len(all_records(store)) == 2
-    assert store.sources == ["2026-11-07T080000-lei2-full.zip"] and store.manifest["lastKey"] == "2026-11-07 08:00:00 full"
+    assert store.sources == [] and store.manifest["lastKey"] == "2026-11-07 08:00:00 full"
     assert all(shard_of(k) == n for n, s in store.shards.items() for k in s)
 
 
@@ -263,7 +263,7 @@ def test_relationships_load_into_their_own_store():
     rels = all_records(store)
     assert out == "done" and gw.fetched == ["https://goldencopy.gleif.org/rr-full.zip"] and len(rels) == 2
     assert {r["endNode"] for r in rels.values()} == {lei(2)} and all(k.startswith("REL") for k in rels)
-    assert store.sources == ["2026-11-07T080000-rr-full.zip"]
+    assert store.sources == []  # the file itself is never kept, only its hash
 
 
 def test_the_entity_run_then_rekeys_every_stored_record_once():

@@ -168,7 +168,8 @@ def test_a_bad_file_is_fetched_again_and_recovers():
     bad = [e for e in events if e["event"] == "bad-download"]
     assert [e["attempt"] for e in bad] == [1, 2] and "HTML" in bad[0]["reason"] and "ZIP" in bad[1]["reason"]
     assert [e for e in events if e["event"] == "download-recovered"][0]["attempt"] == 3
-    assert store.kept == ["a.zip"] and sum(len(s) for s in store.shards.values()) == 1
+    assert store.kept == [] and sum(len(s) for s in store.shards.values()) == 1  # the file itself is never kept
+    assert store.manifest["files"][store.manifest["lastKey"]]["sha256"].startswith("sha256:")  # only its hash and size
 
 
 def test_a_broken_transfer_is_fetched_again():

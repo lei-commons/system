@@ -2,7 +2,9 @@
 
 1. Stop at once unless the system is running.
 2. Find the right file through the gateway. A file already processed is skipped.
-3. Download it through the gateway and keep the raw file.
+3. Download it through the gateway. The file itself is never kept: only its SHA-256 and size, in the
+   manifest and the done event (owner, 2026-11-23: no people's data is stored, and some sources' files hold
+   rows about people that are dropped at step 4).
 4. Partition: map and filter every record, writing each to its shard's file on disk.
 5. Diff: one shard at a time, compare with the stored shard and stage the result.
    Only one shard's records are ever in memory, so file size doesn't matter.
@@ -18,6 +20,7 @@ from __future__ import annotations
 
 import csv
 import gzip
+import hashlib
 import json
 import os
 import tempfile
@@ -61,6 +64,14 @@ class _Partitions:
         with gzip.open(os.path.join(self._dir, f"{n:03d}.jsonl.gz"), "rt", encoding="utf-8") as f:
             for line in f:
                 yield json.loads(line)
+
+
+def _sha256(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return "sha256:" + h.hexdigest()
 
 
 def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: str, allowlist: AllowList, log,
@@ -152,7 +163,7 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
         if measure is not None:  # a trial: the report is all it keeps
             os.remove(download)
             return _measured(store, manifest, key, source, measure, counts, size, log)
-        store.keep_source(filename, download)  # only a file that checked and read cleanly is kept
+        digest = _sha256(download)  # evidence of exactly which file was read; the file itself is never kept
         os.remove(download)  # the disk is memory on Cloud Run
 
         changes_path = os.path.join(work, "changes.jsonl.gz")
@@ -228,11 +239,13 @@ def run_ingest(*, gateway, store, gate, find, read, mapper, source: str, maker: 
         manifest["records"] += new_records
         manifest["processed"] = (manifest["processed"] + [key])[-KEEP_PROCESSED:]
         manifest["lastKey"] = key
+        manifest.setdefault("files", {})[key] = {"sha256": digest, "bytes": size}
+        manifest["files"] = dict(list(manifest["files"].items())[-KEEP_PROCESSED:])
         store.write_manifest(manifest)
         if seen:
             store.keep_seen(key, seen_ids)
 
-    log({"event": "done", "source": source, "publish": key, "bytes": size, "changes": changes_written,
+    log({"event": "done", "source": source, "publish": key, "bytes": size, "sha256": digest, "changes": changes_written,
          "records_changed": changed_existing + new_records, "existing_changed": changed_existing,
          "new_records": new_records, "total": manifest["records"], **dict(counts)})
     return "done"

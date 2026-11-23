@@ -103,7 +103,7 @@ def test_loads_the_part_1_file():
     store, gw = MemStore(), FakeGateway([zipped([row("01234567"), row("SC123456")])])
     assert go(gw, store) == "done" and store.manifest["records"] == 2
     assert gw.fetched[1] == "https://download.companieshouse.gov.uk/BasicCompanyData-2026-11-01-part1_7.zip"
-    assert store.sources == ["BasicCompanyData-2026-11-01-part1_7.zip"] and "2026-11-01" in store.manifest["processed"]
+    assert store.sources == [] and "2026-11-01" in store.manifest["processed"]  # the file itself is never kept
 
 
 def test_care_of_names_never_reach_storage():
