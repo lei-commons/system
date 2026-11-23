@@ -68,18 +68,20 @@ model_hosts:
   - us-central1-aiplatform.googleapis.com
   - aiplatform.googleapis.com
 
-# How the registry hosts above are asked (owner decision 2026-11-18): at a person's pace in a web browser,
-# never continuously. Much stricter than Article 2.4's one request per second. Per host: one request at a
-# time (the next waits until the last has finished, whole download included), then a pause of
-# min_seconds_between_requests plus a random 0 to extra_random_seconds, so requests don't come like
-# clockwork. After a 403, 429 or 5xx (or a failed connection) the host is left alone for
-# seconds_after_an_error, or its Retry-After if longer (up to an hour), so a retry never hammers a site
-# that is refusing us. A request waits up to max_queue_seconds for its turn, then gets 429 with the time
-# to come back (the job's gateway client waits and tries again).
+# How the registry hosts above are asked. They all offer programmatic access (bulk files, APIs, archives), so
+# they are asked at the constitution's own limit (owner decision 2026-11-23: "Speed limit can be removed for
+# sources such as CommonCrawl that allows API or bot or bulk access. Limit should be for non programatic access
+# via browser etc."; this replaces the person's pace of 2026-11-18). Article 2.4 still binds every host: at
+# most one request per second, published rate limits, robots.txt. Per host: one request at a time (the next
+# waits until the last has finished, whole download included), then at least min_seconds_between_requests.
+# After a 403, 429 or 5xx (or a failed connection) the host is left alone for seconds_after_an_error, or its
+# Retry-After if longer (up to an hour), so a retry never hammers a site that is refusing us. A request waits
+# up to max_queue_seconds for its turn, then gets 429 with the time to come back (the job's gateway client
+# waits and tries again). Browser access (browser_policy below) keeps a person's pace.
 pacing:
   one_request_at_a_time: true
-  min_seconds_between_requests: 5
-  extra_random_seconds: 10
+  min_seconds_between_requests: 1
+  extra_random_seconds: 0
   seconds_after_an_error: 120
   max_queue_seconds: 900
 

@@ -197,12 +197,13 @@ def test_crawl_delay_slows_host_beyond_one_second(env):
     assert max(sleeps) > 5
 
 
-def test_registry_hosts_go_at_a_persons_pace(env):
-    """Each request after the first waits 5 to 15 seconds (config pacing), never back to back."""
+def test_registry_hosts_go_at_the_constitution_s_pace(env):
+    """Programmatic hosts (bulk files, APIs, archives) are asked at Article 2.4's limit, one request a second, never
+    back to back (owner decision 2026-11-23; browser access keeps a person's pace)."""
     port, up, _, sleeps, _ = env
     for _ in range(4):
         assert call(port, "https://api.gleif.org/x")[0] == 200
-    assert len(sleeps) == 3 and all(4.9 <= s <= 15.1 for s in sleeps), sleeps
+    assert len(sleeps) == 3 and all(0.95 <= s <= 1.05 for s in sleeps), sleeps
 
 
 def test_after_an_error_the_host_is_left_alone_for_longer(env):
