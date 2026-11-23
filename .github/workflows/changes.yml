@@ -12,7 +12,7 @@ on:
     # Every deploy workflow (scripts/tests/test_record_change.py checks that none is missing).
     workflows: [deploy-budget-guard, deploy-build-snapshot, deploy-cycle, deploy-gateway,
                 deploy-ingest-br, deploy-ingest-browser, deploy-ingest-bulk, deploy-ingest-gb, deploy-ingest-gleif,
-                deploy-ingest-ny, deploy-ingest-sg, deploy-ingest-socrata, deploy-load-db, deploy-site]
+                deploy-ingest-ny, deploy-ingest-sg, deploy-ingest-socrata, deploy-load-db, deploy-site, deploy-web-claims]
     types: [completed]
 
 permissions:

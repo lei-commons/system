@@ -1,0 +1,77 @@
+# The web-asserted facts pilot (job web-claims; owner approval 2026-11-23; lei-commons/docs
+# 04-designs/web-asserted-facts.md). Measure-only: it reads archived pages from Common Crawl, finds match
+# evidence and has two models from different vendors extract and check claims, and keeps only a small report
+# and the claims under trials/web-claims/ in the data bucket. Nothing reaches the snapshot, the database, the
+# site or the releases. Read by services/web_claims (checked: a bad value stops the run before it fetches).
+#
+# enabled: the daily cycle runs the job last, after the trials (scripts/render_cycle.py). Set false to end the
+#   pilot: the next deploy runs the job once with LC_CLEANUP=1 (deletes trials/web-claims/, every version) and
+#   then deletes the job; the data bucket's trials/ lifecycle rule is the net.
+
+version: 1
+enabled: true
+
+candidates:
+  # Records with a published website (system#138): their pages are looked up in Common Crawl by address.
+  # Countries in order: the first fills first (Finland: its register gives the true website and business ID).
+  with_website:
+    count: 10000
+    countries: [FI]
+  # Records with no website, to find one from the legal name (the design's "Finding the website" steps).
+  # Each group gets count / number of groups, taken round-robin across its countries.
+  without_website:
+    count: 10000
+    groups:
+      US: [US]
+      SG: [SG]
+      EU: [AT, BE, BG, CY, CZ, DE, DK, EE, ES, FR, GR, HR, HU, IE, IT, LT, LU, LV, MT, NL, PL, PT, RO, SE, SI, SK]
+      UK: [GB]
+  # Only records whose status is active; LEI holders first, then the rest, in a stable pseudo-random order.
+  status_category: active
+  # How many with-website records also go through website discovery as if they had none: discovery's truth set
+  # (the found address is scored against the published one).
+  discovery_truth_sample: 1000
+
+discovery:
+  # Candidate addresses per record, from the legal name without its legal-form words.
+  max_candidates: 8
+  # The country's usual domains, tried before .com. EU members not listed use their ISO code (e.g. .de).
+  country_domains:
+    GB: [co.uk, uk]
+    SG: [com.sg, sg]
+    US: []
+    GR: [gr]
+  everywhere: [com]
+
+pages:
+  # Common Crawl crawls asked, newest first (1 or 2).
+  crawls: 1
+  # Captures listed per domain in one index query, and archived pages read per record (home page first, then
+  # legal, imprint, about and contact pages).
+  index_limit: 300
+  max_pages: 3
+  # Bytes read of one archived page, and characters of a page kept in memory to look for evidence.
+  max_record_bytes: 2000000
+  max_text_chars: 60000
+  # Characters sent to a model per record, after minimising (lines naming companies or numbers only; lines with
+  # people's roles, honorifics, email addresses or phone numbers removed).
+  max_model_chars: 6000
+
+run:
+  # A run stops taking new records after this many minutes and saves its progress; the next day's run goes on.
+  # Under the job's cycle timeout (config/cycle.yaml timeouts_minutes.web-claims).
+  minutes: 330
+  # Records in flight at once. The gateway still sends one request at a time per host, at most one a second.
+  workers: 4
+  # Model calls stop for the run (and for the pilot) once the estimated spend reaches these, in USD. Under
+  # config/models.yaml limits.max_daily_model_usd.
+  max_model_usd_per_run: 25
+  max_model_usd_total: 150
+  # A run stops after this many model errors in a row (an unavailable model, a refused request).
+  max_model_errors_in_a_row: 5
+
+report:
+  # Claims shown in the report's sample (entity names, addresses and evidence kinds; never page text).
+  sample: 25
+  # Precision a kind of claim must reach before it could be published (the concept's bar for web-asserted facts).
+  precision_bar: 0.98

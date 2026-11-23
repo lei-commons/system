@@ -23,8 +23,26 @@ tasks:
   code_change:
     maker:   {vendor: claude, model: claude-opus, mode: online}
     checker: {vendor: gemini, model: gemini-pro, mode: online}
+  # The web-asserted facts pilot (services/web_claims; owner approval 2026-11-23). Online calls: the pilot is
+  # small and runs in the daily cycle. Gemini 3.x models are served from Vertex AI's global location.
+  web_claims:
+    maker:   {vendor: claude, model: claude-haiku, mode: online, location: global}
+    checker: {vendor: gemini, model: gemini-flash, mode: online, location: global}
   translit_names:
     maker:   {vendor: open, model: open-small, mode: batch}
+
+# Model classes above, as Vertex AI model IDs (the newest of each class; updated here, never in code).
+model_ids:
+  claude-haiku: claude-haiku-5-5
+  claude-sonnet: claude-sonnet-5-5
+  claude-opus: claude-opus-5-5
+  gemini-flash: gemini-3.5-flash
+
+# Approximate list prices, USD per million tokens (input, output), for the pilot's own spend estimate and cap.
+# The budget guard and the owner's monthly budget remain the hard limits.
+prices_usd_per_mtok:
+  claude-haiku: [0.10, 0.50]
+  gemini-flash: [0.50, 3.00]
 
 limits:
   max_daily_model_usd: 40   # soft; hard limit is the owner's monthly budget

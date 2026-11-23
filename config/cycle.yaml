@@ -35,6 +35,9 @@ gate:
 timeouts_minutes:
   default: 120
   build-snapshot: 180
+  # The web-asserted facts pilot: its job's own limit (the cycle starts it and doesn't wait). It stops taking
+  # records after run.minutes (config/web_claims.yaml, 330) and saves its progress.
+  web-claims: 360
 
 watchdogs:
   # The DeDi watchdog (job dedi-check, docs/dedi.md) also runs after the load in every cycle; this second

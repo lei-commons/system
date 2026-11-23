@@ -126,7 +126,10 @@ class SystemView:
                         "measured": len((manifest or {}).get("processed") or []), "lastKey": (manifest or {}).get("lastKey"),
                         "health": health or None, "report": report or None, "reportError": report_error,
                         "validity": validity})
-        return {"trials": out, "promotion": "docs/source-trials.md"}
+        # The web-asserted facts pilot (services/web_claims): measure-only, its report beside the trials'.
+        web, web_error = _try(lambda: r.bucket_json("data", "trials/web-claims/report.json"))
+        return {"trials": out, "promotion": "docs/source-trials.md",
+                "webClaims": {"report": web or None, "reportError": web_error}}
 
     def _threshold(self) -> int:
         from lc_core.sources import invalid_after_failed_days
