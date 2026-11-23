@@ -22,7 +22,8 @@ LIVE = "live"
 # Bump when the schema or indexes change, so the next run reloads the same snapshot.
 # 5: snapshot format v2 (country from the parts, stats from the manifest, incremental loads).
 # 6: status_category (config/status.yaml); the status filter terms are the category.
-LOAD_VERSION = 6
+# 7: website (the entity's own website, where its source gives one).
+LOAD_VERSION = 7
 ENTITY_COLUMNS = [  # (parquet column, table column, kind)
     ("directoryId", "directory_id", "text"), ("lei", "lei", "text"), ("legalName", "legal_name", "text"),
     ("legalForm", "legal_form", "text"), ("legalJurisdiction", "legal_jurisdiction", "text"),
@@ -30,7 +31,7 @@ ENTITY_COLUMNS = [  # (parquet column, table column, kind)
     ("legalStatus", "legal_status", "text"), ("statusCategory", "status_category", "text"),
     ("incorporationDate", "incorporation_date", "text"),
     ("dissolutionDate", "dissolution_date", "text"), ("recordMode", "record_mode", "text"),
-    ("registryUrl", "registry_url", "text"), ("otherNames", "other_names", "json"), ("legalAddress", "legal_address", "json"),
+    ("registryUrl", "registry_url", "text"), ("website", "website", "text"), ("otherNames", "other_names", "json"), ("legalAddress", "legal_address", "json"),
     ("headquartersAddress", "headquarters_address", "json"), ("industryCodes", "industry_codes", "json"),
     ("labels", "labels", "json"), ("sources", "sources", "list"),
 ]
@@ -44,7 +45,7 @@ TABLES = """
 CREATE TABLE {s}.entities (
   directory_id text PRIMARY KEY, lei text, legal_name text NOT NULL, legal_form text, legal_jurisdiction text,
   registration_authority text, registration_number text, legal_status text, status_category text, incorporation_date text,
-  dissolution_date text, record_mode text, registry_url text, other_names jsonb, legal_address jsonb,
+  dissolution_date text, record_mode text, registry_url text, website text, other_names jsonb, legal_address jsonb,
   headquarters_address jsonb, industry_codes jsonb, labels jsonb, sources text[] NOT NULL, country text NOT NULL,
   names_text text NOT NULL, filter_terms text[] NOT NULL,
   -- 'simple' keeps digits and doesn't stem, so "3M" and "APPLE 12" stay searchable. The filter

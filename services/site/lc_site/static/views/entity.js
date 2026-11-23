@@ -91,6 +91,7 @@ export async function render(root, id) {
           fact("Legal form", record.legalForm), fact("Jurisdiction", record.legalJurisdiction),
           fact("Status at the register", record.legalStatus),
           fact("Incorporated", record.incorporationDate), fact("Dissolved", record.dissolutionDate),
+          fact("Website", /^https?:\/\//i.test(record.website || "") ? h("a", { href: record.website, target: "_blank", rel: "noopener noreferrer nofollow" }, record.website.replace(/^https?:\/\//i, "").replace(/\/$/, "")) : null),
           fact("Source", record.registryUrl ? h("a", { href: record.registryUrl, target: "_blank", rel: "noopener noreferrer" }, "View at the source") : null))),
       h("section", { class: "card card-pad" }, h("h3", {}, "Ownership and funds"), mini,
         h("p", { class: "muted", style: { marginBottom: 0 } }, `${rel.up.length} above · ${fmt(rel.downTotal)} below`)),
