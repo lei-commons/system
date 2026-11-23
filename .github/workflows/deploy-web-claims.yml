@@ -1,0 +1,85 @@
+# Builds the web-asserted facts pilot's image (services/web_claims) and deploys its job, web-claims, which runs as
+# the crawler identity on the sealed jobs network (Common Crawl through the gateway; Vertex AI privately). The
+# daily cycle starts it last (config/web_claims.yaml enabled); it also runs once now when this deploy creates it.
+# With enabled: false, the job runs once with LC_CLEANUP=1 (deletes trials/web-claims/, every version) and is
+# then deleted. While the system is paused, nothing deploys, and every run stops at its first check.
+name: deploy-web-claims
+
+on:
+  push:
+    branches: [main]
+    paths: ["services/web_claims/**", "packages/lc_core/**", "packages/lc_ingest/**", "config/web_claims.yaml",
+            "config/models.yaml", "config/cycle.yaml", ".github/workflows/deploy-web-claims.yml"]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-web-claims
+  cancel-in-progress: false
+
+env:
+  REGION: ${{ vars.GCP_REGION }}
+  PROJECT: ${{ vars.GCP_PROJECT_ID }}
+  IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/lei-commons/web-claims
+  JOB: web-claims
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The pilot's switch and the job's time limit, from config
+        run: |
+          pip install -q pyyaml
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import yaml
+          cfg = yaml.safe_load(open("config/web_claims.yaml"))
+          minutes = yaml.safe_load(open("config/cycle.yaml"))["timeouts_minutes"]
+          print(f"ENABLED={'true' if cfg.get('enabled') is True else 'false'}")
+          print(f"TASK_TIMEOUT={60 * int(minutes.get('web-claims', minutes['default']))}")
+          PY
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Deploy only while the system is running (the owner's control state)
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          STATE_CHECK_ENFORCED: ${{ vars.STATE_CHECK_ENFORCED }}
+        run: python3 scripts/check_system_state.py deploy:web-claims
+      - name: "The pilot ended: its files, then its job"
+        if: env.ENABLED != 'true'
+        run: |
+          if gcloud run jobs describe "$JOB" --region "$REGION" >/dev/null 2>&1; then
+            gcloud run jobs execute "$JOB" --region "$REGION" --update-env-vars LC_CLEANUP=1 --wait \
+              || echo "::warning::$JOB: the cleanup run failed; the bucket's trials/ lifecycle deletes its files within about 3 days"
+            gcloud run jobs delete "$JOB" --region "$REGION" --quiet
+          else
+            echo "no $JOB job"
+          fi
+      - name: Build and push
+        if: env.ENABLED == 'true'
+        run: |
+          gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+          docker build -f services/web_claims/Dockerfile -t "$IMAGE:$GITHUB_SHA" .
+          docker push "$IMAGE:$GITHUB_SHA"
+      - name: Deploy the job
+        if: env.ENABLED == 'true'
+        run: |
+          gcloud run jobs describe "$JOB" --region "$REGION" >/dev/null 2>&1 || echo "new" > new_job.txt
+          GATEWAY="$(gcloud run services describe conduct-gateway --region "$REGION" --format='value(status.url)')"
+          gcloud run jobs deploy "$JOB" --region "$REGION" --image "$IMAGE:$GITHUB_SHA" \
+            --service-account "lc-crawler@$PROJECT.iam.gserviceaccount.com" \
+            --network lc-jobs --subnet "lc-jobs-$REGION" --vpc-egress all-traffic \
+            --set-env-vars "LC_GATEWAY_URL=$GATEWAY,LC_DATA_BUCKET=$PROJECT-data,LC_SNAPSHOTS_BUCKET=$PROJECT-snapshots,LC_CONTROL_STATE_URI=gs://$PROJECT-control/state.json,LC_PROJECT_ID=$PROJECT,LC_CODE_VERSION=$GITHUB_SHA" \
+            --max-retries 0 --task-timeout "$TASK_TIMEOUT" --memory 8Gi --cpu 2 \
+            --labels "lc-image=web-claims,lc-stage=trial"
+      # Only when this deploy created the job (its first run); the daily cycle starts it from then on.
+      - name: Run the new job once now
+        if: env.ENABLED == 'true'
+        run: |
+          [ -s new_job.txt ] || { echo "not a new job"; exit 0; }
+          gcloud run jobs execute "$JOB" --region "$REGION" --async

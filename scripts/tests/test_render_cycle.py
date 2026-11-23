@@ -179,3 +179,14 @@ def test_each_jobs_time_limit_comes_from_the_config():
         rc.render(REGISTRY, {**CONFIG, "timeouts_minutes": {"build-snapshot": 180}})
     with pytest.raises(rc.ConfigError, match="build-snapshot"):
         rc.render(REGISTRY, {**CONFIG, "timeouts_minutes": {"default": 120, "build-snapshot": 5}})
+
+
+def test_the_web_claims_pilot_is_started_last_and_never_waited_for_or_fatal():
+    trials = {"sources": REGISTRY["sources"] + [{"id": "t", "pipeline": {"job": "ingest-tt", "stage": "trial"}}]}
+    names = [k for step in rc.render(trials, CONFIG, web_claims=True)["main"]["steps"] for k in step]
+    assert names[-3:] == ["web_claims", "report", "done"] and names.index("trials") < names.index("web_claims")
+    step = steps(rc.render(trials, CONFIG, web_claims=True))["web_claims"]
+    assert step["try"]["args"]["connector_params"]["skip_polling"] is True
+    assert '"web-claims"' in step["try"]["args"]["name"] and "web-claims-failed" in str(step["except"])
+    assert "web_claims" not in steps(rc.render(trials, CONFIG))
+    assert "web_claims" not in steps(rc.render(trials, CONFIG, selftest=True, web_claims=True))

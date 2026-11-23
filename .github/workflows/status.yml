@@ -22,7 +22,7 @@ jobs:
       - name: The cycle's jobs, from the sources registry
         run: |
           pip install -q pyyaml
-          python3 -c "import yaml; s = yaml.safe_load(open('config/sources.yaml'))['sources']; print('CYCLE_JOBS=' + ' '.join([x['pipeline']['job'] for x in s if x.get('pipeline')] + ['build-snapshot', 'load-db', 'dedi-check']))" >> "$GITHUB_ENV"
+          python3 -c "import yaml; s = yaml.safe_load(open('config/sources.yaml'))['sources']; print('CYCLE_JOBS=' + ' '.join([x['pipeline']['job'] for x in s if x.get('pipeline')] + ['build-snapshot', 'load-db', 'dedi-check', 'web-claims']))" >> "$GITHUB_ENV"
       - uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}

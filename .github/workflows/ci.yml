@@ -91,6 +91,12 @@ jobs:
       - run: pytest -q services/budget_guard
       - name: Budget guard image builds
         run: docker build -f services/budget_guard/Dockerfile -t budget-guard .
+      - run: pip install -e services/web_claims
+      - run: pytest -q services/web_claims
+      - name: The web-claims pilot's image builds, reads its settings and has both model clients
+        run: |
+          docker build -f services/web_claims/Dockerfile -t web-claims .
+          docker run --rm web-claims python -c "from web_claims.settings import load; s = load(); assert s.maker.vendor != s.checker.vendor; import anthropic, google.auth.transport.requests, pyarrow; print('web-claims settings load')"
       - name: Ingest job image builds and loads the allow-list
         run: |
           docker build -f services/ingest_gleif/Dockerfile -t ingest-gleif .

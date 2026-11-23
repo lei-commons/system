@@ -93,6 +93,50 @@ function trialCard(t) {
     t.report ? h("div", {}, h("h3", {}, `Sample of ${fmt((q.sample || []).length)} records`), sampleTable(q.sample)) : null);
 }
 
+// The web-asserted facts pilot (services/web_claims; owner approval 2026-11-23): measure-only, from Common Crawl's
+// archived pages. Web claims are never shown on the public site unless a kind passes the 98% bar and the owner
+// decides; there they would be a separate card saying they are web-crawled and not officially verified.
+const rate = (v) => (v === undefined || v === null ? "–" : `${Math.round(v * 1000) / 10}%`);
+
+function gateLine(label, g) {
+  if (!g || !g.judged) return h("li", {}, h("span", { class: "pill warn" }, "…"), ` ${label}: nothing judged yet`);
+  return h("li", {}, h("span", { class: `pill ${g.passes ? "good" : "warn"}` }, g.passes ? "✓" : "✗"),
+    ` ${label}: ${rate(g.precision)} precision on ${fmt(g.judged)} judged (bar ${rate(g.bar)})`);
+}
+
+function webClaimsCard(w) {
+  const q = (w && w.report) || null;
+  const head = h("div", { class: "source-head" }, h("span", { class: "flag big" }, "🌐"),
+    h("div", {}, h("div", { class: "source-name" }, "Web-asserted facts pilot", h("span", { class: "pill busy", style: { marginLeft: "8px" } }, "pilot")),
+      h("div", { class: "muted" }, "job web-claims · Common Crawl archive · maker and checker models from different vendors · measure-only")));
+  if (!q) {
+    return h("section", { class: "card card-pad" }, head, h("p", { class: "muted" }, w && w.reportError
+      ? `The report can't be read right now (${w.reportError}).`
+      : "No report yet: the pilot starts once a full snapshot carries the website column, then works a few hours after each cycle."));
+  }
+  const withSite = Object.entries(q.withWebsite || {}).map(([g, v]) => [`${g}: in archive / evidence`, `${rate(v.inArchiveRate)} / ${rate(v.evidenceRate)} of ${fmt(v.processed)}`]);
+  const without = Object.entries(q.withoutWebsite || {}).map(([g, v]) => [`${g}: websites found`, `${fmt(v.found)} of ${fmt(v.processed)} (${rate(v.yield)})`]);
+  const p = q.parents || {};
+  const sample = (q.sample || []).map((c) => h("tr", {}, h("td", {}, c.kind),
+    h("td", { class: "mono" }, c.directoryId), h("td", {}, typeof c.value === "string" ? c.value : (c.value || {}).legalName || ""),
+    h("td", {}, c.matchEvidence), h("td", {}, (c.capturedAt || "").slice(0, 10))));
+  return h("section", { class: "card card-pad" }, head,
+    h("p", { class: "muted" }, `Candidates from the snapshot of ${q.snapshot}; report ${q.generatedAt}. ${fmt(q.processed)} done, ${fmt(q.remaining)} to go. Model spend so far about $${((q.modelUsage || {}).usd || 0).toFixed(2)}.`),
+    h("div", { class: "kpis" },
+      tile(fmt((q.claims || {}).website || 0), "website claims (with evidence)", "t1"),
+      tile(fmt((q.claims || {}).parent || 0), "parent claims (checked)", "t2"),
+      tile(fmt(p.guardRejected || 0), "parents dropped as possibly a person", p.guardRejected ? "t4" : "t6"),
+      tile(rate((q.discoveryTruth || {}).precision), "discovery precision (truth sample)", "t6")),
+    h("h3", {}, "The 98% bar"),
+    h("ul", { class: "feed compact" }, gateLine("Websites found from the name", (q.gates || {})["website-discovery"]),
+      gateLine("Parents, against GLEIF", (q.gates || {}).parent)),
+    h("div", { class: "grid two" },
+      h("div", {}, h("div", { class: "action-label" }, "Records with a website"), pairs(withSite, "None yet.")),
+      h("div", {}, h("div", { class: "action-label" }, "Records without one"), pairs(without, "None yet."))),
+    sample.length ? h("div", {}, h("h3", {}, `Sample of ${fmt(sample.length)} claims`), h("div", { class: "table-scroll" },
+      h("table", { class: "data" }, h("tr", {}, ...["Kind", "Record", "Value", "Evidence", "Captured"].map((x) => h("th", {}, x))), ...sample))) : null);
+}
+
 export async function render(root) {
   let d;
   try {
@@ -106,5 +150,6 @@ export async function render(root) {
       h("span", { class: "muted" }, "New sources run here first, kept out of the database, until their data checks out")),
     h("p", { class: "muted" }, "Each source on trial runs every day after the production cycle, into its own store. Nothing from it reaches the snapshot, the database or the site. A source moves to production only through a pull request you approve on the Approvals page, quoting these numbers."),
     d.trials.length ? h("div", { class: "grid", style: { gap: "18px" } }, ...d.trials.map(trialCard))
-      : h("p", { class: "empty" }, "No source is on trial.")));
+      : h("p", { class: "empty" }, "No source is on trial."),
+    d.webClaims ? h("div", { style: { marginTop: "18px" } }, webClaimsCard(d.webClaims)) : null));
 }

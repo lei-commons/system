@@ -345,6 +345,17 @@ def test_the_trials_page_shows_only_sources_on_trial_with_their_reports():
     assert trials[1]["report"] is None and trials[1]["reportError"] == "PermissionError"
 
 
+def test_the_trials_page_carries_the_web_claims_pilot_report():
+    class PilotReader(Reader):
+        def bucket_json(self, bucket, name):
+            if (bucket, name) == ("data", "trials/web-claims/report.json"):
+                return {"pilot": "web-claims", "processed": 5, "remaining": 0}
+            return super().bucket_json(bucket, name)
+
+    page = SystemView(PilotReader(), sources=[]).trials()
+    assert page["webClaims"] == {"report": {"pilot": "web-claims", "processed": 5, "remaining": 0}, "reportError": None}
+
+
 def test_the_trials_api_is_admin_only():
     from lc_site.server import ADMIN_API
 

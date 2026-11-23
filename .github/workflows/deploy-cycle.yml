@@ -11,7 +11,7 @@ name: deploy-cycle
 on:
   push:
     branches: [main]
-    paths: ["config/sources.yaml", "config/cycle.yaml", "config/egress-allowlist.yaml", "config/dedi.yaml", "infra/workflows/**", "scripts/render_cycle.py",
+    paths: ["config/sources.yaml", "config/cycle.yaml", "config/egress-allowlist.yaml", "config/dedi.yaml", "config/web_claims.yaml", "infra/workflows/**", "scripts/render_cycle.py",
             "packages/lc_core/lc_core/cycle.py", "packages/lc_core/lc_core/sources.py", ".github/workflows/deploy-cycle.yml"]
 
 permissions:
