@@ -2,9 +2,13 @@ locals {
   bucket_prefix = var.project_id
   # The publishing settings (config/publishing.yaml, checked by lc_core.publishing and in CI).
   publishing = yamldecode(file("${path.module}/../../config/publishing.yaml"))
+  # The source registry: every store's folder of downloaded files that earlier code kept.
+  registry = yamldecode(file("${path.module}/../../config/sources.yaml"))
+  # lc_ingest GcsStore.purge_sources deletes them on each run; the rule below is the safety net. gleif-rr is GLEIF's second store.
+  kept_download_prefixes = sort(distinct(concat(["gleif-rr/sources/"], [for s in local.registry.sources : "${s.pipeline.store}/sources/" if try(s.pipeline.store, null) != null])))
 }
 
-# Working data: raw source files, Parquet, proposals, verdicts. Private.
+# Working data: the stores, build state, trial reports. Private. Downloaded files are never kept (#143).
 resource "google_storage_bucket" "data" {
   name                        = "${local.bucket_prefix}-data"
   location                    = var.region
@@ -12,14 +16,28 @@ resource "google_storage_bucket" "data" {
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
 
+  # Owner decision 2026-11-23: downloaded files and working data, once fully processed and no longer needed,
+  # are deleted within 24 hours. The jobs delete their own (lc_ingest GcsStore.purge_sources, Brazil's
+  # drop_lookups, the UK's delete_seen); these rules are the safety net behind them.
   lifecycle_rule {
     condition {
-      age            = 30
-      matches_prefix = ["raw/"]
+      age            = 1
+      matches_prefix = concat(["raw/", "tmp/"], local.kept_download_prefixes)
     }
     action {
-      type          = "SetStorageClass"
-      storage_class = "NEARLINE"
+      type = "Delete"
+    }
+  }
+
+  # A month's company lookup for Brazil is deleted by the job once the month is done; this catches a month
+  # whose run never finished.
+  lifecycle_rule {
+    condition {
+      age            = 40
+      matches_prefix = ["br-co/lookup/"]
+    }
+    action {
+      type = "Delete"
     }
   }
 
@@ -41,16 +59,6 @@ resource "google_storage_bucket" "data" {
     condition {
       days_since_noncurrent_time = 1
       matches_prefix             = ["trials/"]
-    }
-    action {
-      type = "Delete"
-    }
-  }
-
-  lifecycle_rule {
-    condition {
-      age            = 7
-      matches_prefix = ["tmp/"]
     }
     action {
       type = "Delete"
