@@ -99,9 +99,19 @@ def require_columns(reader: csv.DictReader, columns, what: str) -> csv.DictReade
     return reader
 
 
-def zipped_csv(member_suffix=".csv", encoding="utf-8-sig", key=None, delimiter=",", columns=(), errors="strict"):
+def _unquote(value):
+    """A value written wholly inside double quotes, without them (for readers that keep quotes literal)."""
+    if isinstance(value, str) and len(value) >= 2 and value[0] == value[-1] == '"':
+        return value[1:-1].replace('""', '"')
+    return value
+
+
+def zipped_csv(member_suffix=".csv", encoding="utf-8-sig", key=None, delimiter=",", columns=(), errors="strict",
+               literal_quotes=False):
     """A reader for a ZIP holding one CSV: rows as dicts. With ``key``, later rows repeating a key are skipped.
-    With ``columns``, the header must name each of them (require_columns)."""
+    With ``columns``, the header must name each of them (require_columns). With ``literal_quotes`` (a tab-separated
+    export that doesn't quote its fields), a double quote is an ordinary character: one opening a field can't run
+    on through later lines and rows into one oversized field; a value wholly inside quotes loses them."""
     def read(binary_file):
         with zipfile.ZipFile(binary_file) as z:
             names = [n for n in z.namelist() if n.lower().endswith(member_suffix)]
@@ -110,10 +120,13 @@ def zipped_csv(member_suffix=".csv", encoding="utf-8-sig", key=None, delimiter="
             seen = set()
             with z.open(names[0]) as raw:
                 rows = csv.DictReader(io.TextIOWrapper(raw, encoding=encoding, errors=errors, newline=""),
-                                      delimiter=delimiter)
+                                      delimiter=delimiter,
+                                      **({"quoting": csv.QUOTE_NONE} if literal_quotes else {}))
                 if columns:
                     require_columns(rows, columns, names[0])
                 for row in rows:
+                    if literal_quotes:
+                        row = {k: _unquote(v) for k, v in row.items()}
                     if key:
                         k = _clean(row.get(key))
                         if k in seen:
@@ -523,7 +536,8 @@ def ccew_record(row: dict) -> dict:
 CCEW = Profile(
     source="gb-ccew", job="ingest-gb-ccew", store="gb-ccew", filename="gb-ccew-charities", extension=".zip",
     file_url="https://ccewuksprdoneregsadata1.blob.core.windows.net/data/txt/publicextract.charity.zip",
-    guard_names=True, ra="GB-CCEW", read=zipped_csv(member_suffix=".txt", delimiter="\t", columns=CCEW_COLUMNS), mapper=ccew_record)
+    guard_names=True, ra="GB-CCEW", read=zipped_csv(member_suffix=".txt", delimiter="\t", columns=CCEW_COLUMNS, literal_quotes=True),
+    mapper=ccew_record)
 
 
 # ---- Estonia: e-Business Register ----

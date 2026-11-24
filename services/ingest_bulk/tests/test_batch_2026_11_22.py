@@ -110,6 +110,18 @@ def test_ccew_keeps_main_charities_that_are_not_companies_and_no_contact_details
         ccew_record({"registered_charity_number": "x", "charity_name": "A"})
 
 
+def test_ccew_reads_quotes_literally_so_one_stray_quote_cannot_swallow_the_rows_after_it():
+    # 2026-11-23 trial: "field larger than field limit (131072)". The export doesn't quote its fields, so a name
+    # opening with a quote made the default reader run on through the following rows as one quoted field.
+    text = (CCEW_HEADER + ccew_line("200010", "0", '"HOPE FOR ALL')
+            + "".join(ccew_line(str(200011 + i), "0", f"CHARITY {i}") for i in range(3000))
+            + ccew_line("209999", "0", '"QUOTED NAME"'))
+    kept = [CCEW.record(row) for row in CCEW.read(zipped("publicextract.charity.txt", text))]
+    assert len(kept) == 3002
+    assert kept[0]["legalName"] == '"HOPE FOR ALL' and kept[1]["legalName"] == "CHARITY 0"
+    assert kept[-1]["legalName"] == "QUOTED NAME"
+
+
 def test_a_file_without_the_expected_columns_names_them_and_nothing_else():
     with pytest.raises(ValueError) as exc:
         list(plain_csv(columns=("EIN", "NAME"))(io.BytesIO(b"ein,org_name\n123456789,SECRET VALUE\n")))
