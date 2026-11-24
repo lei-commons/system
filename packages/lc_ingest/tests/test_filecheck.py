@@ -233,3 +233,12 @@ def test_every_source_downloads_through_the_runner_or_the_shared_check():
         downloads = re.findall(r"gateway\.download\(", text)
         if downloads:
             assert "filecheck.check(" in text or job.parent.name in ("ingest_gb", "ingest_sg"), job
+
+
+def test_a_utf16_csv_with_its_byte_order_mark_passes(tmp_path):
+    # si-ajpes-prs, 2026-11-23/24: "the text isn't utf-8" on a file starting 0xFF (UTF-16 little-endian's mark).
+    text = "Ident_stevilka;Popolno_ime\n5012345000;ČEBELA d.o.o.\n"
+    check(write(tmp_path, "le.csv", text.encode("utf-16")))  # Python writes the mark, little-endian here
+    check(write(tmp_path, "be.csv", b"\xfe\xff" + text.encode("utf-16-be")))
+    with pytest.raises(BadFile, match="delimited header"):
+        check(write(tmp_path, "no.csv", "just words\nmore\n".encode("utf-16")))
