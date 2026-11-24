@@ -14,6 +14,7 @@ import zipfile
 import zlib
 
 SNIFF = 64 * 1024
+UTF16_BOMS = (b"\xff\xfe", b"\xfe\xff")
 HTML_STARTS = (b"<!doctype html", b"<html", b"<?xml version", b"<head", b"<body")
 
 
@@ -77,6 +78,14 @@ def check(path: str, kind: str = None, encoding: str = "utf-8") -> None:
         except (gzip.BadGzipFile, zlib.error, EOFError, OSError) as exc:
             raise BadFile(f"the gzip file is corrupt or cut short ({type(exc).__name__})") from exc
     elif kind == "csv":
+        if head.startswith(UTF16_BOMS):  # a Windows export: UTF-16 with its byte-order mark
+            try:
+                first = head[:len(head) - len(head) % 2].decode("utf-16").split("\n", 1)[0]
+            except UnicodeDecodeError as exc:
+                raise BadFile("the text isn't utf-16, though it starts with its byte-order mark") from exc
+            if not any(d in first for d in (",", "\t", ";", "|")):
+                raise BadFile("the first line isn't a delimited header")
+            return
         try:
             head.decode(encoding)
         except UnicodeDecodeError as exc:

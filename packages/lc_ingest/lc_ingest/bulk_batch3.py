@@ -72,6 +72,8 @@ class Columns:
 
 
 def _encoding(head: bytes, fallback: str) -> str:
+    if head.startswith((b"\xff\xfe", b"\xfe\xff")):  # UTF-16 with its byte-order mark (a Windows export)
+        return "utf-16"
     try:
         head[:len(head) - 4].decode("utf-8") if len(head) > 4 else head.decode("utf-8")
         return "utf-8-sig"
@@ -100,6 +102,11 @@ def _rows(open_text, columns: Columns, what: str, fallback: str):
             yield {field: (values[i] if i < len(values) else "") for field, i in index.items()}
 
 
+def _readme(name: str) -> bool:
+    """A notes file packed beside the data (README.txt, LEESMIJ.txt), never the data itself."""
+    return bool(re.match(r"(readme|leesmij|lisezmoi|liesmich)\b", name.rsplit("/", 1)[-1], re.I))
+
+
 def table(columns: Columns, member=r".*\.(csv|txt)$", fallback_encoding="cp1252"):
     """A reader for a CSV, plain or as the largest matching member of a ZIP (or gzip), with columns by name."""
     def read(binary_file):
@@ -112,6 +119,7 @@ def table(columns: Columns, member=r".*\.(csv|txt)$", fallback_encoding="cp1252"
         if head.startswith(b"PK"):
             with zipfile.ZipFile(binary_file) as z:
                 infos = [i for i in z.infolist() if re.match(member, i.filename.rsplit("/", 1)[-1], re.I)]
+                infos = [i for i in infos if not _readme(i.filename)] or infos
                 if not infos:
                     raise ValueError(f"no file matching {member} in the archive (it holds {z.namelist()[:10]})")
                 name = max(infos, key=lambda i: i.file_size).filename
@@ -323,13 +331,26 @@ def anbi_read(binary_file):
         if "xl/workbook.xml" in names:  # the download is the workbook itself
             book = data
         else:
-            books = [n for n in names if n.lower().endswith(".xlsx")]
+            files = [n for n in names if not n.endswith("/") and not _readme(n)]
+            books = [n for n in files if n.lower().endswith(".xlsx")]
             if not books:
-                csvs = [n for n in names if n.lower().endswith((".csv", ".txt"))]
+                csvs = [n for n in files if n.lower().endswith((".csv", ".txt"))]
                 if csvs:
                     yield from table(NL_COLUMNS)(io.BytesIO(data))
                     return
-                raise ValueError(f"no .xlsx or .csv in the archive (it holds {names[:10]})")
+                xmls = [n for n in files if n.lower().endswith(".xml")]
+                if xmls:
+                    with z.open(max(xmls, key=lambda n: z.getinfo(n).file_size)) as f:
+                        yield from _by_columns(xml_records(f), "the ANBI XML file")
+                    return
+                jsons = [n for n in files if n.lower().endswith(".json")]
+                if jsons:
+                    import json
+                    doc = json.loads(z.read(max(jsons, key=lambda n: z.getinfo(n).file_size)).decode("utf-8-sig"))
+                    yield from _by_columns(json_records(doc), "the ANBI JSON file")
+                    return
+                raise ValueError("no .xlsx, .csv, .xml or .json data file in the archive (it holds "
+                                 f"{[(n, z.getinfo(n).file_size) for n in names][:10]})")
             book = z.read(books[0])
     rows = xlsx_rows(book)
     header = next(rows, [])
@@ -337,6 +358,45 @@ def anbi_read(binary_file):
     index = {field: header.index(name) for field, name in found.items()}
     for values in rows:
         yield {field: (values[i] if i < len(values) else "") for field, i in index.items()}
+
+
+def _by_columns(records, what: str):
+    """Records as {name: text} read through NL_COLUMNS; the names are resolved on the first record."""
+    found = None
+    for rec in records:
+        if found is None:
+            found = NL_COLUMNS.resolve(list(rec), what)
+        yield {field: rec.get(name, "") for field, name in found.items()}
+    if found is None:
+        raise ValueError(f"{what}: no records")
+
+
+def xml_records(binary_file):
+    """The repeated records of an XML file, as {child name: text}: the first element whose children are all
+    leaves (at least two) sets the record tag, and every element with that tag is a record. Streamed."""
+    import xml.etree.ElementTree as ET
+
+    def local(tag):
+        return tag.rsplit("}", 1)[-1]
+
+    record_tag = None
+    for _, el in ET.iterparse(binary_file):
+        children = list(el)
+        if record_tag is None and len(children) >= 2 and all(len(c) == 0 for c in children):
+            record_tag = el.tag
+        if el.tag == record_tag:
+            yield {local(c.tag): (c.text or "").strip() for c in children}
+            el.clear()
+
+
+def json_records(doc):
+    """The records of a JSON file: a list of objects, or the largest list of objects inside an object."""
+    if isinstance(doc, dict):
+        lists = [v for v in doc.values() if isinstance(v, list) and v and isinstance(v[0], dict)]
+        doc = max(lists, key=len) if lists else []
+    for rec in doc if isinstance(doc, list) else []:
+        if isinstance(rec, dict):
+            yield {k: "" if v is None else str(v) for k, v in rec.items() if not isinstance(v, (dict, list))}
 
 
 def anbi_record(row: dict) -> dict:
@@ -441,6 +501,8 @@ def cra_locate(gateway):
     if not years:
         raise ValueError(f"no yearly list of charities with an Identification file ({len(results)} packages)")
     year, ident = max(years, key=lambda pair: pair[0])
+    if ident["url"].startswith("/"):  # an uploaded file's link, relative to the catalogue (2026-11-23)
+        ident = dict(ident, url="https://open.canada.ca" + ident["url"])
     if not ident["url"].startswith("https://open.canada.ca/"):
         raise ValueError(f"the file is served from an unexpected place: {ident['url'][:120]}")
     stamp = re.sub(r"\D", "", ident.get("last_modified") or ident.get("created") or "")[:8] or "latest"

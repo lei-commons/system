@@ -105,6 +105,13 @@ def test_slovenia_keeps_businesses_and_drops_sole_traders_room_renters_and_branc
     assert "NOVAK" not in repr(kept) and "KOVAČ" not in repr(kept)
 
 
+
+def test_slovenia_reads_a_utf16_file_by_its_byte_order_mark():
+    kept, _ = mapped(SLOVENIA, SLOVENIA.read(io.BytesIO(SI.encode("utf-16"))))
+    assert [r["registrationNumber"] for r in kept] == ["5012345000"]
+    assert kept[0]["legalName"] == "ČEBELA, proizvodnja medu, d.o.o." and kept[0]["legalAddress"]["city"] == "LJUBLJANA"
+
+
 # ---- Netherlands ANBI ----
 
 def xlsx(rows):
@@ -148,6 +155,36 @@ def test_anbi_names_the_workbook_columns_when_they_differ():
     book = xlsx([["Something", "Else"], ["SECRET", "x"]])
     with pytest.raises(ValueError, match=r"the file has \['Something', 'Else'\]"):
         list(NETHERLANDS_ANBI.read(zipped({"anbi.xlsx": book})))
+
+
+
+ANBI_README = "Toelichting bij het ANBI-bestand.\nVelden: fiscaalNummer, naam, vestigingsPlaats, webSite\n" * 50
+
+
+def test_anbi_skips_the_readme_and_reads_an_xml_data_file():
+    # 2026-11-23/24: the archive held README.txt beside a data file that was neither .xlsx nor .csv.
+    xml = ('<?xml version="1.0" encoding="UTF-8"?><anbis xmlns="urn:example">'
+           '<anbi><fiscaalNummer>2345678</fiscaalNummer><naam>Stichting Vrienden van het Park</naam>'
+           '<vestigingsPlaats>UTRECHT</vestigingsPlaats><webSite>https://vrienden.example</webSite></anbi>'
+           '<anbi><fiscaalNummer>804512345</fiscaalNummer><naam>Vereniging Muziek &amp; Zo</naam>'
+           '<vestigingsPlaats>Zwolle</vestigingsPlaats><webSite/></anbi></anbis>')
+    kept, why = mapped(NETHERLANDS_ANBI, NETHERLANDS_ANBI.read(zipped({"README.txt": ANBI_README, "anbi.xml": xml})))
+    assert [r["registrationNumber"] for r in kept] == ["002345678", "804512345"] and why == []
+    assert kept[0]["website"] == "https://vrienden.example" and kept[1]["legalName"] == "Vereniging Muziek & Zo"
+
+
+def test_anbi_reads_a_json_data_file_and_a_csv_beside_a_bigger_readme():
+    doc = '{"meta": {"n": 1}, "anbis": [{"fiscaalNummer": "804512345", "naam": "Stichting Een", "webSite": null}]}'
+    kept, _ = mapped(NETHERLANDS_ANBI, NETHERLANDS_ANBI.read(zipped({"README.txt": ANBI_README, "anbi.json": doc})))
+    assert [r["legalName"] for r in kept] == ["Stichting Een"]
+    csv_text = "fiscaalNummer;naam\n804512345;Stichting Twee\n"
+    kept, _ = mapped(NETHERLANDS_ANBI, NETHERLANDS_ANBI.read(zipped({"README.txt": ANBI_README, "anbi.csv": csv_text})))
+    assert [r["legalName"] for r in kept] == ["Stichting Twee"]
+
+
+def test_anbi_without_a_data_file_names_the_archive_members_only():
+    with pytest.raises(ValueError, match=r"no .xlsx, .csv, .xml or .json data file.*README.txt.*anbi.ods"):
+        list(NETHERLANDS_ANBI.read(zipped({"README.txt": ANBI_README, "anbi.ods": "SECRET"})))
 
 
 # ---- Scotland OSCR ----
@@ -208,6 +245,26 @@ def test_cra_takes_the_newest_years_identification_file():
                                            {"title": "Something else", "resources": []}]}}
     assert cra_locate(Gateway()) == ("2025 20261118",
                                      "https://open.canada.ca/data/dataset/x/resource/y/download/ident_2025.csv")
+
+
+
+def test_cra_resolves_a_relative_link_against_the_catalogue():
+    # 2026-11-23/24: the catalogue gave "/data/dataset/.../download/ident_2025_upd..." for an uploaded file.
+    class Gateway:
+        def get_json(self, url):
+            return {"result": {"results": [{"title": "2025 List of charities", "resources": [
+                {"name": "Identification", "last_modified": "2026-11-20T10:00:00",
+                 "url": "/data/dataset/x/resource/y/download/ident_2025_upd.csv"}]}]}}
+    assert cra_locate(Gateway()) == ("2025 20261120",
+                                     "https://open.canada.ca/data/dataset/x/resource/y/download/ident_2025_upd.csv")
+
+    class Elsewhere(Gateway):
+        def get_json(self, url):
+            doc = super().get_json(url)
+            doc["result"]["results"][0]["resources"][0]["url"] = "https://example.com/ident.csv"
+            return doc
+    with pytest.raises(ValueError, match="unexpected place"):
+        cra_locate(Elsewhere())
 
 
 # ---- US NPPES ----
