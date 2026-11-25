@@ -115,10 +115,28 @@ sources:
     active: [Operating]
 
   cy-drcor:                    # the register's own Greek words (registered, reminder sent, struck off, ...)
-    active: [Εγγεγραμμένη, Στάληκε επιστολή Υπενθύμισης]
-    struck-off: [Διαγραμμ*]
-    dissolved: [Διαλυ*]
-    in-liquidation: [Υπό Εκκαθάριση*]
+    # Words seen in the trial (2026-W48), with and without accents: the map matches letters exactly.
+    active:
+      - Εγγεγραμμένη                       # registered
+      - Στάληκε επιστολή Υπενθύμισης        # reminder letter sent
+      - Δημοσιεύτηκε η Τρίμηνη              # three-month strike-off notice published (only proposed: active)
+      - Υπο Διαχείριση                      # under administration (still on the register: active)
+      - Ευρωπαϊκή Εταιρεία                  # European company (SE) on the register
+    struck-off:
+      - Διαγραμμ*                           # struck off
+      - Αφαιρέθηκε από το Μητρώο*           # removed from the register (by court decision)
+    dissolved:
+      - Διαλυ*
+      - Διάλυσ*                             # dissolved on completing (voluntary) liquidation
+    merged:
+      - Διαλύθηκε λόγω συγχώνευσης          # dissolved by merger
+    in-liquidation:
+      - Υπό Εκκαθάριση*
+      - Υπο Εκκαθάριση                      # in liquidation (unaccented)
+      - Υπο Διαχείριση & Υπο Εκκαθάριση     # under administration and in liquidation
+      - Εκούσια Εκκαθάριση*                 # voluntary liquidation (by members or creditors)
+      - Εκκαθάριση με Διάταγμα Δικαστηρίου*  # liquidation by court order
+      - Διορισμός Προσωρινού Εκκαθαριστή    # provisional liquidator appointed
 
   si-ajpes-prs:                # lc_ingest.bulk_batch3: only deleted units carry a word
     dissolved: [Deleted]

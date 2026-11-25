@@ -45,6 +45,25 @@ def test_words_match_trimmed_and_in_any_case_and_unlisted_words_are_unmapped():
     assert m.category("x", None) == m.category("x", "  ") == ("unknown", True)  # no word: nothing to map
 
 
+# Every status word Cyprus's trial measured (2026-W48: 48,190 records had a word the map missed).
+CY_TRIAL_WORDS = {
+    "Διαγραμμένη": "struck-off", "Εγγεγραμμένη": "active", "Στάληκε επιστολή Υπενθύμισης": "active",
+    "Διάλυση λόγω Ολοκλήρωσης Εκούσιας Εκκαθάρισης": "dissolved", "Δημοσιεύτηκε η Τρίμηνη": "active",
+    "Εκούσια Εκκαθάριση από Μετόχους": "in-liquidation", "Διαλύθηκε λόγω συγχώνευσης": "merged",
+    "Εκκαθάριση με Διάταγμα Δικαστηρίου": "in-liquidation", "Διάλυση λόγω Ολοκλήρωσης Εκκαθάρισης": "dissolved",
+    "Υπο Διαχείριση": "active", "Εκούσια Εκκαθάριση από Πιστωτές": "in-liquidation",
+    "Υπο Διαχείριση & Υπο Εκκαθάριση": "in-liquidation", "Διορισμός Προσωρινού Εκκαθαριστή": "in-liquidation",
+    "Υπο Εκκαθάριση": "in-liquidation", "Ευρωπαϊκή Εταιρεία": "active",
+    "Αφαιρέθηκε από το Μητρώο ΕΕ με απόφαση Ανωτάτου Δικαστηρίου": "struck-off",
+    "Εκκαθάριση με Διάταγμα Δικαστηρίου& Διορ.Ειδικού Διαχειριστή": "in-liquidation",
+}
+
+
+def test_every_word_cyprus_trial_measured_is_mapped():
+    m = status.load()
+    assert {w: m.category("cy-drcor", w) for w in CY_TRIAL_WORDS} == {w: (c, True) for w, c in CY_TRIAL_WORDS.items()}
+
+
 def test_an_exact_word_wins_over_a_prefix_and_a_longer_prefix_over_a_shorter():
     m = StatusMap({"x": {"inactive": ["Inactive*"], "merged": ["Inactive - Amalgamated*"], "active": ["Inactive - ok"]}},
                   VOCABULARY)
