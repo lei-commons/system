@@ -236,6 +236,13 @@ SI_COLUMNS = Columns(
      "registered": ("Datum_vpisa", "Datum vpisa", "Datum_ustanovitve"), "activity": ("Skd", "Glavna_dejavnost_skd"),
      "deleted": ("Zbrisano", "Oznaka brisanja"), "deletedOn": ("Datum_izbrisa", "Datum izbrisa")})
 SI_PEOPLE = re.compile(r"samostojn|podjetnik|sobodaj|fizičn|fizicn|\bs\.\s?p\.", re.I)
+# Forms that register one person for an activity, not an organisation. The first measured trial (2026-W48) kept
+# farm-activity holders (5,250), registered lawyers (1,098), private doctors and health workers (698), professional
+# athletes (583) and private sports workers (215); the rest are forms of the same kind the register also uses.
+SI_PERSON_ACTIVITY = re.compile(
+    r"na kmetiji|kmetijsk\w* gospodar|odvetnik|notar|zdravnik|zdravstven\w* delav|športnik|športn\w* delav"
+    r"|sportnik|sportn\w* delav|novinar|samozaposlen|raziskovalec|izvršitelj|izvrsitelj|upravitelj|tolmač|tolmac"
+    r"|izvedenec|cenilec|mediator|detektiv|\bzastopnik", re.I)
 
 
 def si_record(row: dict) -> dict:
@@ -243,6 +250,8 @@ def si_record(row: dict) -> dict:
     form = _clean(row.get("form"))
     if SI_PEOPLE.search(form) or _clean(row.get("traderName")) or re.search(r"[ ,]s\.\s?p\.$", name, re.I):
         raise Skip("sole trader or private room renter (people)")
+    if SI_PERSON_ACTIVITY.search(form):
+        raise Skip("a person registered for an activity (farm, profession, sport)")
     if not number or not name:
         raise Skip("no number or name")
     if len(number) == 10 and not number.endswith("000"):
