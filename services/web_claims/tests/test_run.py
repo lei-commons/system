@@ -250,7 +250,7 @@ def test_model_errors_stop_the_run_and_leave_records_pending(tmp_path):
     outcome, store, events = go(tmp_path, FakeMaker(fail=True), FakeChecker(), max_model_errors_in_a_row=1)
     assert outcome == "model-errors"
     run_event = next(e for e in events if e["event"] == "web-claims-run")
-    assert run_event["lastErrorModel"] == "maker-call" and run_event["remaining"] > 0
+    assert run_event["lastErrorModel"] == "maker-call NotFoundError 404" and run_event["remaining"] > 0
 
 
 def test_a_parent_that_might_be_a_person_is_never_kept(tmp_path):

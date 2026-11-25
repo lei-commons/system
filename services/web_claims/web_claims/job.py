@@ -170,7 +170,7 @@ def run(store, snapshots, gateway, s, *, maker=None, checker=None, gate=lambda: 
                 except ModelError as exc:
                     counts["modelErrors"] += 1
                     model_row += 1
-                    last_errors["model"] = exc.kind
+                    last_errors["model"] = exc.loggable
                     if model_row >= s.max_model_errors_in_a_row:
                         stop = stop or "model-errors"
                 except Denied as exc:

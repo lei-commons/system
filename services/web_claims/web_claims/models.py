@@ -73,11 +73,20 @@ CHECKER_PROMPT = (
 
 
 class ModelError(Exception):
-    """A model call failed (unavailable model, refused or malformed answer). ``kind`` is safe to log."""
+    """A model call failed (unavailable model, refused or malformed answer). ``kind`` is safe to log, and so is
+    ``message``: every caller passes only an error's type and HTTP status, or a stop reason, never text from a page
+    or an answer."""
 
     def __init__(self, kind: str, message: str = ""):
         super().__init__(f"{kind}: {message}"[:300])
         self.kind = kind
+        self.detail = " ".join(str(message).split())[:80]
+
+    @property
+    def loggable(self) -> str:
+        """``kind`` and the type and status, e.g. "maker-call NotFoundError 404", to tell an unavailable model from
+        a refused request in the public log."""
+        return f"{self.kind} {self.detail}".strip()
 
 
 @dataclass
