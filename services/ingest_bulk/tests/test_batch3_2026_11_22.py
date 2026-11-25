@@ -105,6 +105,24 @@ def test_slovenia_keeps_businesses_and_drops_sole_traders_room_renters_and_branc
     assert "NOVAK" not in repr(kept) and "KOVAČ" not in repr(kept)
 
 
+def test_slovenia_drops_people_registered_for_an_activity_and_keeps_organisations():
+    forms = {  # form: kept?
+        "Nosilec dopolnilne dejavnosti na kmetiji": False, "Evidentirani odvetnik": False,
+        "Registrirani zdravnik, zobozdravnik, zasebni zdravstveni delavec": False, "Poklicni športnik": False,
+        "Zasebni športni delavec": False, "Notar": False, "Samozaposleni v kulturi": False,
+        "Družba z omejeno odgovornostjo d.o.o.": True, "Društvo, zveza društev": True, "Zavod": True,
+        "Sindikat": True, "Javni zavod": True, "Verska skupnost in podobne verske organizacije": True,
+        "Agrarne, pašne in vaške skupnosti": True, "Zadruga z.o.o.": True, "Ustanova": True,
+        "Skupnost lastnikov stanovanj": True, "Delniška družba d.d.": True, "Podružnica tujega podjetja": True,
+    }
+    head = "Ident_stevilka;Popolno_ime;Kratko_ime;Oblika;Skrajsano_ime;Postna_stevilka;Postni_kraj;Datum_vpisa;Skd\n"
+    rows = "".join(f"{5000000000 + i * 1000};ENOTA {i};;{form};;1000;LJUBLJANA;01.01.2000;\n"
+                   for i, form in enumerate(forms))
+    kept, why = mapped(SLOVENIA, SLOVENIA.read(io.BytesIO((head + rows).encode("cp1250"))))
+    assert [r["legalForm"] for r in kept] == [f for f, keep in forms.items() if keep]
+    assert why == ["a person registered for an activity (farm, profession, sport)"] * 7
+
+
 
 def test_slovenia_reads_a_utf16_file_by_its_byte_order_mark():
     kept, _ = mapped(SLOVENIA, SLOVENIA.read(io.BytesIO(SI.encode("utf-16"))))
