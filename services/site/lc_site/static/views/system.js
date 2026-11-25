@@ -98,19 +98,12 @@ function sourcesTile(sources) {
 
 function kpis(d, meta) {
   const cycle = d.lastCycle;
-  const gate = d.cycle.cleanDays; // config/cycle.yaml gate.clean_days
-  const streak = Math.min(d.cleanStreak || 0, gate);
-  const ring = svg("svg", { class: "ring", viewBox: "0 0 44 44", width: 44, height: 44, "aria-hidden": "true" },
-    svg("circle", { cx: 22, cy: 22, r: 18, class: "ring-track" }),
-    svg("circle", { cx: 22, cy: 22, r: 18, class: "ring-fill", "stroke-dasharray": `${(streak / gate) * 113.1} 113.1`,
-      transform: "rotate(-90 22 22)" }));
   const tile = (value, label, extra) => h("div", { class: "kpi" }, extra || null, h("div", {},
     h("div", { class: "kpi-value num" }, value), h("div", { class: "kpi-label" }, label)));
   return h("div", { class: "kpis" },
     tile(fmt(meta.records), "records in the directory"),
     tile(fmt(meta.relationships), "relationships"),
     sourcesTile(d.sources),
-    tile(`${d.cleanStreak || 0} of ${gate}`, `clean daily cycles in a row (the gate is ${gate} in a row)`, ring),
     tile(cycle ? `${minutes(cycle.started, cycle.ended) ?? "–"} min` : "–",
       cycle ? `last cycle, ${clock(cycle.started)} · ${(cycle.state || "").toLowerCase()}` : "no cycle yet"));
 }

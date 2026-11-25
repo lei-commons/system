@@ -21,6 +21,7 @@ from lc_core.decisions import public_actor
 CACHE_SECONDS = 30
 DECISIONS_SHOWN = 20
 FEED_SHOWN = 14
+CYCLES_SHOWN = 14  # recent daily cycles on the System page
 AFTER_INGEST = ["build-snapshot", "load-db"]  # the cycle's last steps, after every source's ingestion
 AGENT_ROLES = ["engineering"]  # agents/roles; none runs until the owner switches agents on
 
@@ -226,7 +227,7 @@ class SystemView:
             lambda: r.api(f"https://cloudscheduler.googleapis.com/v1/projects/{r.project}/locations/{r.region}/jobs").get("jobs", []), [])
         cycles, cycles_error = _try(lambda: r.api(
             f"https://workflowexecutions.googleapis.com/v1/projects/{r.project}/locations/{r.region}/workflows/daily-cycle"
-            f"/executions?view=FULL&pageSize={min(100, max(14, 2 * self._cycle['clean_days']))}").get("executions", []), [])
+            f"/executions?view=FULL&pageSize={CYCLES_SHOWN}").get("executions", []), [])
         control, control_error = _try(lambda: r.bucket_json("control", "state.json"))
 
         def store(prefix, label):
@@ -290,8 +291,7 @@ class SystemView:
                           for s in schedules],
             "schedulesError": schedules_error,
             "cycles": judged,
-            "cleanStreak": clean_streak(judged),
-            "cycle": {"cleanDays": self._cycle["clean_days"], "scheduleUtc": self._cycle["schedule_utc"],
+            "cycle": {"scheduleUtc": self._cycle["schedule_utc"],
                       "retries": self._cycle["retries"], "retryWaitMinutes": self._cycle["retry_wait_minutes"]},
             "healthError": runs_error,
             "cyclesError": cycles_error,
@@ -442,19 +442,3 @@ def judge_cycles(executions: list, refused) -> list:
         out.append(row)
     return out
 
-
-def clean_streak(cycles: list) -> int:
-    """Days in a row, newest first, whose daily cycle was clean (``judge_cycles``). A run still going
-    doesn't break it."""
-    days = {}
-    for c in cycles:
-        day = (c.get("started") or "")[:10]
-        if day and c.get("state") != "ACTIVE":
-            days.setdefault(day, []).append(c.get("clean"))
-    streak = 0
-    for day in sorted(days, reverse=True):
-        if all(days[day]):
-            streak += 1
-        else:
-            break
-    return streak

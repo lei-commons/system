@@ -114,14 +114,10 @@ def test_system_page_through_the_server(tmp_path):
         srv.server_close()
 
 
-def test_the_daily_cycle_history_and_its_clean_streak():
-    from lc_site.system import clean_streak
-
+def test_the_daily_cycle_history_without_a_clean_run_count():
     data = SystemView(Reader()).collect({})
-    assert [c["status"] for c in data["cycles"]] == [BUSY, OK, OK, BAD] and data["cleanStreak"] == 2
-    assert clean_streak([]) == 0
-    assert clean_streak([{"state": "SUCCEEDED", "startTime": "2026-11-09T02:00:00Z"},
-                         {"state": "FAILED", "startTime": "2026-11-09T05:00:00Z"}]) == 0  # a failed rerun that day counts
+    assert [c["status"] for c in data["cycles"]] == [BUSY, OK, OK, BAD]
+    assert "cleanStreak" not in data  # the clean-run gate was removed (owner, 2026-11-25)
 
 
 def test_sources_steps_and_the_cycle_timeline_come_from_the_registry():
@@ -254,16 +250,16 @@ def test_one_jobs_runs_never_match_anothers_with_a_longer_name():
     assert source_health(RunsReader({a: [_line("t", "ran", "failed", "x")]}), [a], "ingest-us", "2026-11-18") is None
 
 
-def test_the_page_gets_the_gate_and_schedule_from_the_cycle_settings():
-    settings = {"clean_days": 9, "schedule_utc": "03:30", "retries": 2, "retry_wait_minutes": 7, "cron": "30 3 * * *"}
+def test_the_page_gets_the_schedule_from_the_cycle_settings():
+    settings = {"schedule_utc": "03:30", "retries": 2, "retry_wait_minutes": 7, "cron": "30 3 * * *"}
     data = SystemView(Reader(), cycle_settings=settings).collect({})
-    assert data["cycle"] == {"cleanDays": 9, "scheduleUtc": "03:30", "retries": 2, "retryWaitMinutes": 7}
-    assert SystemView(Reader()).collect({})["cycle"]["cleanDays"] == 4  # config/cycle.yaml
+    assert data["cycle"] == {"scheduleUtc": "03:30", "retries": 2, "retryWaitMinutes": 7}
+    assert SystemView(Reader()).collect({})["cycle"]["scheduleUtc"]  # config/cycle.yaml
 
 
 # ---- a day whose only failures were sources refusing us counts as clean (owner decision 2026-11-18) ----
 
-from lc_site.system import clean_streak, failed_sources, judge_cycles  # noqa: E402
+from lc_site.system import failed_sources, judge_cycles  # noqa: E402
 
 
 def _cycle(day, state, failed=None):
@@ -280,7 +276,6 @@ def test_refusal_only_days_count_as_clean_and_are_marked():
     judged = judge_cycles(cycles, lambda day, jobs, until: refused[(day, tuple(jobs))])
     assert [(c["clean"], c["refusedOnly"]) for c in judged] == [(True, True), (True, False), (False, False), (True, False)]
     assert judged[0]["failedSources"] == ["ingest-gleif"] and judged[0]["status"] == BAD  # still shown as a failure
-    assert clean_streak(judged) == 2
 
 
 def test_other_failures_never_count_as_clean_and_unreadable_logs_fail_safe():

@@ -25,10 +25,6 @@ sources:
   # has failed at least this many runs in a row, and never if the source refused us. 1 to 20.
   browser_fallback_after_failures: 3
 
-gate:
-  # Clean daily cycles in a row that a phase gate needs (owner decision 2026-11-17: 4). 1 to 30.
-  clean_days: 4
-
 # How long a job may run, in minutes: the job's own limit (Terraform, deploy workflows) and how long the
 # cycle waits for it. 10 to 1440. build-snapshot reads the whole directory every day, so its time grows with
 # it (78-99 min at 42M records, 2026-11-19/20): it gets more room than the default.

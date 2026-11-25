@@ -15,7 +15,7 @@ spec.loader.exec_module(rc)
 REGISTRY = {"sources": [{"id": "a", "pipeline": {"job": "ingest-aa", "stage": "production"}}, {"id": "b"},
                         {"id": "c", "pipeline": {"job": "ingest-cc", "stage": "production"}}]}
 CONFIG = {"schedule_utc": "02:00", "sources": {"retry_wait_minutes": 10, "retries": 5, "browser_fallback_after_failures": 3},
-          "gate": {"clean_days": 4}, "watchdogs": {"dedi_check_utc": "14:17"}, "timeouts_minutes": {"default": 120}}
+          "watchdogs": {"dedi_check_utc": "14:17"}, "timeouts_minutes": {"default": 120}}
 
 
 def steps(doc):
@@ -101,7 +101,6 @@ def test_approved_fallbacks_run_after_the_retries_and_before_the_snapshot():
     ({"sources": {"retry_wait_minutes": 10, "retries": 13, "browser_fallback_after_failures": 3}}, "retries"),
     ({"sources": {"retry_wait_minutes": "10", "retries": 5, "browser_fallback_after_failures": 3}}, "retry_wait_minutes"),
     ({"sources": {"retry_wait_minutes": 10, "retries": True, "browser_fallback_after_failures": 3}}, "retries"),
-    ({"gate": {"clean_days": 0}}, "clean_days"),
     ({"sources": {"retry_wait_minutes": 10, "retries": 5, "browser_fallback_after_failures": 0}}, "browser_fallback_after_failures"),
     ({"schedule_utc": "2:00"}, "schedule_utc"),
     ({"schedule_utc": "24:00"}, "schedule_utc"),

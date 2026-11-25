@@ -31,8 +31,7 @@ Owner decisions 2026-11-22:
 - **It runs only when there's something new to measure.** It runs once when it's first deployed, and then in
   the daily cycle's last step (`trials`), after the snapshot, the load and the DeDi check. There it measures a
   publication only if it hasn't measured that publication with this commit yet. An unchanged day is a
-  seconds-long check. A failing trial is logged as `trial-failed` and never fails the cycle or touches the
-  clean-run count.
+  seconds-long check. A failing trial is logged as `trial-failed` and never fails the cycle.
 - **It uses nothing when unused, and leaves nothing once done** (`lc_ingest.trials`).
   - With no source on trial, the cycle has no `trials` step, and a Cloud Run job that isn't running costs
     nothing.
