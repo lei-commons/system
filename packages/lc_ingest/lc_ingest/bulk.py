@@ -52,7 +52,9 @@ Batch 2 (owner approved 2026-11-22), all on trial first (docs/source-trials.md):
   resource, and found 92,523 repeated CUITs: hence the two named parts and the de-duplication.
 
 Every profile from batch 1 on sets guard_names: a record whose name holds an email address or a phone number is
-dropped, because the number or address may be a person's (the first trials found 39 in France's RNA).
+dropped, because the number or address may be a person's (the first trials found 39 in France's RNA). In any other
+field (an address line, a website), a value holding an email address or a phone number is left out and the record
+kept (the trials found such values outside the name in Argentina's and Scotland's registers).
 - Taiwan tax registrations (全國營業(稅籍)登記, Ministry of Finance, Open Government Data License 1.0): every
   operating business by unified business number; sole proprietorships (獨資) and partnerships (合夥) are dropped.
   Minted under TW-UBN, the number the company register (GCIS) uses too.
@@ -202,10 +204,33 @@ class Profile:
 
     def record(self, row: dict) -> dict:
         record = self.mapper(row)
-        if self.guard_names and any(EMAIL.search(n) or PHONE.search(n)
-                                    for n in [record.get("legalName") or ""] + list(record.get("otherNames") or [])):
-            raise Skip("name holds an email address or phone number")
+        if self.guard_names:
+            if any(EMAIL.search(n) or PHONE.search(n)
+                   for n in [record.get("legalName") or ""] + list(record.get("otherNames") or [])):
+                raise Skip("name holds an email address or phone number")
+            record = {k: v if k in CONTACT_EXEMPT else _without_contacts(v) for k, v in record.items()}
         return {k: v for k, v in record.items() if v not in (None, "", [], {})}
+
+
+# Fields never checked for contact-like values: identifiers and codes, whose digit runs look like phone numbers.
+# The same fields lc_ingest.quality leaves out of its "contact-like value" count.
+CONTACT_EXEMPT = frozenset(("registrationNumber", "directoryId", "lei", "industryCodes"))
+
+
+def _contact_like(text: str) -> bool:
+    return bool(EMAIL.search(text) or PHONE.search(text))
+
+
+def _without_contacts(value):
+    """``value`` with every string that holds an email address or a phone number left out: an address line, a
+    website or any other field (the record stays; only that value goes, because it may be a person's)."""
+    if isinstance(value, str):
+        return None if _contact_like(value) else value
+    if isinstance(value, dict):
+        return {k: v for k, v in ((k, _without_contacts(v)) for k, v in value.items()) if v not in (None, "", [], {})}
+    if isinstance(value, (list, tuple)):
+        return [v for v in (_without_contacts(v) for v in value) if v not in (None, "", [], {})]
+    return value
 
 
 # ---- Ireland ----

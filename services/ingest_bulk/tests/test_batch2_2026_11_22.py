@@ -199,6 +199,24 @@ def test_trial_profiles_drop_a_name_holding_an_email_or_phone():
     assert not IRELAND.guard_names  # production profiles are unchanged
 
 
+def test_trial_profiles_leave_out_a_contact_like_value_outside_the_name_and_keep_the_record():
+    text = (AR_HEADER
+            + "30712345679,ACME S.A.,2008-05-12 00:00:00,SOCIEDAD ANONIMA,,,BUENOS AIRES,CABA,"
+              "AV CORRIENTES TEL 011 4555-1234,1234,C1043\n"
+            + "30500000007,OTRA S.R.L.,2001-01-01 00:00:00,SOCIEDAD ANONIMA,,,info@otra.com.ar,CABA,"
+              "AV DE MAYO,500,C1084\n"
+            + "30600000004,CLUB ATLETICO 1905,2001-01-01 00:00:00,ASOCIACION CIVIL,,,CORDOBA,CORDOBA,"
+              "CALLE 9 DE JULIO,1905,X5000\n")
+    kept, why = mapped(ARGENTINA, ar_csv(io.BytesIO(text.encode())))
+    assert why == [] and [r["registrationNumber"] for r in kept] == ["30712345679", "30500000007", "30600000004"]
+    first, second, third = (r["legalAddress"] for r in kept)
+    assert "addressLines" not in first and first["city"] == "CABA" and first["postalCode"] == "C1043"
+    assert "region" not in second and second["addressLines"] == ["AV DE MAYO 500"]
+    assert third["addressLines"] == ["CALLE 9 DE JULIO 1905"] and third["region"] == "CORDOBA"
+    # Identifiers are never mistaken for phone numbers, and dates stay.
+    assert kept[0]["registrationNumber"] == "30712345679" and kept[0]["incorporationDate"] == "2008-05-12"
+
+
 def test_taiwan_drops_sole_proprietorships_and_partnerships_and_reads_roc_dates():
     header = "營業地址,統一編號,總機構統一編號,營業人名稱,資本額,設立日期,組織別名稱,使用統一發票,行業代號,名稱\n"
     text = (header + "臺北市中正區重慶南路一段2號,12345675,,台灣測試股份有限公司,1000000,1050101,股份有限公司,Y,461411,批發\n"
