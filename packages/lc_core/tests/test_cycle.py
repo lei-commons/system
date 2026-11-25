@@ -6,13 +6,13 @@ from lc_core.decisions import Recorder, failure
 
 def test_the_repository_settings_load():
     s = cycle.load()
-    assert s["clean_days"] == 4 and s["retries"] == 5 and s["retry_wait_minutes"] == 10
+    assert "clean_days" not in s and s["retries"] == 5 and s["retry_wait_minutes"] == 10
     assert s["browser_fallback_after_failures"] == 3
     assert s["schedule_utc"] == "02:00" and s["cron"] == "0 2 * * *"
 
 
 def test_the_cron_follows_the_time():
-    s = cycle.settings({"schedule_utc": "23:05", "sources": {"retry_wait_minutes": 1, "retries": 0, "browser_fallback_after_failures": 2}, "gate": {"clean_days": 1}, "watchdogs": {"dedi_check_utc": "14:17"}, "timeouts_minutes": {"default": 120}})
+    s = cycle.settings({"schedule_utc": "23:05", "sources": {"retry_wait_minutes": 1, "retries": 0, "browser_fallback_after_failures": 2}, "watchdogs": {"dedi_check_utc": "14:17"}, "timeouts_minutes": {"default": 120}})
     assert s["cron"] == "5 23 * * *"
 
 

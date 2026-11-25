@@ -1,7 +1,7 @@
 """The daily cycle's settings, config/cycle.yaml: one place for every number the cycle and its pages use.
 
 Read by scripts/render_cycle.py (the Workflows definition), Terraform (the schedule) and the site (the
-clean-days gate, the schedule shown on the System page). Nothing else hard-codes them.
+schedule shown on the System page). Nothing else hard-codes them.
 """
 
 from __future__ import annotations
@@ -26,9 +26,9 @@ def _whole(value, low, high, name):
 
 
 def settings(config: dict) -> dict:
-    """Validated settings: retry_wait_minutes, retries, clean_days, schedule_utc ("HH:MM"), cron."""
+    """Validated settings: retry_wait_minutes, retries, schedule_utc ("HH:MM"), cron."""
     config = config or {}
-    sources, gate = config.get("sources") or {}, config.get("gate") or {}
+    sources = config.get("sources") or {}
     timeouts = config.get("timeouts_minutes") or {}
     if "default" not in timeouts:
         raise CycleConfigError("timeouts_minutes needs a default")
@@ -46,7 +46,6 @@ def settings(config: dict) -> dict:
         "retries": _whole(sources.get("retries"), 0, 12, "sources.retries"),
         "browser_fallback_after_failures": _whole(sources.get("browser_fallback_after_failures"), 1, 20,
                                                   "sources.browser_fallback_after_failures"),
-        "clean_days": _whole(gate.get("clean_days"), 1, 30, "gate.clean_days"),
         "schedule_utc": when,
         "dedi_check_utc": dedi_check,
         "timeout_minutes": timeout_minutes,

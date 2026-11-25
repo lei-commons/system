@@ -215,9 +215,6 @@ table.data td.n { text-align: right; font-variant-numeric: tabular-nums; }
   background: linear-gradient(135deg, var(--hero-a, var(--accent-wash)), var(--raised)); border: 1px solid var(--hairline); }
 .kpi-value { font-size: 26px; font-weight: 650; letter-spacing: -.02em; line-height: 1.1; }
 .kpi-label { color: var(--ink-2); font-size: 12.5px; margin-top: 4px; }
-.ring { flex: none; }
-.ring-track { fill: none; stroke: var(--hairline); stroke-width: 5; }
-.ring-fill { fill: none; stroke: var(--good); stroke-width: 5; stroke-linecap: round; transition: stroke-dasharray .6s ease; }
 .source-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }
 .source-card { display: flex; flex-direction: column; gap: 6px; }
 .source-head { display: flex; gap: 10px; align-items: center; }
@@ -258,7 +255,7 @@ dl.mini dd { margin: 2px 0 0; word-break: break-word; }
 .action-label { color: var(--ink-2); font-size: 13px; font-weight: 600; }
 .btn.danger { border-color: color-mix(in srgb, var(--critical) 50%, var(--hairline)); color: var(--critical); }
 .btn.danger:hover { background: color-mix(in srgb, var(--critical) 10%, transparent); }
-@media (prefers-reduced-motion: reduce) { .tl-bar.busy { animation: none; } .ring-fill { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .tl-bar.busy { animation: none; } }
 @media (max-width: 700px) { .action-group { grid-template-columns: 1fr; } .tl-row { grid-template-columns: 90px 1fr 50px; } .tl-axis { margin-left: 100px; margin-right: 60px; } }
 
 /* ---- Data sources page ---- */
