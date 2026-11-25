@@ -22,7 +22,10 @@ main:
         - ingest-au
         - ingest-jp
         - ingest-ca
+        - ingest-us-nppes
+        - ingest-fr-rna
         - ingest-tw-tax
+        - ingest-ca-cra
       - failed: []
       - fallbacks:
           ingest-ie: ingest-ie-browser
@@ -185,13 +188,10 @@ main:
         in:
         - ingest-au-abn
         - ingest-us-irs
-        - ingest-us-nppes
-        - ingest-fr-rna
         - ingest-ar
         - ingest-cy
         - ingest-gb-ccew
         - ingest-si
-        - ingest-ca-cra
         - ingest-nl-anbi
         - ingest-gb-oscr
         steps:

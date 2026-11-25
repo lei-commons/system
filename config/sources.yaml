@@ -787,7 +787,7 @@ sources:
         so merging is harder.
       verified: false
     # Built 2026-11-22 (owner approved the source the same day), on trial: lc_ingest.bulk_batch3 US_NPPES, the monthly full file, organisations only.
-    pipeline: {stage: trial, job: ingest-us-nppes, image: ingest-bulk, store: us-nppes, records_as: us-cms-nppes-org,
+    pipeline: {stage: production, job: ingest-us-nppes, image: ingest-bulk, store: us-nppes, records_as: us-cms-nppes-org,
                label: CMS NPPES organisation providers (United States), refresh: monthly,
                dataset: "NPPES Data Dissemination, monthly full file (CMS)",
                attribution: "Centers for Medicare & Medicaid Services, NPPES (public domain)."}
@@ -812,7 +812,7 @@ sources:
         home and would be dropped. Excludes Alsace-Moselle. Same host as SIRENE (data.gouv.fr).
       verified: false
     # Built 2026-11-22 (owner approved the source the same day), on trial: lc_ingest.bulk FRANCE_RNA.
-    pipeline: {stage: trial, job: ingest-fr-rna, image: ingest-bulk, store: fr-rna, records_as: fr-rna,
+    pipeline: {stage: production, job: ingest-fr-rna, image: ingest-bulk, store: fr-rna, records_as: fr-rna,
                label: Répertoire national des associations (France), refresh: monthly,
                dataset: "RNA waldec (data.gouv.fr)",
                attribution: "Ministère de l'Intérieur, Répertoire national des associations, Licence Ouverte 2.0 (Etalab)."}
@@ -1372,7 +1372,7 @@ sources:
         not in the federal register. Directors kept as names and roles only, or dropped. Yearly.
       verified: false
     # Built 2026-11-22 (owner approved the source the same day), on trial: lc_ingest.bulk_batch3 CANADA_CRA, the newest year's identification file.
-    pipeline: {stage: trial, job: ingest-ca-cra, image: ingest-bulk, store: ca-cra, records_as: ca-cra-charities,
+    pipeline: {stage: production, job: ingest-ca-cra, image: ingest-bulk, store: ca-cra, records_as: ca-cra-charities,
                label: Canada Revenue Agency charities, refresh: yearly, read weekly,
                dataset: "List of charities, Identification (open.canada.ca)",
                attribution: "Contains information licensed under the Open Government Licence - Canada (Canada Revenue Agency)."}
