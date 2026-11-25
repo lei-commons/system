@@ -22,6 +22,7 @@ main:
         - ingest-au
         - ingest-jp
         - ingest-ca
+        - ingest-au-abn
         - ingest-us-nppes
         - ingest-fr-rna
         - ingest-tw-tax
@@ -186,7 +187,6 @@ main:
       for:
         value: job
         in:
-        - ingest-au-abn
         - ingest-us-irs
         - ingest-ar
         - ingest-cy

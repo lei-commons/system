@@ -717,7 +717,7 @@ sources:
         Licence read from a search snippet of data.gov.au; to confirm.
       verified: false
     # Built 2026-11-22 (owner approved the source the same day), on trial: lc_ingest.bulk AUSTRALIA_ABN.
-    pipeline: {stage: trial, job: ingest-au-abn, image: ingest-bulk, store: au-abn, records_as: au-abr-abn,
+    pipeline: {stage: production, job: ingest-au-abn, image: ingest-bulk, store: au-abn, records_as: au-abr-abn,
                label: Australian Business Register (ABN), refresh: weekly,
                dataset: "ABN Bulk Extract (data.gov.au)",
                attribution: "Contains data from the Australian Business Register (ABN Lookup), licensed under CC BY 3.0 AU."}
