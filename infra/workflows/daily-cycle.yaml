@@ -23,8 +23,12 @@ main:
         - ingest-jp
         - ingest-ca
         - ingest-au-abn
+        - ingest-us-irs
         - ingest-us-nppes
         - ingest-fr-rna
+        - ingest-ar
+        - ingest-cy
+        - ingest-gb-ccew
         - ingest-tw-tax
         - ingest-ca-cra
       - failed: []
@@ -187,10 +191,6 @@ main:
       for:
         value: job
         in:
-        - ingest-us-irs
-        - ingest-ar
-        - ingest-cy
-        - ingest-gb-ccew
         - ingest-si
         - ingest-nl-anbi
         - ingest-gb-oscr
