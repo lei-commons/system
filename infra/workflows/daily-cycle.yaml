@@ -23,8 +23,12 @@ main:
         - ingest-jp
         - ingest-ca
         - ingest-au-abn
+        - ingest-us-irs
         - ingest-us-nppes
         - ingest-fr-rna
+        - ingest-ar
+        - ingest-cy
+        - ingest-gb-ccew
         - ingest-tw-tax
         - ingest-ca-cra
       - failed: []
@@ -165,7 +169,7 @@ main:
       args:
         name: ${"projects/" + project + "/locations/" + region + "/jobs/" + "load-db"}
         connector_params:
-          timeout: 7200
+          timeout: 14400
   - dedi_check:
       try:
         call: googleapis.run.v2.projects.locations.jobs.run
@@ -187,11 +191,7 @@ main:
       for:
         value: job
         in:
-        - ingest-us-irs
         - ingest-pe-ruc
-        - ingest-ar
-        - ingest-cy
-        - ingest-gb-ccew
         - ingest-si
         - ingest-nl-anbi
         - ingest-gb-oscr
