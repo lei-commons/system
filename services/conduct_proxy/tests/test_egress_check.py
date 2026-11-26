@@ -103,3 +103,17 @@ def test_the_targets_own_error_or_the_hosts_turn_still_shows_the_control_state_a
 
         assert failed(checks(get=target)) == []
 
+
+def test_a_second_route_doesnt_repeat_the_fetch_while_the_host_pauses_after_an_error():
+    # 2026-11-25 21:42 UTC: the first route's fetch got 502 upstream-error; the second route's fetch then waited
+    # out the gateway's 120 s pause after an error and timed out. Its health checks still run.
+    seen = []
+
+    def get(url, headers):
+        seen.append(url.rsplit("/", 1)[1])
+        return get_ok(url, headers)
+
+    results = gateway_checks("run.app", A, A, get=get, token=lambda aud: "tok", fetch=False)
+    assert failed(results) == [] and "fetch" not in seen and seen == ["health", "health"]
+    assert results[-1][0] == "run.app: applies the control state"
+
