@@ -1,7 +1,10 @@
 """The Data sources and Trials pages show a source on trial marked invalid, with its date and reason, and offer
 to re-approve it (lc_core.validity; owner decision 2026-11-22)."""
 
-from lc_site.system import SystemView
+import pytest
+import yaml
+
+from lc_site.system import SystemView, _default_sources_path
 
 MARK = {"failedDays": ["2026-11-23", "2026-11-24", "2026-11-25"],
         "invalid": {"at": "2026-11-25T03:00:00Z", "reason": "Failed on 3 separate days with no successful run between"}}
@@ -13,6 +16,18 @@ class Reader:
 
     def bucket_json(self, bucket, name):
         return self.files.get((bucket, name))
+
+
+@pytest.fixture(autouse=True)
+def on_trial(tmp_path, monkeypatch):
+    # The real registry, with the two sources these tests mark kept on trial whatever their stage is today.
+    registry = yaml.safe_load(_default_sources_path().read_text())
+    for s in registry["sources"]:
+        if s["id"] in ("cy-drcor", "si-ajpes-prs"):
+            s["pipeline"]["stage"] = "trial"
+    path = tmp_path / "sources.yaml"
+    path.write_text(yaml.safe_dump(registry, sort_keys=False))
+    monkeypatch.setenv("LC_SOURCES_CONFIG", str(path))
 
 
 def view(decisions=None, sources=None):
