@@ -31,6 +31,7 @@ main:
         - ingest-gb-ccew
         - ingest-tw-tax
         - ingest-ca-cra
+        - ingest-gb-oscr
       - failed: []
       - fallbacks:
           ingest-ie: ingest-ie-browser
@@ -193,7 +194,6 @@ main:
         in:
         - ingest-si
         - ingest-nl-anbi
-        - ingest-gb-oscr
         steps:
         - trial_run:
             try:

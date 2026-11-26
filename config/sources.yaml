@@ -1459,7 +1459,7 @@ sources:
         copy as the official register.
       verified: false
     # Built 2026-11-22 (owner approved the source the same day), on trial: lc_ingest.bulk_batch3 SCOTLAND_OSCR, the register download weekly.
-    pipeline: {stage: trial, job: ingest-gb-oscr, image: ingest-bulk, store: gb-oscr, records_as: gb-oscr,
+    pipeline: {stage: production, job: ingest-gb-oscr, image: ingest-bulk, store: gb-oscr, records_as: gb-oscr,
                label: Scottish Charity Regulator (OSCR), refresh: daily download, read weekly,
                dataset: "Scottish Charity Register download (OSCR)",
                attribution: "Contains information from the Scottish Charity Register supplied by the Office of the Scottish Charity Regulator and licensed under the Open Government Licence v3.0."}
