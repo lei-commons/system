@@ -151,6 +151,16 @@ sources:
   ca-cra-charities:            # the list holds registered charities
     active: [Registered]
 
+  pe-sunat-ruc:                # SUNAT's taxpayer states, as SUNAT documents them; the trial counts any other word
+    active: [ACTIVO]
+    inactive:
+      - SUSPENSION TEMPORAL            # temporarily suspended activity
+      - BAJA PROVISIONAL               # provisional deregistration
+      - BAJA PROV. POR OFICIO          # provisional deregistration by SUNAT
+    struck-off:
+      - BAJA DEFINITIVA                # final deregistration
+      - BAJA DE OFICIO                 # deregistered by SUNAT
+
   us-cms-nppes-org:            # lc_ingest.bulk_batch3: deactivated unless reactivated since
     active: [Active]
     inactive: [Deactivated]

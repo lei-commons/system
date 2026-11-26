@@ -188,6 +188,7 @@ main:
         value: job
         in:
         - ingest-us-irs
+        - ingest-pe-ruc
         - ingest-ar
         - ingest-cy
         - ingest-gb-ccew

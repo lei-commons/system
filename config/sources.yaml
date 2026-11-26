@@ -835,6 +835,12 @@ sources:
         RUCs starting 20 (legal persons) would be kept; RUC-10 rows are natural persons and dropped entirely. About
         1.5-2.5M legal persons including inactive (estimate). No licence text found.
       verified: false
+    # Built 2026-11-26 (owner approved the source the same day), on trial: lc_ingest.bulk_batch4 PERU_SUNAT,
+    # the daily ZIP read once a week. Legal persons (RUC 20) only; natural persons are skipped at the first step.
+    pipeline: {stage: trial, job: ingest-pe-ruc, image: ingest-bulk, store: pe-ruc, records_as: pe-sunat-ruc,
+               label: SUNAT taxpayer register (Peru), refresh: weekly,
+               dataset: "Padrón reducido del RUC (SUNAT)",
+               attribution: "Superintendencia Nacional de Aduanas y de Administración Tributaria (SUNAT), padrón reducido del RUC."}
 
   - id: hk-cr
     name: "Hong Kong Companies Registry open data (live companies, registered non-Hong Kong companies)"
