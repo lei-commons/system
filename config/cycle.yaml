@@ -31,6 +31,9 @@ sources:
 timeouts_minutes:
   default: 120
   build-snapshot: 180
+  # A full reload copies the whole directory into a new database before the switch: 78 min at 42M records
+  # (2026-11-20); 2026-11-26's, at 50.5M after four sources' first production runs, passed 100 min.
+  load-db: 240
   # The web-asserted facts pilot: its job's own limit (the cycle starts it and doesn't wait). It stops taking
   # records after run.minutes (config/web_claims.yaml, 330) and saves its progress.
   web-claims: 360
