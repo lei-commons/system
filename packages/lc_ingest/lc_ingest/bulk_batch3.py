@@ -235,6 +235,7 @@ SI_COLUMNS = Columns(
      "postcode": ("Postna_stevilka", "Poštna številka"), "city": ("Postni_kraj", "Poštni kraj"),
      "registered": ("Datum_vpisa", "Datum vpisa", "Datum_ustanovitve"), "activity": ("Skd", "Glavna_dejavnost_skd"),
      "deleted": ("Zbrisano", "Oznaka brisanja"), "deletedOn": ("Datum_izbrisa", "Datum izbrisa")})
+SI_UNIT = re.compile(r"poslovna\s+enota\b", re.I)
 SI_PEOPLE = re.compile(r"samostojn|podjetnik|sobodaj|fizičn|fizicn|\bs\.\s?p\.", re.I)
 # Forms that register one person for an activity, not an organisation. The first measured trial (2026-W48) kept
 # farm-activity holders (5,250), registered lawyers (1,098), private doctors and health workers (698), professional
@@ -254,7 +255,9 @@ def si_record(row: dict) -> dict:
         raise Skip("a person registered for an activity (farm, profession, sport)")
     if not number or not name:
         raise Skip("no number or name")
-    if len(number) == 10 and not number.endswith("000"):
+    # A unit's number is the business's with a 3-digit suffix; the head office ends in 000. The first measured
+    # trial (2026-W48) also had 92 units of form "Poslovna enota" (business unit) with 9-digit numbers.
+    if (len(number) == 10 and not number.endswith("000")) or SI_UNIT.match(form):
         raise Skip("a branch unit of a registered business")
     deleted = _clean(row.get("deleted")).upper() in ("1", "D", "DA", "Y", "X", "TRUE") or bool(_dmy(row.get("deletedOn")))
     short, activity = _clean(row.get("short")), _clean(row.get("activity"))

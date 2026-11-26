@@ -90,14 +90,15 @@ SI = ("Ident_stevilka;Popolno_ime;Kratko_ime;Oblika;Skrajsano_ime;Postna_stevilk
       "15.03.1995;A01.490\n"
       "5012345001;ČEBELA d.o.o., podružnica Maribor;;Podružnica;;2000;MARIBOR;01.01.2000;A01.490\n"
       "6012345000;JANEZ NOVAK s.p.;;Samostojni podjetnik posameznik;JANEZ NOVAK s.p.;4000;KRANJ;01.01.2010;\n"
-      "7012345000;MARIJA KOVAČ;;Fizična oseba - sobodajalec;;6320;PORTOROŽ;01.01.2012;\n")
+      "7012345000;MARIJA KOVAČ;;Fizična oseba - sobodajalec;;6320;PORTOROŽ;01.01.2012;\n"
+      "501234502;ČEBELA, poslovna enota Celje;;Poslovna enota;;3000;CELJE;01.01.2001;A01.490\n")
 
 
 def test_slovenia_keeps_businesses_and_drops_sole_traders_room_renters_and_branches():
     kept, why = mapped(SLOVENIA, SLOVENIA.read(io.BytesIO(SI.encode("cp1250"))))
     assert [r["registrationNumber"] for r in kept] == ["5012345000"]
     assert why == ["a branch unit of a registered business", "sole trader or private room renter (people)",
-                   "sole trader or private room renter (people)"]
+                   "sole trader or private room renter (people)", "a branch unit of a registered business"]
     r = kept[0]
     assert r["directoryId"] == mint("SI", "SI-PRS", "5012345000") and r["otherNames"] == ["ČEBELA d.o.o."]
     assert r["legalAddress"] == {"city": "LJUBLJANA", "postalCode": "1000", "country": "SI"}
