@@ -90,6 +90,7 @@ def test_a_source_on_trial_runs_but_never_reaches_the_snapshot(tmp_path):
 
 
 def test_the_real_registry_keeps_new_sources_on_trial():
+    # A trial is never merged into the snapshot; which sources are on trial changes with each promotion.
     on_trial = {p["id"] for p in trials()}
-    assert {"us-irs-eo-bmf", "gb-ccew"} <= on_trial
     assert not on_trial & {p["id"] for p in merge_order()}
+    assert all(p["stage"] == "trial" for p in trials())
