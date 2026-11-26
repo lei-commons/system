@@ -90,3 +90,16 @@ def test_token_is_requested_for_the_service_not_the_load_balancer():
     seen = []
     checks(token=lambda aud: seen.append(aud) or "tok")
     assert set(seen) == {A}
+
+
+def test_the_targets_own_error_or_the_hosts_turn_still_shows_the_control_state_applied():
+    # 2026-11-25: two scheduled checks failed while every route was up. The gateway passes on the target's own
+    # answer (no X-LC-Denied) and paces hosts with 429 rate-limited: both mean it was running and decided.
+    for answer in ((503, {}), (429, {"X-LC-Denied": "rate-limited"}), (500, {})):
+        def target(url, headers, answer=answer):
+            if url.endswith("/fetch") and "X-Serverless-Authorization" in headers:
+                return answer
+            return get_ok(url, headers)
+
+        assert failed(checks(get=target)) == []
+

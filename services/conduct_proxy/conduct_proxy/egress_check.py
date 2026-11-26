@@ -21,6 +21,8 @@ from conduct_proxy.upstream import UPSTREAM_TIMEOUT_S
 FETCH_TIMEOUT_S = UPSTREAM_TIMEOUT_S + 10
 METADATA = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity"
 DIRECT_TARGETS = (("1.1.1.1", 443), ("example.org", 443))
+# The target's own answers that say it is busy or failing, passed on by the gateway.
+TARGET_BUSY_OR_DOWN = (429, 500, 502, 503, 504)
 
 
 def tcp_connects(host: str, port: int, timeout: float = 5.0) -> bool:
@@ -69,9 +71,12 @@ def gateway_checks(label: str, gateway: str, audience: str, get=http_get, token=
         status, headers = get(f"{gateway}/fetch", {**auth, "X-LC-Target": "https://api.gleif.org/api/v1/lei-records?page%5Bsize%5D=1",
                                                    "X-LC-Actor": "job:egress-check"})
         denied = {k.lower(): v for k, v in headers.items()}.get("x-lc-denied", "")
-        # 502 upstream-error means the gateway let the request through (the system is running)
-        # and the target was slow or down: the control state was applied all the same.
-        applied = status == 200 or denied == "system-not-running" or (status == 502 and denied == "upstream-error")
+        # The gateway decided by the control state if it refused because the system isn't running, or let the
+        # request through: 200, the target's own busy or server error (no X-LC-Denied), 502 upstream-error (the
+        # target slow or down) or 429 rate-limited (the host's turn not yet come) all mean it was running and
+        # checked. A policy refusal of an approved host, or an answer that isn't the gateway's, is a failure.
+        applied = (status == 200 or denied in ("system-not-running", "upstream-error", "rate-limited")
+                   or (not denied and status in TARGET_BUSY_OR_DOWN))
         results.append((f"{label}: applies the control state", applied, f"{status} {denied}".strip()))
     except OSError as exc:
         results.append((f"{label}: connects", False, type(exc).__name__))
