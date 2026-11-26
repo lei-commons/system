@@ -165,7 +165,7 @@ main:
       args:
         name: ${"projects/" + project + "/locations/" + region + "/jobs/" + "load-db"}
         connector_params:
-          timeout: 7200
+          timeout: 14400
   - dedi_check:
       try:
         call: googleapis.run.v2.projects.locations.jobs.run
