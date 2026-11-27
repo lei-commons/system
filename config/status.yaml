@@ -165,6 +165,9 @@ sources:
     active: [Active]
     inactive: [Deactivated]
 
+  in-mca:                      # set by lc_ingest.owner_supplied from MCA's strike-off reports; no word: not stated
+    struck-off: [Struck Off]
+
   gb-ccew:
     active: [Registered]
     inactive: [Removed]

@@ -172,7 +172,7 @@ def test_the_data_sources_page_shows_the_owners_edits():
     co = by["us-co-sos"]
     assert co["name"] == "Colorado SOS" and co["owner"]["hint"] == "Try <the bulk CSV> first"
     assert not co["removable"] and "deny it instead" in co["removeBlocked"]  # Colorado is built now
-    assert by["in-mca"]["removable"]  # not built, not approved
+    assert by["hk-cr"]["removable"]  # not built, not approved
     assert not by["gleif"]["removable"] and "deny it instead" in by["gleif"]["removeBlocked"]
     assert by["gleif"]["pipeline"] == {"job": "ingest-gleif", "store": "gleif", "records_as": "gleif"}
     assert {a["id"] for a in by["us-de-corporations"]["actions"]} == {"source-approve:us-de-corporations",

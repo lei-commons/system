@@ -1,0 +1,197 @@
+"""Owner-supplied sources (docs/owner-supplied-sources.md): files only a person may download, which the owner
+downloads by hand and keeps, cleaned, in the private repository lei-commons/data-downloads. Its copy workflow
+writes each source's folder as one bundle to the data bucket:
+
+    intake/<source>/<git tree id>.tar.gz   the cleaned CSVs and their manifest
+    intake/<source>/current.json           {"key": <git tree id>, "object": "intake/<source>/<id>.tar.gz", "commit": ...}
+
+The bundle is one complete publication, keyed by its tree id, so the usual runner processes it (lc_ingest.runner:
+diff, volume guard, trial measures). The cycle never reaches GitHub, and nothing new goes through the gateway.
+In production the bundle is deleted once processed; at every run, any bundle current.json no longer names is
+deleted (``tidy``). current.json itself holds no records and stays, so the next run finds its key already done.
+
+India (in-mca): the Ministry of Corporate Affairs' monthly reports, cleaned by data-downloads' tools/clean_mca.py:
+companies, LLPs and foreign companies registered each month since January 2016, and companies and LLPs struck
+off each month since October 2023. Every row is a company or an LLP: no natural person is listed. A report's
+status is the status at registration, so it isn't kept; a record is "Struck Off" when a strike-off report lists
+it, else its status is not stated. Struck-off companies and LLPs registered before 2016 come from the strike-off
+reports alone, with their identifier and name.
+"""
+
+from __future__ import annotations
+
+import csv
+import io
+import json
+import os
+import re
+import tarfile
+
+from lc_core.directory_id import mint
+
+from .bulk import Profile, _clean
+from .bulk_batch3 import _address
+from .gleif import Skip
+
+INTAKE = "intake"
+
+
+def _bucket():
+    from google.cloud import storage
+
+    return storage.Client().bucket(os.environ["LC_DATA_BUCKET"])
+
+
+def current(bucket, source: str):
+    """The source's current.json, or None when nothing was ever copied."""
+    blob = bucket.blob(f"{INTAKE}/{source}/current.json")
+    if not blob.exists():
+        return None
+    return json.loads(blob.download_as_bytes())
+
+
+class IntakeEmpty(ValueError):
+    """Nothing was ever copied for this source: data-downloads' copy workflow hasn't run for it."""
+
+
+def locate_for(source: str, bucket=None):
+    """Profile.locate: (key, url) of the bundle current.json names."""
+    def locate(gateway):
+        b = bucket or _bucket()
+        pointer = current(b, source)
+        if not pointer:
+            raise IntakeEmpty(f"no {INTAKE}/{source}/current.json: nothing copied from data-downloads yet")
+        if not re.fullmatch(r"[0-9a-f]{40}", pointer.get("key", "")) or \
+                pointer.get("object") != f"{INTAKE}/{source}/{pointer['key']}.tar.gz":
+            raise IntakeEmpty(f"{INTAKE}/{source}/current.json doesn't name a bundle of this source")
+        return pointer["key"], f"gs://{b.name}/{pointer['object']}"
+    return locate
+
+
+def fetch_for(bucket=None):
+    """Profile.fetch: copy the bundle from the data bucket into the open file (never through the gateway)."""
+    def fetch(gateway, url, out):
+        b = bucket or _bucket()
+        name = url.split(f"gs://{b.name}/", 1)[1]
+        b.blob(name).download_to_file(out)
+        return out.tell()
+    return fetch
+
+
+def tidy(bucket, source: str, processed, production: bool, log) -> int:
+    """Delete the bundles no longer needed: any current.json doesn't name, and, in production, the one it names
+    once processed. A trial never deletes the current bundle: production reads it after promotion."""
+    pointer = current(bucket, source) or {}
+    deleted = 0
+    for blob in bucket.list_blobs(prefix=f"{INTAKE}/{source}/"):
+        if not blob.name.endswith(".tar.gz"):
+            continue
+        if blob.name != pointer.get("object") or (production and pointer.get("key") in processed):
+            blob.delete()
+            deleted += 1
+    if deleted:
+        log({"event": "intake-tidied", "source": source, "objects": deleted})
+    return deleted
+
+
+# ---- India: Ministry of Corporate Affairs ----
+
+KINDS = {"companies.csv": "company", "llps.csv": "llp", "foreign-companies.csv": "foreign-company"}
+MEMBER = re.compile(r"^mca/(?P<folder>incorporated|struck-off)/(?P<month>\d{4}-\d{2})/(?P<file>[a-z-]+\.csv)$")
+IDS = {"company": re.compile(r"[UL]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6}"), "llp": re.compile(r"[A-Z]{3}-\d{4}"),
+       "foreign-company": re.compile(r"F\d{5}")}
+ID_COLUMN = {"company": "cin", "llp": "llpin", "foreign-company": "fcrn"}
+PIN = re.compile(r"(?<!\d)(\d{6})(?!\d)")
+
+
+def _members(f, folder: str):
+    """(month, kind, rows) for each of the bundle's CSVs under ``folder``, oldest month first."""
+    f.seek(0)
+    with tarfile.open(fileobj=f, mode="r:gz") as tar:
+        found = []
+        for member in tar:
+            m = MEMBER.match(member.name)
+            if m and member.isfile() and m["folder"] == folder and m["file"] in KINDS:
+                found.append((m["month"], KINDS[m["file"]], member))
+        for month, kind, member in sorted(found, key=lambda x: (x[0], x[1])):
+            text = io.TextIOWrapper(tar.extractfile(member), encoding="utf-8", newline="")
+            yield month, kind, csv.DictReader(text)
+
+
+def mca_read(f):
+    """Rows for the mapper, one per company or LLP: the first report that lists an identifier gives its row (a
+    company is registered once); a strike-off report adds the month it was struck off."""
+    struck = {}
+    for month, kind, rows in _members(f, "struck-off"):
+        for row in rows:
+            struck.setdefault(row.get(ID_COLUMN[kind], ""), (month, kind, row.get("name", "")))
+    seen = set()
+    for month, kind, rows in _members(f, "incorporated"):
+        for row in rows:
+            ident = row.get(ID_COLUMN[kind], "")
+            if ident in seen:
+                continue
+            seen.add(ident)
+            yield {**row, "id": ident, "kind": kind, "struckOff": struck.get(ident, ("",))[0]}
+    for ident, (month, kind, name) in struck.items():
+        if ident not in seen:  # registered before 2016: known from the strike-off report alone
+            yield {"id": ident, "kind": kind, "name": name, "struckOff": month}
+
+
+def _title(v: str) -> str:
+    v = _clean(v)
+    return v if not v.isupper() else v.title()
+
+
+def mca_form(row: dict) -> str:
+    kind = row.get("kind")
+    if kind == "llp":
+        return "Limited Liability Partnership"
+    if kind == "foreign-company":
+        office = _clean(row.get("office_type"))
+        return "Foreign company" + (f" ({_title(office)})" if office else "")
+    return " - ".join(p for p in (mca_class(row.get("class", "")), _clean(row.get("category"))) if p) or "Company"
+
+
+def mca_class(v: str) -> str:
+    """MCA spells a class several ways over the years ("Private(One Person Company)", "Private One Person", ...)."""
+    v = _clean(v).upper()
+    if "ONE PERSON" in v:
+        return "One Person Company"
+    if v.startswith("PRIVATE"):
+        return "Private"
+    if v.startswith("PUBLIC"):
+        return "Public"
+    return _title(v)
+
+
+def mca_record(row: dict) -> dict:
+    kind, ident, name = row.get("kind"), _clean(row.get("id")), _clean(row.get("name"))
+    if kind not in IDS or not IDS[kind].fullmatch(ident) or not name:
+        raise Skip("no identifier or name")
+    address = _clean(row.get("address"))
+    pins = PIN.findall(address)
+    activity = _clean(row.get("activity_code"))
+    return {
+        "directoryId": mint("IN", "IN-MCA", ident),
+        "legalName": name,
+        "legalForm": mca_form(row),
+        "legalJurisdiction": "IN",
+        "registrationAuthority": "IN-MCA",
+        "registrationNumber": ident,
+        "legalStatus": "Struck Off" if row.get("struckOff") else None,
+        "incorporationDate": _clean(row.get("registered")) or None,
+        "industryCodes": [activity] if activity else [],
+        "legalAddress": _address(addressLines=[address] if address else [], region=_title(row.get("state", "")),
+                                 postalCode=pins[-1] if pins else "",
+                                 country="IN") if address or row.get("state") else None,
+        "recordMode": "mirror",
+    }
+
+
+INDIA_MCA = Profile(
+    source="in-mca", job="ingest-in-mca", store="in-mca", filename="in-mca", extension=".tar.gz",
+    file_url="", guard_names=True, ra="IN-MCA", read=mca_read, mapper=mca_record,
+    locate=locate_for("in-mca"), fetch=fetch_for(), tidy=tidy)
+
+OWNER_SUPPLIED = (INDIA_MCA,)
