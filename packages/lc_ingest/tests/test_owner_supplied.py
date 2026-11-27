@@ -104,7 +104,7 @@ def test_each_company_once_with_the_strike_offs_applied():
 def test_a_company_maps_to_a_record_with_its_address_pin_and_activity():
     r = INDIA_MCA.record(records()["U12345MH2016PTC123456"])
     assert r["directoryId"] == mint("IN", "IN-MCA", "U12345MH2016PTC123456") and r["registrationNumber"] == "U12345MH2016PTC123456"
-    assert r["legalForm"] == "Private - Company limited by Shares"
+    assert r["legalForm"] == "Private - Company limited by shares"
     assert r["incorporationDate"] == "2016-01-05" and r["industryCodes"] == ["46900"]
     assert r["legalAddress"] == {"addressLines": ["12 MG ROAD, ANDHERI EAST, MUMBAI 400069"], "region": "Maharashtra",
                                  "postalCode": "400069", "country": "IN"}
@@ -173,3 +173,71 @@ def test_tidy_keeps_the_current_bundle_on_trial_and_deletes_it_once_processed_in
                                       ("Private One Person", "One Person Company"), ("One Person Company", "One Person Company")])
 def test_the_class_reads_the_same_whatever_the_years_spelling(raw, form):
     assert mca_record({"kind": "company", "id": "U12345MH2016PTC123456", "name": "A", "class": raw})["legalForm"] == form
+
+
+MASTER = {
+    **FILES,
+    "mca/master/2026-11-27/companies-01.csv":
+        "cin,name,registered,class,category,sub_category,status,state,roc,pin,address\n"
+        "L17110MH1907PLC000123,OLD TEXTILE MILLS LIMITED,1907-05-01,Public,Company limited by shares,"
+        "Non-government company,Active,Maharashtra,ROC Mumbai,400001,\"1 MILL ROAD, MUMBAI\"\n"
+        "U12345MH2016PTC123456,ALPHA TRADING PRIVATE LIMITED,2016-01-05,Private,Company limited by shares,"
+        "Non-government company,Amalgamated,Maharashtra,ROC Mumbai,400069,\"12 MG ROAD, ANDHERI EAST\"\n",
+    "mca/master/2026-11-27/companies-02.csv":
+        "cin,name,registered,class,category,sub_category,status,state,roc,pin,address\n"
+        "U99999DL2016PLC000001,BETA INFRA LIMITED,2016-01-09,Public,Company limited by shares,,Strike Off,Delhi,"
+        "ROC Delhi,,\n",
+    "mca/master/2026-11-27/llps-01.csv":
+        "llpin,name,registered,status,state,roc,district,address\n"
+        "AAA-1234,GAMMA ASSOCIATES LLP,2016-01-11,Active,Karnataka,ROC Bangalore,Bengaluru,\"5 MAIN ROAD, 560001\"\n",
+    # An earlier snapshot is never read.
+    "mca/master/2026-10-01/companies-01.csv":
+        "cin,name,registered,class,category,sub_category,status,state,roc,pin,address\n"
+        "U00000KA2010PTC000009,GONE BEFORE PRIVATE LIMITED,2010-01-01,Private,,,Active,,,,\n",
+}
+
+
+def test_the_master_snapshot_comes_first_and_each_company_is_listed_once():
+    rows = list(mca_read(bundle(MASTER)))
+    ids = [r["id"] for r in rows]
+    assert len(ids) == len(set(ids)) == 6
+    assert "U00000KA2010PTC000009" not in ids  # only the latest snapshot
+    by = {r["id"]: r for r in rows}
+    assert by["U12345MH2016PTC123456"]["master"] and by["AAA-1234"]["master"]
+    assert not by["F01234"].get("master")  # not in the master: from its report
+    alpha = INDIA_MCA.record(by["U12345MH2016PTC123456"])
+    assert alpha["legalStatus"] == "Amalgamated"  # today's status, in MCA's words
+    assert alpha["industryCodes"] == ["12345"]  # from the CIN when no report gives a code
+    old = INDIA_MCA.record(by["L17110MH1907PLC000123"])
+    assert old["incorporationDate"] == "1907-05-01" and old["legalForm"] == "Public - Company limited by shares"
+    assert old["legalAddress"] == {"addressLines": ["1 MILL ROAD, MUMBAI"], "region": "Maharashtra",
+                                   "postalCode": "400001", "country": "IN"}
+    # The master's "Strike Off" stands over the strike-off report; a company only a report lists is struck off.
+    assert INDIA_MCA.record(by["U99999DL2016PLC000001"])["legalStatus"] == "Strike Off"
+    assert INDIA_MCA.record(by["U11111TN1999PTC022222"])["legalStatus"] == "Struck Off"
+    assert INDIA_MCA.record(by["AAA-1234"])["legalAddress"]["postalCode"] == "560001"
+
+
+@pytest.mark.parametrize("raw,category", [("Company limited by Shares", "Company limited by shares"),
+                                          ("Company Limted by Shares", "Company limited by shares"),
+                                          ("Companies Limited by Shares", "Company limited by shares"),
+                                          ("Company Limited By Share", "Company limited by shares"),
+                                          ("Company Limjted By Guarentee", "Company limited by guarantee"),
+                                          ("Unlimited Liability", "Unlimited company")])
+def test_a_category_reads_the_same_whatever_the_reports_spelling(raw, category):
+    form = mca_record({"kind": "company", "id": "U12345MH2016PTC123456", "name": "A", "class": "Private",
+                       "category": raw})["legalForm"]
+    assert form == f"Private - {category}"
+
+
+def test_every_status_word_of_the_master_data_has_a_category():
+    from lc_core.status import default
+
+    words = ["Active", "Strike Off", "Amalgamated", "Under process of striking off", "Converted to LLP",
+             "Dissolved (Liquidated)", "Under Liquidation", "Inactive for e-filing", "Dormant under section 455",
+             "Converted and Dissolved", "Under CIRP", "Converted to CMP and Dissolved", "Dissolved under section 59(8)",
+             "Dissolved under section 54", "Strike Off-AwaitingPublication", "Inactive", "Dissolved",
+             "Not available for efiling", "Vanished", "Converted to LLP and Dissolved", "Unclassified",
+             "Not available for E-filing", "Struck Off"]
+    status = default()
+    assert [w for w in words if not status.category("in-mca", w)[1]] == []
