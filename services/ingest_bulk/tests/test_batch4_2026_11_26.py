@@ -65,6 +65,27 @@ def test_peru_never_maps_a_natural_persons_row():
             raise AssertionError(f"{ruc} was mapped")
 
 
+def test_peru_skips_a_row_a_pipe_in_its_name_has_shifted():
+    shifted = PE + "20888888888|INVERSIONES|LEGAL PARTNER CORPORATION S.A.C.|ACTIVO|HABIDO|150101|-|-|-|-|-|-|-|-|-|-|\n"
+    kept, why = mapped(PERU_SUNAT.read(zipped("padron_reducido_ruc.txt", shifted.encode("cp1252"))))
+    assert [r["registrationNumber"] for r in kept] == ["20100047218", "20601234567", "20777777777"]
+    assert why.count("a | inside a value shifted the row's columns") == 1
+
+
+def test_peru_every_word_of_the_first_trial_run_has_a_category():
+    from lc_core.status import default
+
+    words = {  # as the file spells them, cut at 20 characters (trial run of 2026-11-27)
+        "ACTIVO": "active", "PENDIENTE DE INI. DE": "active",
+        "SUSPENSION TEMPORAL": "inactive", "BAJA PROVISIONAL": "inactive", "BAJA PROV. POR OFICI": "inactive",
+        "INHABILITADO-VENT.UN": "inactive", "ANUL.PROVI.-ACTO ILI": "inactive",
+        "BAJA DE OFICIO": "struck-off", "BAJA DEFINITIVA": "struck-off", "BAJA NO ACTIV. SISEV": "struck-off",
+        "BAJA MULT.INSCR. Y O": "struck-off", "ANULACION - ERROR SU": "struck-off",
+        "OTROS OBLIGADOS": "unknown", "NUM. INTERNO IDENTIF": "unknown"}
+    status = default()
+    assert {w: status.category("pe-sunat-ruc", w) for w in words} == {w: (c, True) for w, c in words.items()}
+
+
 def test_batch_4_is_registered_on_trial():
     from lc_core.sources import pipelines
 
