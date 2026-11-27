@@ -128,6 +128,14 @@ def test_a_month_with_missing_parts_fails_loudly():
         go(FakeGateway([], page=page(parts=range(1, 6))), MemStore())
 
 
+def test_the_sites_maintenance_page_is_named_as_such():
+    down = b"<h1>Service Unavailable</h1><p>The service is temporarily unavailable. Please check back later.</p>"
+    with pytest.raises(FetchError, match="temporarily unavailable"):
+        go(FakeGateway([], page=down), MemStore())
+    with pytest.raises(FetchError, match="no basic company data files"):
+        go(FakeGateway([], page=b"<html>a different page</html>"), MemStore())
+
+
 def month(store, date, numbers_by_part):
     for k in range(1, 8):
         rows = [row(n) for n in numbers_by_part.get(k, [])] or [row(f"99{k}{date[5:7]}0000")]
