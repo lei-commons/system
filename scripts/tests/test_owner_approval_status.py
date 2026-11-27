@@ -142,3 +142,19 @@ def test_a_registry_change_beyond_promotion_still_waits_for_the_owner():
                 ("config/sources.yaml", SHA): registry.replace("stage: trial", "stage: production", 1) + "\n# x\n"}
     gh = FakeGitHub([{"filename": "config/sources.yaml"}, {"filename": "scripts/render_cycle.py"}], contents=contents)
     assert run(gh) == "pending"
+
+
+def test_a_pull_request_whose_files_github_cant_list_waits_for_the_owner():
+    import urllib.error
+
+    class TooLarge(FakeGitHub):
+        def call(self, method, path, body=None):
+            if method == "GET" and "/files" in path:
+                self.calls.append((method, path, body))
+                raise urllib.error.HTTPError(path, 422, "Unprocessable Entity", {}, None)  # a diff too large
+            return super().call(method, path, body)
+
+    gh = TooLarge([])
+    assert run(gh) == "pending"
+    assert gh.posted("statuses")[0]["state"] == "pending"
+    assert "can't list" in gh.posted("comments")[0]["body"]

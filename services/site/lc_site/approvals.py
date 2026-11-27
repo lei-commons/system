@@ -27,6 +27,7 @@ API = "https://api.github.com"
 MAX_BODY = 4096
 CACHE_SECONDS = 60
 MAX_FILES = 3000
+UNLISTED = "(GitHub can't list this pull request's files: its diff is too large)"
 
 
 class GitHubApp:
@@ -79,9 +80,17 @@ class Approvals:
 
     # ---- reading ----
     def _files(self, repo, number):
+        """The changed paths, or None when GitHub can't list them (a diff too large: HTTP 422)."""
+        import urllib.error
+
         paths, page = [], 1
         while len(paths) < MAX_FILES:
-            batch = self.github.call("GET", f"/repos/{repo}/pulls/{number}/files?per_page=100&page={page}") or []
+            try:
+                batch = self.github.call("GET", f"/repos/{repo}/pulls/{number}/files?per_page=100&page={page}") or []
+            except urllib.error.HTTPError as exc:
+                if exc.code == 422:
+                    return None
+                raise
             for f in batch:
                 paths.append(f["filename"])
                 if f.get("previous_filename"):
@@ -112,7 +121,9 @@ class Approvals:
         out = []
         for r in sorted(repos, key=lambda r: r["full_name"]):
             for pr in self.github.call("GET", f"/repos/{r['full_name']}/pulls?state=open&per_page=100") or []:
-                sensitive = self.rules.sensitive(self._files(r["full_name"], pr["number"]))
+                files = self._files(r["full_name"], pr["number"])
+                # Files that can't be listed can't be judged: listed for the owner (fail closed), as the workflow does.
+                sensitive = [UNLISTED] if files is None else self.rules.sensitive(files)
                 if not sensitive:
                     continue
                 sha = pr["head"]["sha"]
@@ -162,7 +173,8 @@ class Approvals:
             return Outcome(409, f"{repo}#{number} isn't open any more.")
         if pr["head"]["sha"] != sha:
             return Outcome(409, f"{repo}#{number} has new commits since you looked. Reload and review them first.")
-        sensitive = self.rules.sensitive(self._files(repo, number))
+        files = self._files(repo, number)
+        sensitive = [UNLISTED] if files is None else self.rules.sensitive(files)
         try:
             secret = self._read_secret()
             ok = bool(secret) and self.verifier.verify(secret, code)

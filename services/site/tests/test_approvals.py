@@ -166,3 +166,20 @@ def test_the_app_signs_in_with_a_jwt_and_reuses_its_token():
     claims = jwt.decode(token_calls[0][2].split(" ", 1)[1], certs=public, clock_skew_in_seconds=10**10)
     assert claims["iss"] == "5655569" and claims["exp"] - claims["iat"] <= 600
     assert [s[2] for s in seen if not s[1].endswith("/access_tokens")] == ["Bearer ghs_x", "Bearer ghs_x"]
+
+
+def test_a_pull_request_whose_files_github_cant_list_is_listed_for_the_owner(page):
+    import urllib.error
+
+    approvals, gh, events, post, code = page
+    plain = gh.call
+
+    def call(method, path, body=None):
+        if "/pulls/6/files" in path:
+            raise urllib.error.HTTPError(path, 422, "Unprocessable Entity", {}, None)  # a diff too large
+        return plain(method, path, body)
+
+    gh.call = call
+    listed = approvals.pending(fresh=True)["pullRequests"]
+    assert [(p["number"], p["sensitive"]) for p in listed] == [
+        (5, ["infra/terraform/site_lb.tf"]), (6, ["(GitHub can't list this pull request's files: its diff is too large)"])]

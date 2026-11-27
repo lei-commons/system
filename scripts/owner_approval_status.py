@@ -48,10 +48,21 @@ class GitHub:
         return json.loads(text) if text else None
 
 
-def changed_paths(gh, repo: str, number: int) -> list:
+UNLISTED = "(GitHub can't list this pull request's files: its diff is too large)"
+
+
+def changed_paths(gh, repo: str, number: int) -> list | None:
+    """The changed paths, or None when GitHub can't list them (a diff too large: HTTP 422)."""
+    import urllib.error
+
     paths, page = [], 1
     while len(paths) < MAX_FILES:
-        batch = gh.call("GET", f"/repos/{repo}/pulls/{number}/files?per_page=100&page={page}")
+        try:
+            batch = gh.call("GET", f"/repos/{repo}/pulls/{number}/files?per_page=100&page={page}")
+        except urllib.error.HTTPError as exc:
+            if exc.code == 422:
+                return None
+            raise
         if not batch:
             break
         for f in batch:
@@ -99,13 +110,14 @@ def already_approved(gh, repo: str, sha: str, rules) -> bool:
 def run(gh, repo: str, number: int, sha: str, rules, admin_url: str, log=print) -> str:
     """Set the status; return what was decided: not-needed, promotion, approved or pending."""
     paths = changed_paths(gh, repo, number)
-    sensitive = rules.sensitive(paths)
+    # Files that can't be listed can't be judged: the owner approves (fail closed).
+    sensitive = [UNLISTED] if paths is None else rules.sensitive(paths)
     if not sensitive:
         gh.call("POST", f"/repos/{repo}/statuses/{sha}", {"state": "success", "context": rules.context,
                                                           "description": "No sensitive paths: no approval needed"})
         log("not-needed: no sensitive paths")
         return "not-needed"
-    promoted = promoted_sources(gh, repo, number, sha, paths)
+    promoted = promoted_sources(gh, repo, number, sha, paths) if paths is not None else None
     if promoted:
         gh.call("POST", f"/repos/{repo}/statuses/{sha}", {
             "state": "success", "context": rules.context,
