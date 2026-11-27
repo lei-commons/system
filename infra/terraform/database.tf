@@ -103,6 +103,13 @@ resource "google_sql_database_instance" "directory" {
   }
 
   depends_on = [google_project_service.apis]
+
+  lifecycle {
+    # disk_size is the starting size: Cloud SQL grows the disk itself (disk_autoresize) and can never shrink it.
+    # Without this, a plan after any growth would "shrink" it back by replacing the instance, losing the
+    # database (2026-11-27: 109 GB -> 100 forced a replacement; deletion protection would have stopped it).
+    ignore_changes = [settings[0].disk_size]
+  }
 }
 
 resource "google_sql_database" "directory" {
