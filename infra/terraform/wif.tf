@@ -16,6 +16,8 @@ locals {
     "ledger-sg@refs/heads/main"    = "maker"
     # Read-only: prints the owner's suggestions for Claude in a private repository's logs.
     "intake@refs/heads/main" = "reader"
+    # Copies the owner's cleaned hand-downloaded files to the data bucket's intake/ folder (owner, 2026-11-27).
+    "data-downloads@refs/heads/main" = "supplier"
   }
 }
 

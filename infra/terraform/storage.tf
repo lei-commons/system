@@ -29,6 +29,10 @@ resource "google_storage_bucket" "data" {
     }
   }
 
+  # intake/ holds the owner's cleaned hand-downloaded files (lei-commons/data-downloads, docs/owner-supplied-sources.md),
+  # copied there by that repository's workflow. No age rule: a bundle waits for its source's job, which deletes it
+  # once processed in production, and deletes at every run any bundle its current.json no longer names.
+
   # A month's company lookup for Brazil is deleted by the job once the month is done; this catches a month
   # whose run never finished.
   lifecycle_rule {
