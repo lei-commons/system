@@ -17,10 +17,12 @@ locals {
     loader       = "Loads each snapshot into the serving database"
     # Lets Claude read the owner's suggestions and source edits, privately, from intake@main. Read-only.
     reader = "Reads the owner's source edits and approvals (control bucket, two objects), from intake@main only"
+    # The owner's hand-downloaded files, cleaned, reach the system from data-downloads@main (owner, 2026-11-27).
+    supplier = "Copies the owner's cleaned hand-downloaded files into the data bucket's intake/ folder, from data-downloads@main only"
   }
 
   # Runtime identities read the control state before every step.
-  runtime_sas = [for k in keys(local.service_accounts) : k if !contains(["deployer", "reader"], k)]
+  runtime_sas = [for k in keys(local.service_accounts) : k if !contains(["deployer", "reader", "supplier"], k)]
 
   common_roles = ["roles/logging.logWriter", "roles/monitoring.metricWriter"]
 
@@ -43,6 +45,8 @@ locals {
     loader = ["roles/cloudsql.client"]
     # No project roles: it reads two objects in the control bucket (below).
     reader = []
+    # No project roles: it writes the data bucket's intake/ folder only (below).
+    supplier = []
   }
 
   # bucket => { role => [sa keys] }
@@ -135,6 +139,21 @@ resource "google_storage_bucket_iam_member" "reader_source_files" {
     title       = "source-files-only"
     description = "source-edits.json and source-approvals.json"
     expression  = "resource.name == \"projects/_/buckets/${google_storage_bucket.control.name}/objects/source-edits.json\" || resource.name == \"projects/_/buckets/${google_storage_bucket.control.name}/objects/source-approvals.json\""
+  }
+}
+
+# The supplier writes the data bucket's intake/ folder and nothing else: the owner's cleaned hand-downloaded files
+# (lei-commons/data-downloads, its copy workflow), which the sources' ingest jobs read and delete once processed.
+# Each object is written by name in one call, so it needs no right to list the bucket.
+resource "google_storage_bucket_iam_member" "supplier_intake" {
+  bucket = google_storage_bucket.data.name
+  role   = "roles/storage.objectUser"
+  member = google_service_account.sa["supplier"].member
+
+  condition {
+    title       = "intake-only"
+    description = "objects under intake/"
+    expression  = "resource.name.startsWith(\"projects/_/buckets/${google_storage_bucket.data.name}/objects/intake/\")"
   }
 }
 

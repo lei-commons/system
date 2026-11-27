@@ -8,7 +8,7 @@
 set -euo pipefail
 
 ORG=lei-commons
-REPOS="releases intake ledger-gleif ledger-gb ledger-br ledger-us ledger-sg"
+REPOS="releases intake data-downloads ledger-gleif ledger-gb ledger-br ledger-us ledger-sg"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 FILE="$HERE/owner-approval.yml"
 DEST=.github/workflows/owner-approval.yml
