@@ -50,6 +50,7 @@ PAGE = SITE + "en_output.html"
 PARTS = 7
 PART = re.compile(r"BasicCompanyData-(\d{4}-\d{2}-\d{2})-part(\d)_7\.zip")
 ABSENT = "absent-from-source:gb-coh"
+UNAVAILABLE = re.compile(r"service unavailable|temporarily unavailable", re.I)
 
 
 def log(record):
@@ -64,8 +65,12 @@ def find(gateway, manifest=None):
     """The newest month's first part not yet processed: (key, url, filename)."""
     page = io.BytesIO()
     gateway.download(PAGE, page)
-    found = PART.findall(page.getvalue().decode("utf-8", "replace"))
+    html = page.getvalue().decode("utf-8", "replace")
+    found = PART.findall(html)
     if not found:
+        # 2026-11-27: the site answered 200 with a "Service Unavailable ... temporarily unavailable" page.
+        if UNAVAILABLE.search(html):
+            raise FetchError("Companies House's download service says it is temporarily unavailable")
         raise FetchError("no basic company data files on the download page")
     latest = max(date for date, _ in found)
     parts = sorted({int(k) for date, k in found if date == latest})
