@@ -31,6 +31,12 @@ raw downloads ── clean ──PR──▶  <source>/ cleaned CSVs + manifest 
 The repository keeps the cleaned files for good (owner, 2026-11-27): a register such as MCA offers only a window of
 its past reports, and the snapshots must be reproducible from what was read.
 
-Adding a month: the owner downloads the new reports into an empty folder outside the workspace; the session cleans
-them into the repository by pull request (`python3 -I tools/clean_<source>.py <folder> <source>`), merges it once the
-check passes, and the raw folder is deleted.
+Adding a month: the owner downloads the new reports into a folder outside the workspace; the session cleans them
+into the repository by pull request (`python3 -I tools/clean_<source>.py <folder> <source>`) and merges it once the
+check passes. The raw downloads stay on the owner's machine until the owner deletes them (owner, 2026-11-27).
+
+MCA has two kinds of download (2026-11-27). Its **master data** (every company, LLP and foreign company on the
+register with its status today) is kept as one snapshot, the latest, in parts of 150,000 rows; its **monthly
+reports** (registrations since 2016, strike-offs since October 2023) are kept month by month. A company is in
+several of these files; the job lists each identifier once: from the master snapshot when it lists it, else from
+the first report that does (struck off when a strike-off report lists it), else from a strike-off report alone.

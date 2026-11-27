@@ -10,12 +10,14 @@ diff, volume guard, trial measures). The cycle never reaches GitHub, and nothing
 In production the bundle is deleted once processed; at every run, any bundle current.json no longer names is
 deleted (``tidy``). current.json itself holds no records and stays, so the next run finds its key already done.
 
-India (in-mca): the Ministry of Corporate Affairs' monthly reports, cleaned by data-downloads' tools/clean_mca.py:
-companies, LLPs and foreign companies registered each month since January 2016, and companies and LLPs struck
-off each month since October 2023. Every row is a company or an LLP: no natural person is listed. A report's
-status is the status at registration, so it isn't kept; a record is "Struck Off" when a strike-off report lists
-it, else its status is not stated. Struck-off companies and LLPs registered before 2016 come from the strike-off
-reports alone, with their identifier and name.
+India (in-mca): the Ministry of Corporate Affairs' data, cleaned by data-downloads' tools/clean_mca.py. Every row
+is a company or an LLP: no natural person is listed. Each identifier becomes one record, from the first of:
+1. the master data (``mca/master/<date>/``, the latest snapshot): every company, LLP and foreign company on the
+   register with its status today, in MCA's own words;
+2. the monthly incorporation reports (January 2016 on): the first report that lists it. A report's status is the
+   status at registration, so it isn't kept: the record is "Struck Off" when a strike-off report lists it, else its
+   status is not stated;
+3. the monthly strike-off reports (October 2023 on) alone, with the identifier and name.
 """
 
 from __future__ import annotations
@@ -98,6 +100,7 @@ def tidy(bucket, source: str, processed, production: bool, log) -> int:
 
 KINDS = {"companies.csv": "company", "llps.csv": "llp", "foreign-companies.csv": "foreign-company"}
 MEMBER = re.compile(r"^mca/(?P<folder>incorporated|struck-off)/(?P<month>\d{4}-\d{2})/(?P<file>[a-z-]+\.csv)$")
+MASTER = re.compile(r"^mca/master/(?P<day>\d{4}-\d{2}-\d{2})/(?P<file>[a-z-]+)-\d{2}\.csv$")
 IDS = {"company": re.compile(r"[UL]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6}"), "llp": re.compile(r"[A-Z]{3}-\d{4}"),
        "foreign-company": re.compile(r"F\d{5}")}
 ID_COLUMN = {"company": "cin", "llp": "llpin", "foreign-company": "fcrn"}
@@ -118,14 +121,33 @@ def _members(f, folder: str):
             yield month, kind, csv.DictReader(text)
 
 
+def _master(f):
+    """(kind, rows) for each part of the bundle's latest master snapshot."""
+    f.seek(0)
+    with tarfile.open(fileobj=f, mode="r:gz") as tar:
+        parts = [(m["day"], member.name, KINDS[m["file"] + ".csv"], member) for member in tar
+                 if (m := MASTER.match(member.name)) and member.isfile() and m["file"] + ".csv" in KINDS]
+        latest = max((p[0] for p in parts), default=None)
+        for day, _, kind, member in sorted(p for p in parts if p[0] == latest):
+            text = io.TextIOWrapper(tar.extractfile(member), encoding="utf-8", newline="")
+            yield kind, csv.DictReader(text)
+
+
 def mca_read(f):
-    """Rows for the mapper, one per company or LLP: the first report that lists an identifier gives its row (a
-    company is registered once); a strike-off report adds the month it was struck off."""
+    """Rows for the mapper, one per company or LLP: the master snapshot's row when it lists the identifier, else
+    the first report that lists it (a company is registered once), with the month a strike-off report gives."""
+    seen = set()
+    for kind, rows in _master(f):
+        for row in rows:
+            ident = row.get(ID_COLUMN[kind], "")
+            if ident in seen:
+                continue
+            seen.add(ident)
+            yield {**row, "id": ident, "kind": kind, "master": True}
     struck = {}
     for month, kind, rows in _members(f, "struck-off"):
         for row in rows:
             struck.setdefault(row.get(ID_COLUMN[kind], ""), (month, kind, row.get("name", "")))
-    seen = set()
     for month, kind, rows in _members(f, "incorporated"):
         for row in rows:
             ident = row.get(ID_COLUMN[kind], "")
@@ -134,7 +156,7 @@ def mca_read(f):
             seen.add(ident)
             yield {**row, "id": ident, "kind": kind, "struckOff": struck.get(ident, ("",))[0]}
     for ident, (month, kind, name) in struck.items():
-        if ident not in seen:  # registered before 2016: known from the strike-off report alone
+        if ident not in seen:  # registered before 2016 and not in the master: known from the strike-off report alone
             yield {"id": ident, "kind": kind, "name": name, "struckOff": month}
 
 
@@ -150,7 +172,20 @@ def mca_form(row: dict) -> str:
     if kind == "foreign-company":
         office = _clean(row.get("office_type"))
         return "Foreign company" + (f" ({_title(office)})" if office else "")
-    return " - ".join(p for p in (mca_class(row.get("class", "")), _clean(row.get("category"))) if p) or "Company"
+    return " - ".join(p for p in (mca_class(row.get("class", "")), mca_category(row.get("category", ""))) if p) or "Company"
+
+
+def mca_category(v: str) -> str:
+    """MCA's reports spell a category many ways ("Company Limted by Shares", "Companies Limited by Shares", ...)."""
+    v = _clean(v)
+    up = v.upper().replace(" ", "")
+    if "GUAR" in up:
+        return "Company limited by guarantee"
+    if "SHARE" in up:
+        return "Company limited by shares"
+    if "UNLIMITED" in up:
+        return "Unlimited company"
+    return v
 
 
 def mca_class(v: str) -> str:
@@ -170,8 +205,11 @@ def mca_record(row: dict) -> dict:
     if kind not in IDS or not IDS[kind].fullmatch(ident) or not name:
         raise Skip("no identifier or name")
     address = _clean(row.get("address"))
-    pins = PIN.findall(address)
+    pin = _clean(row.get("pin"))
+    pins = [pin] if PIN.fullmatch(pin) else PIN.findall(address)
     activity = _clean(row.get("activity_code"))
+    if not activity and kind == "company":
+        activity = ident[1:6]  # a CIN holds the company's NIC activity code
     return {
         "directoryId": mint("IN", "IN-MCA", ident),
         "legalName": name,
@@ -179,7 +217,8 @@ def mca_record(row: dict) -> dict:
         "legalJurisdiction": "IN",
         "registrationAuthority": "IN-MCA",
         "registrationNumber": ident,
-        "legalStatus": "Struck Off" if row.get("struckOff") else None,
+        "legalStatus": (_clean(row.get("status")) or None) if row.get("master")
+        else ("Struck Off" if row.get("struckOff") else None),
         "incorporationDate": _clean(row.get("registered")) or None,
         "industryCodes": [activity] if activity else [],
         "legalAddress": _address(addressLines=[address] if address else [], region=_title(row.get("state", "")),

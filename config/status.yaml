@@ -176,8 +176,37 @@ sources:
     active: [Active]
     inactive: [Deactivated]
 
-  in-mca:                      # set by lc_ingest.owner_supplied from MCA's strike-off reports; no word: not stated
-    struck-off: [Struck Off]
+  in-mca:                      # MCA's master data words (2026-11-27 snapshot); "Struck Off" is set by
+                               # lc_ingest.owner_supplied from a strike-off report; no word: not stated
+    active:
+      - Active
+      - Under process of striking off  # a strike-off only proposed is active (see the judgement calls above)
+      - Under CIRP                     # corporate insolvency resolution: still on the register
+    inactive:
+      - Inactive
+      - Inactive for e-filing
+      - Dormant under section 455
+      - Vanished                       # MCA's list of companies that can't be traced
+    dissolved:
+      - Dissolved
+      - Dissolved (Liquidated)
+      - Dissolved under section 54
+      - Dissolved under section 59(8)
+      - Converted and Dissolved
+      - Converted to LLP and Dissolved
+      - Converted to CMP and Dissolved
+    in-liquidation: [Under Liquidation]
+    merged:
+      - Amalgamated
+      - Converted to LLP               # carried on by the LLP it became
+    struck-off:
+      - Struck Off
+      - Strike Off
+      - Strike Off-AwaitingPublication  # struck off; the notice is yet to be published
+    unknown:
+      - Not available for efiling
+      - Not available for E-filing
+      - Unclassified
 
   gb-ccew:
     active: [Registered]
