@@ -192,6 +192,7 @@ main:
       for:
         value: job
         in:
+        - ingest-in-mca
         - ingest-pe-ruc
         - ingest-si
         - ingest-nl-anbi

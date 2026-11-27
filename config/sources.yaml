@@ -309,14 +309,29 @@ sources:
   - id: in-mca
     name: India Ministry of Corporate Affairs
     country: IN
-    access: owner-key
-    method: api
-    secret: sources/in-mca/credentials
-    status: awaiting-owner
-    fallback: web-discovery
-    url: https://www.mca.gov.in
+    access: open
+    method: bulk
+    cadence: monthly
+    status: active
+    url: https://www.mca.gov.in/content/mca/global/en/data-and-reports/company-llp-info/incorporated-closed-month.html
     terms_url: https://www.mca.gov.in
-    assessment: {risk: unknown, commercial: unknown, attribution: unknown, summary: "Needs MCA access arranged by the owner; terms depend on the access route.", verified: false}
+    assessment:
+      risk: medium
+      commercial: "unclear"
+      attribution: "none stated"
+      summary: >-
+        Monthly reports of companies, LLPs and foreign companies incorporated (January 2016 on) and struck off
+        (October 2023 on), published on MCA's site. MCA has no API and its pages refuse scripted access, so the
+        owner downloads the reports by hand (owner, 2026-11-27); they are cleaned into lei-commons/data-downloads
+        and reach the system through the data bucket (docs/owner-supplied-sources.md). No natural persons; email
+        columns are never read. No licence text found.
+      verified: false
+    # Owner-supplied (owner, 2026-11-27): read from intake/in-mca/ in the data bucket, never through the gateway.
+    # On trial: lc_ingest.owner_supplied INDIA_MCA; one publication per data-downloads commit of mca/.
+    pipeline: {stage: trial, job: ingest-in-mca, image: ingest-bulk, store: in-mca, records_as: in-mca,
+               label: Ministry of Corporate Affairs (India), refresh: monthly,
+               dataset: "MCA monthly incorporation and strike-off reports",
+               attribution: "Ministry of Corporate Affairs, Government of India: monthly reports of companies and LLPs incorporated and struck off."}
 
   - id: sg-acra
     name: Singapore ACRA (data.gov.sg)

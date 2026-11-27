@@ -112,7 +112,8 @@ def run(profile: Profile, gateway, store, today=None, gate=None, allowlist=None,
     for part in profile.parts or (None,):
         outcome = run_ingest(gateway=gateway, store=store, gate=gate or gate_for(profile), find=find_for(profile, today, part, code),
                              read=profile.read, mapper=profile.record, source=profile.source,
-                             maker=f"ingestion@{profile.store}", allowlist=allowlist, log=log, quality=quality)
+                             maker=f"ingestion@{profile.store}", allowlist=allowlist, log=log, quality=quality,
+                             fetch=profile.fetch)
         if outcome not in ("done", "already-done"):
             break
     return outcome
@@ -215,6 +216,9 @@ def main() -> int:
         with lease(client.bucket(bucket), profile.job):
             outcome = run(profile, gateway, store, allowlist=allowlist, log=logged)
         health.note(store, outcome=outcome, log=record)  # a browser fallback reads it (ingest_browser)
+        if profile.tidy:  # an owner-supplied source: its processed bundles go (lc_ingest.owner_supplied)
+            profile.tidy(client.bucket(bucket), profile.source, store.read_manifest()["processed"],
+                         production=not on_trial and outcome in ("done", "already-done"), log=record)
         if on_trial:
             trial_outcome(profile.source, store, outcome, ended, log=record)
         if on_trial and outcome in ("done", "already-done"):
