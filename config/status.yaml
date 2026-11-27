@@ -151,15 +151,26 @@ sources:
   ca-cra-charities:            # the list holds registered charities
     active: [Registered]
 
-  pe-sunat-ruc:                # SUNAT's taxpayer states, as SUNAT documents them; the trial counts any other word
-    active: [ACTIVO]
+  pe-sunat-ruc:                # SUNAT's taxpayer states. The file cuts each word at 20 characters, so the
+                               # words are written as the file spells them (first trial run, 2026-11-27).
+    active:
+      - ACTIVO
+      - PENDIENTE DE INI. DE           # pendiente de inicio de actividades: registered, not trading yet
     inactive:
       - SUSPENSION TEMPORAL            # temporarily suspended activity
       - BAJA PROVISIONAL               # provisional deregistration
-      - BAJA PROV. POR OFICIO          # provisional deregistration by SUNAT
+      - BAJA PROV. POR OFICI*          # baja provisional por oficio: provisional deregistration by SUNAT
+      - INHABILITADO-VENT.UN           # disabled at the Ventanilla Única (the state's one-stop formation desk)
+      - ANUL.PROVI.-ACTO ILI           # anulación provisional por acto ilícito: provisionally annulled
     struck-off:
       - BAJA DEFINITIVA                # final deregistration
       - BAJA DE OFICIO                 # deregistered by SUNAT
+      - BAJA NO ACTIV. SISEV           # deregistered by SUNAT: formed through SISEV, never started trading
+      - BAJA MULT.INSCR. Y O*          # baja por múltiple inscripción y otros: a duplicate RUC, cancelled
+      - ANULACION - ERROR SU*          # anulación por error SUNAT: the RUC was annulled
+    unknown:
+      - OTROS OBLIGADOS                # a kind of taxpayer, not a state
+      - NUM. INTERNO IDENTIF*          # número interno de identificación: an internal number, not a state
 
   us-cms-nppes-org:            # lc_ingest.bulk_batch3: deactivated unless reactivated since
     active: [Active]

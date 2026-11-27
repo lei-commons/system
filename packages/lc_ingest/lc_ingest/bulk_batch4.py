@@ -8,7 +8,8 @@ read by name (``Columns``) and the first trial run says what the file really hol
   and 15 rows are natural persons, and 17 is a non-domiciled person: they are skipped at the first step, before
   any field is mapped. Kept of a legal person: its RUC, name, taxpayer status and fiscal address (street,
   number, interior, block and lot, department from the UBIGEO code). The file's names can hold
-  bare double quotes, so it is read with quotes as plain characters.
+  bare double quotes, so it is read with quotes as plain characters, and a few hold a "|", which shifts the
+  row's columns: such a row is skipped (3 of 2,383,323 in the first trial run).
 """
 
 from __future__ import annotations
@@ -50,6 +51,8 @@ def pe_record(row: dict) -> dict:
     ruc = _clean(row.get("ruc"))
     if not ruc.startswith("20"):
         raise Skip("natural person (RUC 10, 15 or 17)")
+    if row.get("_misaligned"):
+        raise Skip("a | inside a value shifted the row's columns")
     name = _clean(row.get("name"))
     if not re.fullmatch(r"20\d{9}", ruc) or not name:
         raise Skip("no number or name")
@@ -80,6 +83,6 @@ def pe_record(row: dict) -> dict:
 PERU_SUNAT = Profile(
     source="pe-sunat-ruc", job="ingest-pe-ruc", store="pe-ruc", filename="pe-sunat-padron-reducido", extension=".zip",
     file_url="https://www2.sunat.gob.pe/padron_reducido_ruc.zip", guard_names=True, ra="PE-RUC",
-    read=table(PE_COLUMNS, fallback_encoding="cp1252", literal_quotes=True), mapper=pe_record)
+    read=table(PE_COLUMNS, fallback_encoding="cp1252", literal_quotes=True, flag_misaligned=True), mapper=pe_record)
 
 BATCH4 = (PERU_SUNAT,)
