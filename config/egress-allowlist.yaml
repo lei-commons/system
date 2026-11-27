@@ -52,6 +52,9 @@ registry_hosts:
   - open.canada.ca
   - opencanada.blob.core.windows.net
   - download.cms.gov
+  # Peru's SUNAT padrón reducido del RUC (pe-sunat-ruc; source approved by the owner 2026-11-26, host with
+  # system PR "trial: Peru SUNAT", approved on /admin): its daily ZIP.
+  - www2.sunat.gob.pe
   # Owner approved 2026-11-09 for the ACRA datasets: data.gov.sg starts a download at
   # api-open and serves the file from a signed S3 link in its Singapore region.
   - api-open.data.gov.sg

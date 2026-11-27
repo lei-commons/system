@@ -85,8 +85,9 @@ def _delimiter(first_line: str) -> str:
     return max(DELIMITERS, key=first_line.count)
 
 
-def _rows(open_text, columns: Columns, what: str, fallback: str):
-    """Rows of one CSV as {field: value}. ``open_text(encoding)`` opens it (as bytes when None), anew each time."""
+def _rows(open_text, columns: Columns, what: str, fallback: str, literal_quotes: bool = False):
+    """Rows of one CSV as {field: value}. ``open_text(encoding)`` opens it (as bytes when None), anew each time.
+    ``literal_quotes``: a double quote is a plain character (files that never quote fields but hold bare quotes)."""
     with open_text(None) as probe:
         head = probe.read(1 << 20)
     encoding = _encoding(head, fallback)
@@ -96,7 +97,8 @@ def _rows(open_text, columns: Columns, what: str, fallback: str):
         header = next(reader, [])
         found = columns.resolve(header, what)
         index = {field: header.index(name) for field, name in found.items()}
-        for values in csv.reader(text, delimiter=_delimiter(first)):
+        quoting = {"quoting": csv.QUOTE_NONE} if literal_quotes else {}
+        for values in csv.reader(text, delimiter=_delimiter(first), **quoting):
             if not values:
                 continue
             yield {field: (values[i] if i < len(values) else "") for field, i in index.items()}
@@ -107,7 +109,7 @@ def _readme(name: str) -> bool:
     return bool(re.match(r"(readme|leesmij|lisezmoi|liesmich)\b", name.rsplit("/", 1)[-1], re.I))
 
 
-def table(columns: Columns, member=r".*\.(csv|txt)$", fallback_encoding="cp1252"):
+def table(columns: Columns, member=r".*\.(csv|txt)$", fallback_encoding="cp1252", literal_quotes=False):
     """A reader for a CSV, plain or as the largest matching member of a ZIP (or gzip), with columns by name."""
     def read(binary_file):
         head = binary_file.read(4)
@@ -128,14 +130,14 @@ def table(columns: Columns, member=r".*\.(csv|txt)$", fallback_encoding="cp1252"
                     raw = z.open(name)
                     return raw if encoding is None else io.TextIOWrapper(raw, encoding=encoding, errors="replace",
                                                                         newline="")
-                yield from _rows(open_text, columns, name, fallback_encoding)
+                yield from _rows(open_text, columns, name, fallback_encoding, literal_quotes)
             return
 
         def open_plain(encoding):
             binary_file.seek(0)
             view = io.BufferedReader(_Unclosing(binary_file))
             return view if encoding is None else io.TextIOWrapper(view, encoding=encoding, errors="replace", newline="")
-        yield from _rows(open_plain, columns, "the CSV file", fallback_encoding)
+        yield from _rows(open_plain, columns, "the CSV file", fallback_encoding, literal_quotes)
     return read
 
 
