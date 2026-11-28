@@ -50,6 +50,43 @@ def settings(config: dict) -> dict:
         "dedi_check_utc": dedi_check,
         "timeout_minutes": timeout_minutes,
         "cron": f"{int(match.group(2))} {int(match.group(1))} * * *",
+        "checkin": checkin(config.get("checkin")),
+    }
+
+
+GITHUB_WORKFLOW = re.compile(r"^[a-z0-9-]+/[a-z0-9._-]+ [a-z0-9._-]+$")
+
+
+def checkin(section) -> dict:
+    """The daily check-in's settings (config/cycle.yaml checkin). Without the section, the check-in is off."""
+    if not section:
+        return {"enabled": False, "watchdog_utc": "", "final_after_minutes": 0, "github": [],
+                "recovery": {"enabled": False, "max_runs_per_day": 0, "wait_minutes": 0, "latest_start_utc": ""}}
+    if not isinstance(section.get("enabled"), bool):
+        raise CycleConfigError("checkin.enabled must be true or false")
+    times = {}
+    for key in ("watchdog_utc",):
+        times[key] = str(section.get(key, ""))
+        if not TIME.match(times[key]):
+            raise CycleConfigError(f"checkin.{key} must be a time of day, HH:MM (UTC)")
+    recovery = section.get("recovery") or {}
+    if not isinstance(recovery.get("enabled"), bool):
+        raise CycleConfigError("checkin.recovery.enabled must be true or false")
+    latest = str(recovery.get("latest_start_utc", ""))
+    if not TIME.match(latest):
+        raise CycleConfigError("checkin.recovery.latest_start_utc must be a time of day, HH:MM (UTC)")
+    github = section.get("github") or []
+    if not isinstance(github, list) or not all(isinstance(g, str) and GITHUB_WORKFLOW.match(g) for g in github):
+        raise CycleConfigError("checkin.github must list '<owner>/<repo> <workflow name>' entries")
+    return {
+        "enabled": section["enabled"],
+        **times,
+        "final_after_minutes": _whole(section.get("final_after_minutes"), 0, 360, "checkin.final_after_minutes"),
+        "recovery": {"enabled": recovery["enabled"],
+                     "max_runs_per_day": _whole(recovery.get("max_runs_per_day"), 0, 3, "checkin.recovery.max_runs_per_day"),
+                     "wait_minutes": _whole(recovery.get("wait_minutes"), 0, 120, "checkin.recovery.wait_minutes"),
+                     "latest_start_utc": latest},
+        "github": list(github),
     }
 
 

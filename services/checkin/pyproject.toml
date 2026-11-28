@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lc-checkin"
+version = "0.1.0"
+description = "The daily check-in: reads the cycle, recovers once, reports and emails the owner"
+requires-python = ">=3.11"
+license = {text = "Apache-2.0"}
+dependencies = ["google-cloud-storage>=2.16", "google-auth>=2.29", "requests>=2.31"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+include = ["checkin*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

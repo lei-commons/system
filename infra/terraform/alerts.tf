@@ -1,5 +1,7 @@
 # Alerts to the owner, by email (owner decision 2026-11-07). This goes only to
-# the owner, so it is consistent with the rule that agents never contact anyone.
+# the owner, so it is consistent with the rule that agents never contact anyone. The day's status comes once,
+# in the final check-in's summary (checkin.tf); what stays immediate here is the check-in failing, the conduct
+# gateway refusing a request (a conduct rule, not a status) and the private site failing.
 
 locals {
   alert_email = var.alert_email != "" ? var.alert_email : var.owner_email
@@ -16,18 +18,19 @@ resource "google_monitoring_notification_channel" "owner" {
   depends_on = [google_project_service.apis]
 }
 
+# The day's status reaches the owner once, in the final check-in's email (infra/terraform/checkin.tf; owner,
+# 2026-11-28: "absolutely the FINAL summary rather than any intermediate status"). The jobs' own failures are in
+# it, after every retry and recovery, so they no longer email one by one. This alert is for the check-in itself:
+# if it fails, the summary may not come.
 resource "google_monitoring_alert_policy" "job_failed" {
-  display_name          = "lei-commons: a job failed"
+  display_name          = "lei-commons: the daily check-in failed"
   combiner              = "OR"
   notification_channels = [google_monitoring_notification_channel.owner.id]
 
   conditions {
-    display_name = "Cloud Run job execution failed"
+    display_name = "The check-in job's run failed"
     condition_threshold {
-      # Ingestion jobs aren't here: a source is tried and retried many times a day (and refusals are expected),
-      # so its failures are reported once a day by the daily cycle's alert, after all its retries, and on the
-      # System page. This alert is for the jobs that aren't sources (snapshot, load, egress check...).
-      filter          = "resource.type = \"cloud_run_job\" AND metric.type = \"run.googleapis.com/job/completed_execution_count\" AND metric.labels.result = \"failed\" AND NOT resource.labels.job_name = starts_with(\"ingest-\")"
+      filter          = "resource.type = \"cloud_run_job\" AND metric.type = \"run.googleapis.com/job/completed_execution_count\" AND metric.labels.result = \"failed\" AND resource.labels.job_name = \"checkin\""
       comparison      = "COMPARISON_GT"
       threshold_value = 0
       duration        = "0s"
@@ -40,7 +43,7 @@ resource "google_monitoring_alert_policy" "job_failed" {
   }
 
   documentation {
-    content   = "A lei-commons job that isn't a source failed (the snapshot, the database load, the egress check...). Open the private site's System page to see which one, and its logs in Cloud Run. Sources are reported by the daily cycle's alert."
+    content   = "A run of the daily check-in failed, so the day's summary email may not come (the final check-in tries every 30 minutes until before the next cycle). The private site's System page shows the day; the check-in's logs in Cloud Run say why."
     mime_type = "text/markdown"
   }
 }

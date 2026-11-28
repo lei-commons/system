@@ -71,3 +71,18 @@ def test_a_refusal_becomes_a_refused_decision():
         r(failure(exc))
     (e,) = r.events
     assert (e.action, e.decision) == ("refused", "failed") and "refused us (HTTP 403)" in e.reason
+
+
+def test_the_checkin_settings_load_and_are_checked():
+    c = cycle.load()["checkin"]
+    assert c["enabled"] is True and c["watchdog_utc"] == "08:17" and c["recovery"]["max_runs_per_day"] == 1
+    assert "lei-commons/releases verify" in c["github"]
+    assert cycle.checkin(None)["enabled"] is False  # no section: no check-in
+    good = {"enabled": True, "watchdog_utc": "08:17", "final_after_minutes": 120, "github": ["o/r w"],
+            "recovery": {"enabled": True, "max_runs_per_day": 1, "wait_minutes": 15, "latest_start_utc": "16:00"}}
+    assert cycle.checkin(good)["github"] == ["o/r w"]
+    assert cycle.load()["checkin"]["final_after_minutes"] == 120
+    for bad in ({**good, "watchdog_utc": "8am"}, {**good, "github": ["no-workflow"]}, {**good, "final_after_minutes": 600},
+                {**good, "recovery": {**good["recovery"], "max_runs_per_day": 9}}, {**good, "enabled": "yes"}):
+        with pytest.raises(cycle.CycleConfigError):
+            cycle.checkin(bad)

@@ -141,6 +141,9 @@ def _event(actor: str, record: dict) -> Event | None:
     if kind == "denied":
         return Event(actor, "fetched", subject, "failed", record.get("reason") or "the gateway refused the request",
                      refs=_refs(record))
+    if kind == "recovery-started":  # services/checkin: one run of the cycle when the day's didn't finish
+        what = "a recovery run" if record.get("recovery") else "a catch-up run"
+        return Event(actor, "started", f"{what} of the daily cycle", "done", record.get("reason") or "", refs=_refs(record))
     return None
 
 

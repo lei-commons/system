@@ -5,7 +5,7 @@
 # cycle: the failure is logged, the other sources carry on, and the failed ones are tried again after
 # a wait, up to `retries` more rounds. The snapshot and the database load then run with every source's
 # newest good data (a source that still fails keeps its last good data). The cycle still ends as
-# failed, so the owner is alerted and the day doesn't count as clean, and the next day's cycle tries
+# failed, so the day's final check-in reports it and the day doesn't count as clean, and the next day's cycle tries
 # every source again (each source catches up on what it missed).
 #
 # After changing this file, run `python scripts/render_cycle.py` and commit the result
@@ -37,8 +37,48 @@ timeouts_minutes:
   # The web-asserted facts pilot: its job's own limit (the cycle starts it and doesn't wait). It stops taking
   # records after run.minutes (config/web_claims.yaml, 330) and saves its progress.
   web-claims: 360
+  # The daily check-in (services/checkin) reads logs and a few files: minutes.
+  checkin: 15
 
 watchdogs:
   # The DeDi watchdog (job dedi-check, docs/dedi.md) also runs after the load in every cycle; this second
   # daily run re-issues the files on a day the cycle failed, so they never go stale. HH:MM in UTC.
   dedi_check_utc: "14:17"
+
+# The daily check-in (job checkin; docs repo 05-operations/daily-check-in.md; owner, 2026-11-28: "Check-in, any
+# self-recovery, etc all should run on the cloud itself", with one email a day, "absolutely the FINAL summary rather
+# than any intermediate status", run after the day's regular cloud jobs so it "will never run in the middle" of them).
+#
+# - At the end of the cycle (its last step, also when the snapshot or the load failed) it decides on recovery and may
+#   start one recovery run. No email.
+# - Then the cycle waits final_after_minutes and runs the final check-in, which emails the owner the day's one
+#   summary: the cycle (and any recovery run, whose own final check-in reports instead), the trials, and the GitHub
+#   workflows as they stand (the day's release and ledger syncs if they have run, the previous night's verify).
+# - The watchdog (watchdog_utc) starts a cycle on a day none ran, and sends a day's summary that never went out.
+checkin:
+  enabled: true
+  # A day with no cycle, or no summary the day before, HH:MM in UTC.
+  watchdog_utc: "08:17"
+  # How long after the cycle (or its recovery run) has fully finished the final check-in runs, in minutes.
+  final_after_minutes: 120
+  # Self-recovery: when the snapshot or the load stopped the cycle (or no cycle ran), the check-in starts one
+  # recovery run of the cycle: it waits wait_minutes, re-checks the sources (quick: they are done), builds and
+  # loads. Never more than max_runs_per_day, never after latest_start_utc (so it ends long before the next
+  # cycle), never while the system is paused. A source that still fails is left to the next day's cycle.
+  recovery:
+    enabled: true
+    max_runs_per_day: 1
+    wait_minutes: 15
+    latest_start_utc: "16:00"
+  # The scheduled GitHub workflows the day waits for (each reports its outcome to the logs at its end, after its
+  # own retries): the release of the day, the overnight verify of it, the ledger syncs after the cycle, and the
+  # network check (reported, not waited for). Each is "<owner>/<repo> <workflow name>".
+  github:
+    - lei-commons/releases snapshot
+    - lei-commons/releases verify
+    - lei-commons/system egress-check
+    - lei-commons/ledger-gleif sync
+    - lei-commons/ledger-gb sync
+    - lei-commons/ledger-br sync
+    - lei-commons/ledger-us sync
+    - lei-commons/ledger-sg sync

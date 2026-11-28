@@ -30,7 +30,7 @@ resource "google_secret_manager_secret_iam_member" "dedi_signing_key" {
 # Verifies the published set as a DeDi server would and, if it fails or would go stale, publishes it
 # again (--repair). The cycle runs it after the load (a failure there doesn't fail the cycle), and the
 # schedule below runs it again in the afternoon, so the files stay fresh on a day the cycle failed. A
-# check that still fails exits non-zero, and the job alert emails the owner.
+# check that still fails exits non-zero, and the day's final check-in reports it to the owner.
 resource "google_cloud_run_v2_job" "dedi_check" {
   count = var.cycle_enabled ? 1 : 0
 

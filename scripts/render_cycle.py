@@ -8,7 +8,7 @@ never disagree. Each source is independent (owner decision 2026-11-18): every in
 the registry's order; a failure is logged and the cycle carries on; the sources still failing are tried
 again after ``retry_wait_minutes``, up to ``retries`` rounds; then the snapshot and the database load
 run (these two still stop the cycle if they fail); finally, if any source never succeeded, the cycle
-ends as failed, naming them, so the owner is alerted and the day isn't counted as clean.
+ends as failed, naming them, so the day's final check-in reports them and the day isn't counted as clean.
 
 Sources on trial (config/sources.yaml pipeline stage, owner 2026-11-22; docs/source-trials.md) run last,
 after the snapshot, the load and the DeDi check, once each, and only measure (a publication already measured
@@ -99,15 +99,27 @@ def render(registry: dict, config: dict, selftest: bool = False, fallbacks: dict
     if selftest:
         s, jobs = {"retry_wait_minutes": 1, "retries": 1}, SELFTEST_JOBS
         fallbacks = {"ingest-selftest-missing": "egress-check"}  # the fallback path: the missing job "recovers"
+    checkin = (s_all.get("checkin") or {}) if not selftest else {}
+    checking_in = bool(checkin.get("enabled"))
     steps = [
         {"init": {"assign": [
             {"project": '${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}'},
             {"region": REGION},
             {"sources": jobs},
             {"failed": []},
-        ] + ([{"fallbacks": fallbacks}] if fallbacks else [])}},
-        {"first_try": {"for": {"value": "job", "in": "${sources}", "steps": _try_source("${0}", "first", default_timeout)}}},
+        ] + ([{"fallbacks": fallbacks}] if fallbacks else [])
+          + ([{"recovery": False}, {"stopped": ""}, {"stop_error": None}] if checking_in else [])}},
     ]
+    if checking_in:
+        # A recovery run (started by the check-in with {"recovery": true}) waits a little, then does the day again:
+        # the sources are quick (already done), the snapshot and the load are what it is for.
+        steps += [
+            {"read_args": {"switch": [{"condition": "${args != null}", "next": "read_recovery"}], "next": "first_try"}},
+            {"read_recovery": {"switch": [{"condition": '${"recovery" in args}', "assign": [{"recovery": "${args.recovery == true}"}]}]}},
+            {"recovery_wait": {"switch": [{"condition": "${recovery}", "steps": [{"recovery_sleep": {
+                "call": "sys.sleep", "args": {"seconds": checkin["recovery"]["wait_minutes"] * 60}}}]}]}},
+        ]
+    steps.append({"first_try": {"for": {"value": "job", "in": "${sources}", "steps": _try_source("${0}", "first", default_timeout)}}})
     if s["retries"]:
         steps.append({"retry_rounds": {"for": {"value": "retry_round", "range": [1, s["retries"]], "steps": [
             {"all_done": {"switch": [{"condition": "${len(failed) == 0}", "next": "break"}]}},
@@ -138,15 +150,29 @@ def render(registry: dict, config: dict, selftest: bool = False, fallbacks: dict
                 }},
             ]}}},
         ]}})
-    steps += [{job.replace("-", "_"): _run(f'"{job}"', timeout_seconds(s_all, job))} for job in ([] if selftest else AFTER_INGEST)]
+    for job in ([] if selftest else AFTER_INGEST):
+        if not checking_in:
+            steps.append({job.replace("-", "_"): _run(f'"{job}"', timeout_seconds(s_all, job))})
+            continue
+        # With the check-in, a failed snapshot or load still stops the day's work, but the check-in runs first
+        # (and may start a recovery run); the cycle then ends with the same error as before.
+        step = job.replace("-", "_")
+        steps += [
+            {step: {"try": _run(f'"{job}"', timeout_seconds(s_all, job)),
+                    "except": {"as": "e", "steps": [{f"{step}_stopped": {"assign": [{"stopped": job}, {"stop_error": "${e}"}]}}]}}},
+            {f"after_{step}": {"switch": [{"condition": '${stopped != ""}', "next": "wrap_up"}]}},
+        ]
     if dedi and not selftest:
         # The DeDi watchdog (docs/dedi.md): checks the published set and republishes if needed. Non-fatal: the
-        # day's data is already served; a failure is logged here and the job's own alert emails the owner.
+        # day's data is already served; a failure is logged here and the day's final check-in reports it.
         steps.append({"dedi_check": {
             "try": _run('"dedi-check"', timeout_seconds(s_all, "dedi-check")),
             "except": {"as": "e", "steps": [{"dedi_check_failed": {"call": "sys.log", "args": {
                 "severity": "WARNING", "json": {"event": "dedi-check-failed", "error": "${e}"}}}}]},
         }})
+    if checking_in and (trials or web_claims):
+        # A recovery run is for the production data only: the trials and the pilot ran with the day's cycle.
+        steps.append({"skip_on_recovery": {"switch": [{"condition": "${recovery}", "next": "wrap_up"}]}})
     if trials:
         # Sources on trial: once each, after everything production needs. A failure is logged, never fatal.
         steps.append({"trials": {"for": {"value": "job", "in": trials, "steps": [{"trial_run": {
@@ -165,6 +191,33 @@ def render(registry: dict, config: dict, selftest: bool = False, fallbacks: dict
             "except": {"as": "e", "steps": [{"web_claims_failed": {"call": "sys.log", "args": {
                 "severity": "WARNING", "json": {"event": "web-claims-failed", "error": "${e}"}}}}]},
         }})
+    if checking_in:
+        # The check-in's cycle stage (services/checkin): decides on recovery and may start one recovery run. No email:
+        # the day's one summary comes from the final check-in below. Then, once the cycle's work has all finished, it
+        # waits final_after_minutes (owner, 2026-11-28: the check-in never runs in the middle of the regular jobs)
+        # and runs the final check-in, which emails the owner the day's one summary (or stays quiet if it started a
+        # recovery run: that run's own final check-in reports the day). Neither ever fails the cycle: a check-in
+        # that can't run is logged here.
+        def check_in(stage, step):
+            run = _run('"checkin"', timeout_seconds(s_all, "checkin"))
+            run["args"]["body"] = {"overrides": {"containerOverrides": [{"args": [
+                "--stage", stage, "--execution", '${sys.get_env("GOOGLE_CLOUD_WORKFLOW_EXECUTION_ID")}',
+                "--ended", "${time.format(ended)}", "--failed", "${json.encode_to_string(failed)}",
+                "--stopped", "${stopped}", "--recovery", "${json.encode_to_string(recovery)}"]}]}}
+            return {step: {"try": run, "except": {"as": "e", "steps": [{f"{step}_failed": {"call": "sys.log", "args": {
+                "severity": "WARNING", "json": {"event": "checkin-failed", "stage": stage, "error": "${e}"}}}}]}}}
+
+        steps += [
+            {"wrap_up": {"assign": [{"ended": "${sys.now()}"}]}},
+            # Until the owner's bootstrap rerun creates the checkin job, the cycle ends as it did before (no wait).
+            {"find_check_in": {"try": {"call": "googleapis.run.v2.projects.locations.jobs.get", "args": {
+                "name": '${"projects/" + project + "/locations/" + region + "/jobs/checkin"}'}},
+                "except": {"as": "e", "steps": [{"no_check_in": {"next": "stop_raise"}}]}}},
+            check_in("cycle", "check_in"),
+            {"settle": {"call": "sys.sleep", "args": {"seconds": checkin["final_after_minutes"] * 60}}},
+            check_in("final", "final_check_in"),
+            {"stop_raise": {"switch": [{"condition": '${stopped != ""}', "raise": "${stop_error}"}]}},
+        ]
     steps += [
         {"report": {"switch": [{"condition": "${len(failed) > 0}", "steps": [{"fail": {"raise": {
             "code": "sources-failed",
@@ -172,7 +225,7 @@ def render(registry: dict, config: dict, selftest: bool = False, fallbacks: dict
             "failed": "${failed}"}}}]}]}},
         {"done": {"return": {"sources": "${sources}", "failed": "${failed}"}}},
     ]
-    return {"main": {"steps": steps}}
+    return {"main": ({"params": ["args"]} if checking_in else {}) | {"steps": steps}}
 
 
 def approved_fallbacks() -> dict:

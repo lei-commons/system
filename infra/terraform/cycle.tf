@@ -1,7 +1,7 @@
 # The daily cycle (design: one Cloud Workflows run a day). Each source is independent (owner decision
 # 2026-11-18): a source whose job fails is logged and retried later in the run, and never stops the
 # others; the snapshot and the database load then run (these two still stop the cycle if they fail),
-# and the cycle ends as failed if any source never succeeded, which alerts the owner. Every job stops at
+# and the cycle ends as failed if any source never succeeded; the day's final check-in reports it to the owner. Every job stops at
 # once if the system isn't running, so a paused system makes the cycle a quick no-op.
 #
 # The definition is rendered by scripts/render_cycle.py from config/sources.yaml and config/cycle.yaml
@@ -48,32 +48,9 @@ resource "google_cloud_scheduler_job" "daily_cycle" {
   }
 }
 
-resource "google_monitoring_alert_policy" "cycle_failed" {
-  display_name          = "lei-commons: the daily cycle failed"
-  combiner              = "OR"
-  notification_channels = [google_monitoring_notification_channel.owner.id]
-
-  conditions {
-    display_name = "Daily cycle execution failed"
-    condition_threshold {
-      # The daily cycle only: deploy-cycle's self-test copy (daily-cycle-selftest) is meant to end as failed.
-      filter          = "resource.type = \"workflows.googleapis.com/Workflow\" AND resource.labels.workflow_id = \"daily-cycle\" AND metric.type = \"workflows.googleapis.com/finished_execution_count\" AND metric.labels.status = \"FAILED\""
-      comparison      = "COMPARISON_GT"
-      threshold_value = 0
-      duration        = "0s"
-
-      aggregations {
-        alignment_period   = "300s"
-        per_series_aligner = "ALIGN_DELTA"
-      }
-    }
-  }
-
-  documentation {
-    content   = "The daily cycle ended as failed: either a source still failed after its retries and any browser fallback (the other sources, the snapshot and the load still ran; that source keeps its last good data), or the snapshot or the load failed. A day whose only failures are sources refusing us still counts as clean. The private site's System page shows which, with the error details."
-    mime_type = "text/markdown"
-  }
-}
+# The cycle's end is no longer emailed on its own (it was the "daily cycle failed" alert, removed 2026-11-28): the
+# final check-in's one summary a day reports it, after any recovery run (owner: "absolutely the FINAL summary rather
+# than any intermediate status"; checkin.tf).
 
 # The two jobs the cycle adds. Their images are pushed by the deploy workflows;
 # the jobs are created once cycle_enabled is true (bootstrap.sh --cycle).

@@ -19,6 +19,8 @@ locals {
     reader = "Reads the owner's source edits and approvals (control bucket, two objects), from intake@main only"
     # The owner's hand-downloaded files, cleaned, reach the system from data-downloads@main (owner, 2026-11-27).
     supplier = "Copies the owner's cleaned hand-downloaded files into the data bucket's intake/ folder, from data-downloads@main only"
+    # The daily check-in (owner, 2026-11-28): reads the day's runs and logs, emails the summary, may start one run of the cycle.
+    checkin = "The daily check-in: reads the cycle, its logs and the reports; may start one recovery run of the cycle"
   }
 
   # Runtime identities read the control state before every step.
@@ -47,6 +49,8 @@ locals {
     reader = []
     # No project roles: it writes the data bucket's intake/ folder only (below).
     supplier = []
+    # Reads executions, job runs and logs; workflows.invoker only to start a recovery run of the cycle (services/checkin).
+    checkin = ["roles/logging.viewer", "roles/run.viewer", "roles/workflows.viewer", "roles/workflows.invoker"]
   }
 
   # bucket => { role => [sa keys] }
@@ -54,15 +58,15 @@ locals {
     data = {
       "roles/storage.objectUser"    = ["ingest", "crawler", "resolver", "publisher"]
       "roles/storage.objectCreator" = ["maker", "checker"]
-      "roles/storage.objectViewer"  = ["maker", "checker", "site"]
+      "roles/storage.objectViewer"  = ["maker", "checker", "site", "checkin"]
     }
     snapshots = {
       "roles/storage.objectUser"   = ["publisher"]
-      "roles/storage.objectViewer" = ["site", "loader", "crawler"] # crawler: the web-claims pilot's candidates
+      "roles/storage.objectViewer" = ["site", "loader", "crawler", "checkin"] # crawler: the web-claims pilot's candidates; checkin: the manifest's stats
     }
     decision_log = {
       # The deployer records each merge and deploy (.github/workflows/changes.yml): create-only, like every writer.
-      "roles/storage.objectCreator" = ["ingest", "crawler", "resolver", "maker", "checker", "publisher", "workflow", "budget-guard", "loader", "site", "deployer"]
+      "roles/storage.objectCreator" = ["ingest", "crawler", "resolver", "maker", "checker", "publisher", "workflow", "budget-guard", "loader", "site", "deployer", "checkin"]
       "roles/storage.objectViewer"  = ["publisher", "site"]
     }
     ledger_baselines = {

@@ -22,7 +22,7 @@ jobs:
       - name: The cycle's jobs, from the sources registry
         run: |
           pip install -q pyyaml
-          python3 -c "import yaml; s = yaml.safe_load(open('config/sources.yaml'))['sources']; print('CYCLE_JOBS=' + ' '.join([x['pipeline']['job'] for x in s if x.get('pipeline')] + ['build-snapshot', 'load-db', 'dedi-check', 'web-claims']))" >> "$GITHUB_ENV"
+          python3 -c "import yaml; s = yaml.safe_load(open('config/sources.yaml'))['sources']; print('CYCLE_JOBS=' + ' '.join([x['pipeline']['job'] for x in s if x.get('pipeline')] + ['build-snapshot', 'load-db', 'dedi-check', 'web-claims', 'checkin']))" >> "$GITHUB_ENV"
       - uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
@@ -89,6 +89,26 @@ jobs:
             | jq -c '.[] | {time: .timestamp[0:19], status: .httpRequest.status, latency: .httpRequest.latency, path: (.httpRequest.requestUrl | sub("^https?://[^/]+"; ""))}' || true
           gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="lei-commons-site" AND (severity>=ERROR OR textPayload:"Traceback" OR textPayload:"Error")' \
             --freshness=2d --order=desc --limit=20 --format='value(timestamp,textPayload)' | cut -c1-220 || true
+      - name: The daily check-in's final summaries, last 3 days (the emailed lines; services/checkin)
+        run: |
+          gcloud logging read 'resource.type="cloud_run_job" AND resource.labels.job_name="checkin" AND jsonPayload.event="checkin-report"' \
+            --freshness="3d" --order=asc --limit=20 --format=json \
+            | jq -r '.[] | .jsonPayload | "== \(.day) \(.verdict | ascii_upcase)\(if .complete then "" else " (sent before the day finished)" end)",
+                     "subject:   \(.subject)", "cycle:     \(.cycle)", "issues:    \(.issues)", "recovered: \(.recovered)",
+                     "actions:   \(.actions)", "needs:     \(.needs)", "sources:   \(.sources)", "trials:    \(.trials)",
+                     "github:    \(.github)", "other:     \(.other)", ""'
+      - name: The full reports (details)
+        run: |
+          gcloud logging read 'resource.type="cloud_run_job" AND resource.labels.job_name="checkin" AND jsonPayload.event="checkin-report"' \
+            --freshness="3d" --order=asc --limit=20 --format=json | jq -c '.[] | .jsonPayload | {day, details}'
+      - name: The check-in's other stages (recovery decisions, waiting, quiet)
+        run: |
+          gcloud logging read 'resource.type="cloud_run_job" AND resource.labels.job_name="checkin" AND jsonPayload.event:* AND NOT jsonPayload.event="checkin-report"' \
+            --freshness="3d" --order=asc --limit=200 --format=json \
+            | jq -c '.[] | {time: .timestamp[0:19]} + (.jsonPayload | {event, day, pending, why, notStarted, execution, action, stopped, failed, reason} | with_entries(select(.value != null)))'
+          echo "== The GitHub workflows' reports"
+          gcloud logging read 'logName:"logs/lc-github-runs"' --freshness="3d" --order=asc --limit=200 --format=json \
+            | jq -c '.[] | {time: .timestamp[0:19]} + (.jsonPayload | {repo, workflow, conclusion, date, detail, trigger} | with_entries(select(.value != null)))'
       - name: Schedules
         run: gcloud scheduler jobs list --location "$REGION" --format='table(name.basename(),schedule,state,lastAttemptTime,status.code)' || true
       - name: Services
