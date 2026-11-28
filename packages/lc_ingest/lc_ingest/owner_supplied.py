@@ -28,6 +28,7 @@ import json
 import os
 import re
 import tarfile
+from collections import Counter
 
 from lc_core.directory_id import mint
 
@@ -133,17 +134,34 @@ def _master(f):
             yield kind, csv.DictReader(text)
 
 
+def _registration(cin: str):
+    """A CIN's state, year and registration number: what stays when the CIN changes (a new main activity, company
+    type or listing gives the company a new CIN)."""
+    return (cin[6:8], cin[8:12], cin[15:21]) if len(cin) == 21 else None
+
+
 def mca_read(f):
     """Rows for the mapper, one per company or LLP: the master snapshot's row when it lists the identifier, else
-    the first report that lists it (a company is registered once), with the month a strike-off report gives."""
-    seen = set()
+    the first report that lists it (a company is registered once), with the month a strike-off report gives.
+    A report's CIN that the master lists under a changed CIN (one company in the master with the same state, year
+    and registration number) is the same company, so it is left out."""
+    seen, registered = set(), Counter()
     for kind, rows in _master(f):
         for row in rows:
             ident = row.get(ID_COLUMN[kind], "")
             if ident in seen:
                 continue
             seen.add(ident)
+            if kind == "company":
+                registered[_registration(ident)] += 1
             yield {**row, "id": ident, "kind": kind, "master": True}
+
+    def listed(ident: str, kind: str) -> bool:
+        if ident in seen:
+            return True
+        key = _registration(ident) if kind == "company" else None
+        return key is not None and registered[key] == 1  # Counter: an unknown key reads 0
+
     struck = {}
     for month, kind, rows in _members(f, "struck-off"):
         for row in rows:
@@ -151,12 +169,12 @@ def mca_read(f):
     for month, kind, rows in _members(f, "incorporated"):
         for row in rows:
             ident = row.get(ID_COLUMN[kind], "")
-            if ident in seen:
+            if listed(ident, kind):
                 continue
             seen.add(ident)
             yield {**row, "id": ident, "kind": kind, "struckOff": struck.get(ident, ("",))[0]}
     for ident, (month, kind, name) in struck.items():
-        if ident not in seen:  # registered before 2016 and not in the master: known from the strike-off report alone
+        if not listed(ident, kind):  # registered before 2016 and not in the master: from the strike-off report alone
             yield {"id": ident, "kind": kind, "name": name, "struckOff": month}
 
 
