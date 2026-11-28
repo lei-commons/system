@@ -9,6 +9,7 @@ import pytest
 from lc_core.control import SystemHalted
 from lc_core.fetch import FetchError
 from lc_ingest.store import decode_records
+from ingest_gb import job
 from ingest_gb.job import ABSENT, PAGE, reconcile, run
 
 FIELDS = ["CompanyName", " CompanyNumber", "RegAddress.CareOf", "RegAddress.AddressLine1", "RegAddress.PostTown",
@@ -134,6 +135,18 @@ def test_the_sites_maintenance_page_is_named_as_such():
         go(FakeGateway([], page=down), MemStore())
     with pytest.raises(FetchError, match="no basic company data files"):
         go(FakeGateway([], page=b"<html>a different page</html>"), MemStore())
+    with pytest.raises(job.Unavailable):  # its own kind: main stops without retries when the month is in
+        go(FakeGateway([], page=down), MemStore())
+
+
+def test_a_maintenance_notice_costs_nothing_only_once_this_months_file_is_all_in():
+    from datetime import date
+    whole = {"processed": [job.part_key("2026-11-01", k) for k in range(1, 8)]}
+    assert job.holds_month(whole, date(2026, 11, 28)) == "2026-11-01"
+    assert job.holds_month(whole, date(2026, 12, 2)) == ""  # December's file is due: a real miss
+    six = {"processed": [job.part_key("2026-11-01", k) for k in range(1, 7)]}
+    assert job.holds_month(six, date(2026, 11, 28)) == ""   # part 7 still to come
+    assert job.holds_month({}, date(2026, 11, 28)) == ""
 
 
 def month(store, date, numbers_by_part):
