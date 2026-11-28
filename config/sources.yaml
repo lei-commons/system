@@ -1324,7 +1324,7 @@ sources:
         About 120-150k entities after dropping sole traders (s.p.) and room renters (about 42% of units).
       verified: false
     # Built 2026-11-22 (owner approved the source the same day), on trial: lc_ingest.bulk_batch3 SLOVENIA.
-    pipeline: {stage: trial, job: ingest-si, image: ingest-bulk, store: si, records_as: si-ajpes-prs,
+    pipeline: {stage: production, job: ingest-si, image: ingest-bulk, store: si, records_as: si-ajpes-prs,
                label: AJPES business register (Slovenia), refresh: twice monthly, read weekly,
                dataset: "Poslovni register Slovenije (podatki.gov.si)",
                attribution: "AJPES, Poslovni register Slovenije, CC BY 4.0."}

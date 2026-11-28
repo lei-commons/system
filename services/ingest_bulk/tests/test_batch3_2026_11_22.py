@@ -357,6 +357,6 @@ def test_batch_3_is_registered_on_trial():
     built = {p["id"]: p for p in pipelines()}
     for profile in (CYPRUS, SLOVENIA, NETHERLANDS_ANBI, SCOTLAND_OSCR, CANADA_CRA, US_NPPES):
         assert PROFILES[profile.source] is profile and profile.guard_names
-        promoted = profile in (CANADA_CRA, US_NPPES, CYPRUS, SCOTLAND_OSCR)  # 2026-11-25, 2026-11-26
+        promoted = profile in (CANADA_CRA, US_NPPES, CYPRUS, SCOTLAND_OSCR, SLOVENIA)  # 2026-11-25, -26, -28
         assert built[profile.source]["job"] == profile.job
         assert built[profile.source]["stage"] == ("production" if promoted else "trial")
