@@ -96,7 +96,7 @@ jobs:
       - name: The check-in's image builds and reads its settings
         run: |
           docker build -f services/checkin/Dockerfile -t checkin .
-          docker run --rm --entrypoint python checkin -c "from lc_core import cycle; from lc_core.sources import pipelines; c = cycle.load()['checkin']; assert c['enabled'] and c['github']; print(len(pipelines()), 'sources;', c['final_first_utc'], 'to', c['final_last_utc'])"
+          docker run --rm --entrypoint python checkin -c "from lc_core import cycle; from lc_core.sources import pipelines; c = cycle.load()['checkin']; assert c['enabled'] and c['github']; print(len(pipelines()), 'sources; final check-in', c['final_after_minutes'], 'min after the cycle')"
       - run: pip install -e services/web_claims
       - run: pytest -q services/web_claims
       - name: The web-claims pilot's image builds, reads its settings and has both model clients
