@@ -29,6 +29,7 @@ main:
         - ingest-ar
         - ingest-cy
         - ingest-gb-ccew
+        - ingest-si
         - ingest-tw-tax
         - ingest-ca-cra
         - ingest-gb-oscr
@@ -194,7 +195,6 @@ main:
         in:
         - ingest-in-mca
         - ingest-pe-ruc
-        - ingest-si
         - ingest-nl-anbi
         steps:
         - trial_run:
