@@ -218,6 +218,35 @@ def test_the_master_snapshot_comes_first_and_each_company_is_listed_once():
     assert INDIA_MCA.record(by["AAA-1234"])["legalAddress"]["postalCode"] == "560001"
 
 
+CHANGED_CIN = {
+    "mca/master/2026-11-28/companies-01.csv":
+        "cin,name,registered,class,category,sub_category,status,state,roc,pin,address\n"
+        # Registered as a not-for-profit (NPL, activity 85300); the master lists it under its later CIN.
+        "U70200KA2020PTC132336,EXAMPLE INDIA PRIVATE LIMITED,2020-02-05,Private,,,Strike Off,Karnataka,,,\n"
+        # Two master companies share state, year and number: a report CIN matching them is not guessed at.
+        "U11111DL2017PTC300001,FIRST TWIN PRIVATE LIMITED,2017-03-01,Private,,,Active,Delhi,,,\n"
+        "L22222DL2017PLC300001,SECOND TWIN LIMITED,2017-03-01,Public,,,Active,Delhi,,,\n",
+    "mca/incorporated/2020-02/companies.csv":
+        "cin,name,registered,class,category,sub_category,company_type,state,roc,activity_code,address\n"
+        "U85300KA2020NPL132336,EXAMPLE INDIA FOUNDATION,2020-02-05,Private,,,,Karnataka,,85300,\n"
+        "U33333DL2017PTC300001,THIRD TWIN PRIVATE LIMITED,2017-03-01,Private,,,,Delhi,,33333,\n"
+        "U44444KA2020PTC132337,NEXT NUMBER PRIVATE LIMITED,2020-02-06,Private,,,,Karnataka,,44444,\n",
+    "mca/struck-off/2024-01/companies.csv":
+        "cin,name\nU85300KA2020NPL132336,EXAMPLE INDIA FOUNDATION\nU55555KA2020PTC132336,EXAMPLE AGAIN\n"
+        "U66666TN2001PTC047000,ONLY STRUCK OFF PRIVATE LIMITED\n",
+}
+
+
+def test_a_company_the_master_lists_under_a_changed_cin_is_listed_once():
+    ids = [r["id"] for r in mca_read(bundle(CHANGED_CIN))]
+    assert sorted(ids) == sorted([
+        "U70200KA2020PTC132336", "U11111DL2017PTC300001", "L22222DL2017PLC300001",  # the master
+        "U33333DL2017PTC300001",   # matches two master companies: kept, not guessed at
+        "U44444KA2020PTC132337",   # another registration number
+        "U66666TN2001PTC047000",   # known from a strike-off report alone
+    ])
+
+
 @pytest.mark.parametrize("raw,category", [("Company limited by Shares", "Company limited by shares"),
                                           ("Company Limted by Shares", "Company limited by shares"),
                                           ("Companies Limited by Shares", "Company limited by shares"),
