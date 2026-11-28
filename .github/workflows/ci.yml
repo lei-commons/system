@@ -91,6 +91,12 @@ jobs:
       - run: pytest -q services/budget_guard
       - name: Budget guard image builds
         run: docker build -f services/budget_guard/Dockerfile -t budget-guard .
+      - run: pip install -e "services/checkin[test]"
+      - run: pytest -q services/checkin
+      - name: The check-in's image builds and reads its settings
+        run: |
+          docker build -f services/checkin/Dockerfile -t checkin .
+          docker run --rm --entrypoint python checkin -c "from lc_core import cycle; from lc_core.sources import pipelines; c = cycle.load()['checkin']; assert c['enabled'] and c['github']; print(len(pipelines()), 'sources;', c['final_first_utc'], 'to', c['final_last_utc'])"
       - run: pip install -e services/web_claims
       - run: pytest -q services/web_claims
       - name: The web-claims pilot's image builds, reads its settings and has both model clients

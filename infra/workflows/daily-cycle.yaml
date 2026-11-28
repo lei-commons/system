@@ -3,6 +3,8 @@
 # change those and run the script. Deployed by Terraform (infra/terraform/cycle.tf) and by
 # .github/workflows/deploy-cycle.yml, which deploy this same file.
 main:
+  params:
+  - args
   steps:
   - init:
       assign:
@@ -37,6 +39,27 @@ main:
       - fallbacks:
           ingest-ie: ingest-ie-browser
           ingest-au: ingest-au-browser
+      - recovery: false
+      - stopped: ''
+      - stop_error: null
+  - read_args:
+      switch:
+      - condition: ${args != null}
+        next: read_recovery
+      next: first_try
+  - read_recovery:
+      switch:
+      - condition: ${"recovery" in args}
+        assign:
+        - recovery: ${args.recovery == true}
+  - recovery_wait:
+      switch:
+      - condition: ${recovery}
+        steps:
+        - recovery_sleep:
+            call: sys.sleep
+            args:
+              seconds: 900
   - first_try:
       for:
         value: job
@@ -161,17 +184,41 @@ main:
                           job: ${job}
                           error: ${e}
   - build_snapshot:
-      call: googleapis.run.v2.projects.locations.jobs.run
-      args:
-        name: ${"projects/" + project + "/locations/" + region + "/jobs/" + "build-snapshot"}
-        connector_params:
-          timeout: 10800
+      try:
+        call: googleapis.run.v2.projects.locations.jobs.run
+        args:
+          name: ${"projects/" + project + "/locations/" + region + "/jobs/" + "build-snapshot"}
+          connector_params:
+            timeout: 10800
+      except:
+        as: e
+        steps:
+        - build_snapshot_stopped:
+            assign:
+            - stopped: build-snapshot
+            - stop_error: ${e}
+  - after_build_snapshot:
+      switch:
+      - condition: ${stopped != ""}
+        next: wrap_up
   - load_db:
-      call: googleapis.run.v2.projects.locations.jobs.run
-      args:
-        name: ${"projects/" + project + "/locations/" + region + "/jobs/" + "load-db"}
-        connector_params:
-          timeout: 14400
+      try:
+        call: googleapis.run.v2.projects.locations.jobs.run
+        args:
+          name: ${"projects/" + project + "/locations/" + region + "/jobs/" + "load-db"}
+          connector_params:
+            timeout: 14400
+      except:
+        as: e
+        steps:
+        - load_db_stopped:
+            assign:
+            - stopped: load-db
+            - stop_error: ${e}
+  - after_load_db:
+      switch:
+      - condition: ${stopped != ""}
+        next: wrap_up
   - dedi_check:
       try:
         call: googleapis.run.v2.projects.locations.jobs.run
@@ -189,6 +236,10 @@ main:
               json:
                 event: dedi-check-failed
                 error: ${e}
+  - skip_on_recovery:
+      switch:
+      - condition: ${recovery}
+        next: wrap_up
   - trials:
       for:
         value: job
@@ -233,6 +284,95 @@ main:
               json:
                 event: web-claims-failed
                 error: ${e}
+  - wrap_up:
+      assign:
+      - ended: ${sys.now()}
+  - find_check_in:
+      try:
+        call: googleapis.run.v2.projects.locations.jobs.get
+        args:
+          name: ${"projects/" + project + "/locations/" + region + "/jobs/checkin"}
+      except:
+        as: e
+        steps:
+        - no_check_in:
+            next: stop_raise
+  - check_in:
+      try:
+        call: googleapis.run.v2.projects.locations.jobs.run
+        args:
+          name: ${"projects/" + project + "/locations/" + region + "/jobs/" + "checkin"}
+          connector_params:
+            timeout: 900
+          body:
+            overrides:
+              containerOverrides:
+              - args:
+                - --stage
+                - cycle
+                - --execution
+                - ${sys.get_env("GOOGLE_CLOUD_WORKFLOW_EXECUTION_ID")}
+                - --ended
+                - ${time.format(ended)}
+                - --failed
+                - ${json.encode_to_string(failed)}
+                - --stopped
+                - ${stopped}
+                - --recovery
+                - ${json.encode_to_string(recovery)}
+      except:
+        as: e
+        steps:
+        - check_in_failed:
+            call: sys.log
+            args:
+              severity: WARNING
+              json:
+                event: checkin-failed
+                stage: cycle
+                error: ${e}
+  - settle:
+      call: sys.sleep
+      args:
+        seconds: 7200
+  - final_check_in:
+      try:
+        call: googleapis.run.v2.projects.locations.jobs.run
+        args:
+          name: ${"projects/" + project + "/locations/" + region + "/jobs/" + "checkin"}
+          connector_params:
+            timeout: 900
+          body:
+            overrides:
+              containerOverrides:
+              - args:
+                - --stage
+                - final
+                - --execution
+                - ${sys.get_env("GOOGLE_CLOUD_WORKFLOW_EXECUTION_ID")}
+                - --ended
+                - ${time.format(ended)}
+                - --failed
+                - ${json.encode_to_string(failed)}
+                - --stopped
+                - ${stopped}
+                - --recovery
+                - ${json.encode_to_string(recovery)}
+      except:
+        as: e
+        steps:
+        - final_check_in_failed:
+            call: sys.log
+            args:
+              severity: WARNING
+              json:
+                event: checkin-failed
+                stage: final
+                error: ${e}
+  - stop_raise:
+      switch:
+      - condition: ${stopped != ""}
+        raise: ${stop_error}
   - report:
       switch:
       - condition: ${len(failed) > 0}

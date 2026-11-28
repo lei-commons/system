@@ -25,3 +25,19 @@ jobs:
       - uses: google-github-actions/setup-gcloud@v2
       - name: Run the check inside the jobs network
         run: gcloud run jobs execute egress-check --region "${{ vars.GCP_REGION }}" --wait
+      # The daily check-in (system services/checkin) waits for this workflow's outcome, after its own retries,
+      # before it sends the owner the day's one summary. Names, states and dates only.
+      - name: Report the outcome to the daily check-in
+        if: always()
+        env:
+          CONCLUSION: ${{ job.status }}
+          DAY: ""
+          DETAIL: ""
+        run: |
+          payload=$(jq -cn --arg repo "$GITHUB_REPOSITORY" --arg workflow "$GITHUB_WORKFLOW" --arg conclusion "$CONCLUSION" \
+            --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg trigger "$GITHUB_EVENT_NAME" --arg date "$DAY" \
+            --arg detail "$DETAIL" '{event: "github-run", repo: $repo, workflow: $workflow, conclusion: $conclusion, run: $run,
+            attempt: $attempt, trigger: $trigger} + (if $date != "" then {date: $date} else {} end)
+            + (if $detail != "" then {detail: $detail} else {} end)')
+          gcloud logging write lc-github-runs "$payload" --payload-type=json --severity=INFO \
+            || echo "::warning::couldn't report this run to the daily check-in"

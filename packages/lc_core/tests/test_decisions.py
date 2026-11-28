@@ -198,3 +198,13 @@ def test_the_owners_actions_are_written_into_the_chain():
                     "decision": "done", "reason": "maintenance", "trigger": "site"})
     (name,) = backend._storage.buckets["p-decision-log"].objects
     assert name.startswith("runs/2026-11-22/") and "owner-admin" in name
+
+
+def test_a_recovery_run_started_by_the_check_in_is_a_decision():
+    from lc_core.decisions import Recorder
+
+    r = Recorder("job:checkin", log=lambda record: None)
+    r({"event": "recovery-started", "reason": "load-db stopped the cycle", "execution": "x1", "recovery": True})
+    r({"event": "checkin-report", "verdict": "failed"})
+    assert [(e.action, e.subject, e.decision, e.reason) for e in r.events] == [
+        ("started", "a recovery run of the daily cycle", "done", "load-db stopped the cycle")]

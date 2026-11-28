@@ -1,0 +1,49 @@
+# Builds the daily check-in's image (services/checkin) and rolls it out to its job. The deployer identity can do
+# this from system@main only. Until the owner's bootstrap rerun creates the job (infra/terraform/checkin.tf), it
+# just pushes the image.
+name: deploy-checkin
+
+on:
+  push:
+    branches: [main]
+    paths: ["services/checkin/**", "packages/lc_core/**", "config/cycle.yaml", "config/sources.yaml",
+            ".github/workflows/deploy-checkin.yml"]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-checkin
+  cancel-in-progress: false
+
+env:
+  IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/lei-commons/checkin
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Deploy only while the system is running (the owner's control state)
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          STATE_CHECK_ENFORCED: ${{ vars.STATE_CHECK_ENFORCED }}
+        run: python3 scripts/check_system_state.py deploy:checkin
+      - name: Build and push
+        run: |
+          gcloud auth configure-docker "${{ vars.GCP_REGION }}-docker.pkg.dev" --quiet
+          docker build -f services/checkin/Dockerfile -t "$IMAGE:$GITHUB_SHA" -t "$IMAGE:latest" .
+          docker push --all-tags "$IMAGE"
+      - name: Roll out, if the job exists
+        run: |
+          if gcloud run jobs describe checkin --region "${{ vars.GCP_REGION }}" >/dev/null 2>&1; then
+            gcloud run jobs update checkin --region "${{ vars.GCP_REGION }}" --image "$IMAGE:$GITHUB_SHA"
+          else
+            echo "::notice::checkin doesn't exist yet (the owner's bootstrap rerun creates it); the image is pushed"
+          fi
