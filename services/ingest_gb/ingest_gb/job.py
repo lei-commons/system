@@ -23,6 +23,7 @@ import os
 import re
 import sys
 import tempfile
+from datetime import datetime, timezone
 
 from lc_core.allowlist import AllowList
 from lc_core.control import require_running
@@ -53,6 +54,20 @@ ABSENT = "absent-from-source:gb-coh"
 UNAVAILABLE = re.compile(r"service unavailable|temporarily unavailable", re.I)
 
 
+class Unavailable(FetchError):
+    """Companies House's download page is its maintenance notice."""
+
+
+def holds_month(manifest: dict, today) -> str:
+    """This month's date when all its parts are in ("" if not): a maintenance notice then costs nothing."""
+    processed = set((manifest or {}).get("processed", []))
+    month = today.strftime("%Y-%m")
+    for date in sorted({k.split(" ")[0] for k in processed if k.startswith(month)}, reverse=True):
+        if all(part_key(date, part) in processed for part in range(1, PARTS + 1)):
+            return date
+    return ""
+
+
 def log(record):
     print(json.dumps(record, sort_keys=True), flush=True)
 
@@ -70,7 +85,7 @@ def find(gateway, manifest=None):
     if not found:
         # 2026-11-27: the site answered 200 with a "Service Unavailable ... temporarily unavailable" page.
         if UNAVAILABLE.search(html):
-            raise FetchError("Companies House's download service says it is temporarily unavailable")
+            raise Unavailable("Companies House's download service says it is temporarily unavailable")
         raise FetchError("no basic company data files on the download page")
     latest = max(date for date, _ in found)
     parts = sorted({int(k) for date, k in found if date == latest})
@@ -178,6 +193,18 @@ def main() -> int:
     except Busy as exc:
         record({"event": "busy", "reason": str(exc)})  # another run is doing this work
         outcome = "busy"
+    except Unavailable as exc:
+        # A maintenance notice while this month's file is all in: nothing to miss, so no retries and no failed
+        # cycle (2026-11-27 and -28: six tries a day, 1.5 h before the build could start). Without this month's
+        # file it is a failure, retried as any other.
+        held = holds_month(store.read_manifest(), datetime.now(timezone.utc))
+        if not held:
+            failed = failure(exc)
+            record(failed)
+            health.note(store, failure=failed, log=record)
+            raise
+        record({"event": "source-unavailable", "source": SOURCE_ID, "message": str(exc), "held": held})
+        outcome = "unavailable"
     except Exception as exc:
         failed = failure(exc)
         record(failed)
@@ -185,7 +212,7 @@ def main() -> int:
         raise
     finally:
         record.write(client.bucket(log_bucket_name(bucket)))
-    return 0 if outcome in ("done", "already-done", "halted", "busy") else 1
+    return 0 if outcome in ("done", "already-done", "halted", "busy", "unavailable") else 1
 
 
 if __name__ == "__main__":
